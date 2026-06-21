@@ -1,6 +1,6 @@
 'use client';
 
-import { use } from 'react';
+import { use, useState, useEffect } from 'react';
 import Link from 'next/link';
 import { getStockBySymbol } from '@/lib/sectorData';
 import { DEMO_SECTORS, DEMO_NEWS, DEMO_SENTIMENT_HISTORY } from '@/lib/mockData';
@@ -37,6 +37,42 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
   const { symbol } = use(params);
   const decodedSymbol = decodeURIComponent(symbol).toUpperCase();
   const stock = getStockBySymbol(decodedSymbol);
+  
+  const [inWatchlist, setInWatchlist] = useState(false);
+
+  useEffect(() => {
+    const saved = localStorage.getItem('marketpulse_watchlist');
+    if (saved) {
+      try {
+        const list = JSON.parse(saved);
+        setInWatchlist(list.includes(decodedSymbol));
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  }, [decodedSymbol]);
+
+  const toggleWatchlist = () => {
+    const saved = localStorage.getItem('marketpulse_watchlist');
+    let list: string[] = [];
+    if (saved) {
+      try {
+        list = JSON.parse(saved);
+      } catch (e) {
+        list = [];
+      }
+    }
+
+    let updated: string[];
+    if (list.includes(decodedSymbol)) {
+      updated = list.filter(s => s !== decodedSymbol);
+      setInWatchlist(false);
+    } else {
+      updated = [...list, decodedSymbol];
+      setInWatchlist(true);
+    }
+    localStorage.setItem('marketpulse_watchlist', JSON.stringify(updated));
+  };
 
   if (!stock) {
     return (
@@ -107,6 +143,14 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
             <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
               {stock.symbol}
             </h1>
+            <button
+              onClick={toggleWatchlist}
+              className="text-lg p-1 rounded-lg transition-all hover:bg-opacity-10 hover:bg-white cursor-pointer"
+              title={inWatchlist ? "Remove from watchlist" : "Add to watchlist"}
+              style={{ color: inWatchlist ? 'var(--accent-yellow)' : 'var(--text-muted)' }}
+            >
+              {inWatchlist ? '★' : '☆'}
+            </button>
             <span className="text-xs px-2 py-0.5 rounded-full capitalize font-medium"
               style={{ background: 'var(--accent-purple-dim)', color: 'var(--accent-purple)' }}>
               {stock.sector}
