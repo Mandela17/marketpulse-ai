@@ -94,7 +94,7 @@ export default function StockSearch({ onClose }: { onClose?: () => void }) {
 
         {/* Results dropdown */}
         {results.length > 0 && (
-          <div className="absolute top-full left-0 right-0 mt-2 rounded-xl overflow-hidden z-50"
+          <div className="absolute top-full left-0 right-0 mt-2 rounded-xl overflow-hidden z-50 glass-card"
             style={{
               background: 'var(--bg-card)',
               border: '1px solid var(--border-color)',

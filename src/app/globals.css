@@ -2,26 +2,27 @@
 
 @layer base {
   :root {
-    --bg-primary: #0a0e1a;
-    --bg-secondary: #111827;
-    --bg-card: #1a1f35;
-    --bg-card-hover: #222845;
-    --border-color: #2a3050;
-    --text-primary: #e8ecf4;
-    --text-secondary: #8b95b0;
-    --text-muted: #5a6380;
-    --accent-green: #00d68f;
-    --accent-green-dim: rgba(0, 214, 143, 0.15);
-    --accent-red: #ff4d6a;
-    --accent-red-dim: rgba(255, 77, 106, 0.15);
-    --accent-yellow: #ffc554;
-    --accent-yellow-dim: rgba(255, 197, 84, 0.15);
-    --accent-blue: #5b8cff;
-    --accent-blue-dim: rgba(91, 140, 255, 0.15);
+    --bg-primary: #060914; /* Deep cybernetic space black */
+    --bg-secondary: rgba(11, 15, 30, 0.65); /* Frosted translucent sidebar */
+    --bg-card: rgba(22, 28, 54, 0.45); /* Frosted translucent card */
+    --bg-card-hover: rgba(32, 40, 75, 0.6); /* Slightly more opaque on hover */
+    --border-color: rgba(255, 255, 255, 0.07); /* Delicate border stroke */
+    --border-hover: rgba(91, 140, 255, 0.35); /* Soft glowing blue border */
+    --text-primary: #f8fafc;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+    --accent-green: #10b981;
+    --accent-green-dim: rgba(16, 185, 129, 0.15);
+    --accent-red: #f43f5e;
+    --accent-red-dim: rgba(244, 63, 94, 0.15);
+    --accent-yellow: #f59e0b;
+    --accent-yellow-dim: rgba(245, 158, 11, 0.15);
+    --accent-blue: #3b82f6;
+    --accent-blue-dim: rgba(59, 130, 246, 0.15);
     --accent-purple: #a78bfa;
     --accent-purple-dim: rgba(167, 139, 250, 0.15);
-    --gradient-start: #5b8cff;
-    --gradient-end: #a78bfa;
+    --gradient-start: #3b82f6;
+    --gradient-end: #8b5cf6;
   }
 }
 
@@ -37,9 +38,11 @@ html {
 
 body {
   font-family: var(--font-geist-sans), 'Inter', system-ui, -apple-system, sans-serif;
-  background: var(--bg-primary);
+  background: radial-gradient(circle at 50% -20%, #1e1b4b 0%, var(--bg-primary) 65%);
   color: var(--text-primary);
   line-height: 1.6;
+  min-height: 100vh;
+  overflow-x: hidden;
 }
 
 /* Scrollbar styling */
@@ -49,26 +52,86 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--bg-secondary);
+  background: var(--bg-primary);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 100px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-muted);
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Glassmorphism Core */
+aside {
+  backdrop-filter: blur(25px) saturate(180%);
+  -webkit-backdrop-filter: blur(25px) saturate(180%);
+  box-shadow: 4px 0 40px rgba(0, 0, 0, 0.4);
+}
+
+.card-hover, .glass-card {
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.25), 
+              inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.card-hover:hover, .glass-card:hover {
+  transform: translateY(-4px) scale(1.006) !important;
+  background: var(--bg-card-hover) !important;
+  border-color: var(--border-hover) !important;
+  box-shadow: 0 16px 40px rgba(59, 130, 246, 0.14), 
+              inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+}
+
+/* Input elements focus effect */
+input, select {
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+input:focus {
+  border-color: var(--accent-blue) !important;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2) !important;
+}
+
+/* Interactive elements animations */
+a, button {
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+button:hover {
+  filter: brightness(1.1);
+}
+
+/* Table styling with glass look */
+tr {
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+tr:hover {
+  background: var(--bg-card-hover) !important;
+}
+
+/* Sidebar nav items slide micro-animation */
+nav a div {
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+nav a div:hover {
+  transform: translateX(4px);
 }
 
 /* Custom animations */
 @keyframes pulse-glow {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
+  0%, 100% { opacity: 1; filter: drop-shadow(0 0 2px var(--accent-red)); }
+  50% { opacity: 0.6; filter: drop-shadow(0 0 6px var(--accent-red)); }
 }
 
 @keyframes slide-up {
-  from { opacity: 0; transform: translateY(20px); }
+  from { opacity: 0; transform: translateY(16px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
@@ -83,17 +146,17 @@ body {
 }
 
 .animate-slide-up {
-  animation: slide-up 0.5s ease-out forwards;
+  animation: slide-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .animate-fade-in {
-  animation: fade-in 0.4s ease-out forwards;
+  animation: fade-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .animate-shimmer {
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.05), transparent);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.03), transparent);
   background-size: 200% 100%;
-  animation: shimmer 2s infinite;
+  animation: shimmer 2.2s infinite;
 }
 
 /* Sentiment gauge gradients */
@@ -103,12 +166,13 @@ body {
 .gauge-bullish { background: linear-gradient(135deg, #00d68f, #00b377); }
 .gauge-very-bullish { background: linear-gradient(135deg, #00e6a0, #00d68f); }
 
-/* Glass effect */
+/* Glass effect generic */
 .glass {
-  background: rgba(26, 31, 53, 0.7);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(42, 48, 80, 0.6);
+  background: rgba(22, 28, 54, 0.45);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--border-color);
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
 }
 
 /* Gradient text */
@@ -119,25 +183,15 @@ body {
   background-clip: text;
 }
 
-/* Card hover effects */
-.card-hover {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.card-hover:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-  border-color: rgba(91, 140, 255, 0.3);
-}
-
 /* Sentiment badge */
 .sentiment-badge {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 10px;
+  padding: 3px 10px;
   border-radius: 100px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.3px;
+  letter-spacing: 0.4px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
 }
