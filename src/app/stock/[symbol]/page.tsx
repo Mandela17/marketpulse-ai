@@ -63,7 +63,10 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
   }
 
   const [inWatchlist, setInWatchlist] = useState(false);
+  const [liveData, setLiveData] = useState<{ quote: any; technicals: any } | null>(null);
+  const [loadingLive, setLoadingLive] = useState(true);
 
+  // Load watchlist status
   useEffect(() => {
     const saved = localStorage.getItem('marketpulse_watchlist');
     if (saved) {
@@ -74,6 +77,23 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
         console.error(e);
       }
     }
+  }, [decodedSymbol]);
+
+  // Fetch live market data and option/technical metrics
+  useEffect(() => {
+    async function fetchLiveQuote() {
+      try {
+        const res = await fetch(`/api/stock?symbol=${encodeURIComponent(decodedSymbol)}`).then(r => r.json());
+        if (res && !res.error) {
+          setLiveData(res);
+        }
+      } catch (e) {
+        console.error('Failed to fetch live stock indicators:', e);
+      } finally {
+        setLoadingLive(false);
+      }
+    }
+    fetchLiveQuote();
   }, [decodedSymbol]);
 
   const toggleWatchlist = () => {
@@ -98,26 +118,7 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
     localStorage.setItem('marketpulse_watchlist', JSON.stringify(updated));
   };
 
-  if (!stock) {
-    return (
-      <div className="p-6 flex items-center justify-center min-h-[60vh]">
-        <div className="text-center">
-          <p className="text-4xl mb-4">🔍</p>
-          <h2 className="text-xl font-bold mb-2" style={{ color: 'var(--text-primary)' }}>
-            Stock Not Found
-          </h2>
-          <p className="text-sm mb-4" style={{ color: 'var(--text-secondary)' }}>
-            We couldn&apos;t find sentiment data for &quot;{decodedSymbol}&quot;
-          </p>
-          <Link href="/search"
-            className="text-sm px-4 py-2 rounded-lg font-medium"
-            style={{ background: 'var(--accent-blue-dim)', color: 'var(--accent-blue)' }}>
-            Search Stocks
-          </Link>
-        </div>
-      </div>
-    );
-  }
+  if (!stock) return null;
 
   const sentiment = getStockSentiment(stock.symbol, stock.sector);
   if (!sentiment) return null;
@@ -180,7 +181,32 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
               {stock.sector}
             </span>
           </div>
-          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>{stock.name}</p>
+          <p className="text-sm mb-1" style={{ color: 'var(--text-secondary)' }}>{stock.name}</p>
+
+          {/* Live stock values strip */}
+          {liveData ? (
+            <div className="flex items-center gap-3 mt-2 text-sm font-semibold animate-fade-in">
+              <span className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
+                ₹{liveData.quote.price.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </span>
+              <span className="text-xs px-2 py-0.5 rounded"
+                style={{
+                  background: liveData.quote.changePercent >= 0 ? 'var(--accent-green-dim)' : 'var(--accent-red-dim)',
+                  color: liveData.quote.changePercent >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'
+                }}>
+                {liveData.quote.changePercent >= 0 ? '▲ +' : '▼ '}{liveData.quote.changePercent.toFixed(2)}%
+              </span>
+              <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                Vol: {(liveData.quote.volume / 100000).toFixed(1)}L
+              </span>
+            </div>
+          ) : (
+            loadingLive && (
+              <p className="text-xs mt-2 animate-pulse" style={{ color: 'var(--text-muted)' }}>
+                ⏳ Fetching live quote and volume from NSE...
+              </p>
+            )
+          )}
         </div>
         <SentimentGauge score={sentiment.overall} size="lg" />
       </div>
@@ -239,6 +265,165 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
               })}
             </div>
           </div>
+
+          {/* Option Chain & Microstructure (NSE) */}
+          {liveData && (
+            <div className="rounded-xl p-5 glass-card"
+              style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+                <h2 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>
+                  📊 Option Chain & Microstructure (NSE)
+                </h2>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded self-start"
+                  style={{
+                    background: liveData.technicals.institutionalSignal === 'Accumulation' ? 'var(--accent-green-dim)' :
+                               liveData.technicals.institutionalSignal === 'Distribution' ? 'var(--accent-red-dim)' : 'rgba(255, 255, 255, 0.05)',
+                    color: liveData.technicals.institutionalSignal === 'Accumulation' ? 'var(--accent-green)' :
+                           liveData.technicals.institutionalSignal === 'Distribution' ? 'var(--accent-red)' : 'var(--text-muted)'
+                  }}>
+                  {liveData.technicals.institutionalSignal === 'Accumulation' ? '🚀 INSTITUTIONAL ACCUMULATION' :
+                   liveData.technicals.institutionalSignal === 'Distribution' ? '⚠️ INSTITUTIONAL DISTRIBUTION' : 'NEUTRAL MARKET BALANCE'}
+                </span>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* Delivery Volume */}
+                <div className="p-3 rounded-lg" style={{ background: 'var(--bg-primary)' }}>
+                  <p className="text-[10px] uppercase font-semibold tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
+                    Delivery Volume %
+                  </p>
+                  <div className="flex items-end gap-2 mb-1">
+                    <span className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>
+                      {liveData.technicals.deliveryPercent}%
+                    </span>
+                    <span className="text-[9px] mb-1" style={{ color: liveData.technicals.deliveryPercent > 50 ? 'var(--accent-green)' : 'var(--text-muted)' }}>
+                      {liveData.technicals.deliveryPercent > 50 ? 'Institutional Accumulation' : 'Retail Activity'}
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full transition-all duration-1000"
+                      style={{
+                        width: `${liveData.technicals.deliveryPercent}%`,
+                        background: liveData.technicals.deliveryPercent > 50 ? 'var(--accent-green)' : 'var(--accent-blue)'
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* Put-Call Ratio */}
+                <div className="p-3 rounded-lg" style={{ background: 'var(--bg-primary)' }}>
+                  <p className="text-[10px] uppercase font-semibold tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
+                    Put-Call Ratio (PCR)
+                  </p>
+                  <div className="flex items-end gap-2 mb-1">
+                    <span className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>
+                      {liveData.technicals.pcr}
+                    </span>
+                    <span className="text-[9px] mb-1"
+                      style={{
+                        color: liveData.technicals.pcr > 1.15 ? 'var(--accent-green)' :
+                               liveData.technicals.pcr < 0.85 ? 'var(--accent-red)' : 'var(--accent-yellow)'
+                      }}>
+                      {liveData.technicals.pcr > 1.15 ? 'Bullish Sentiment' :
+                       liveData.technicals.pcr < 0.85 ? 'Bearish Sentiment' : 'Neutral Range'}
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full transition-all duration-1000"
+                      style={{
+                        width: `${Math.min(100, (liveData.technicals.pcr / 2.0) * 100)}%`,
+                        background: liveData.technicals.pcr > 1.15 ? 'var(--accent-green)' :
+                                    liveData.technicals.pcr < 0.85 ? 'var(--accent-red)' : 'var(--accent-yellow)'
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* OI Signal */}
+                <div className="p-3 rounded-lg border" style={{ background: 'var(--bg-primary)', borderColor: 'rgba(255,255,255,0.03)' }}>
+                  <p className="text-[10px] uppercase font-semibold tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>
+                    Options Open Interest Build-up
+                  </p>
+                  <p className="text-base font-bold mt-1"
+                    style={{
+                      color: ['Long Build-up', 'Short Covering'].includes(liveData.technicals.oiSignal) ? 'var(--accent-green)' :
+                             ['Short Build-up', 'Long Unwinding'].includes(liveData.technicals.oiSignal) ? 'var(--accent-red)' : 'var(--text-secondary)'
+                    }}>
+                    {liveData.technicals.oiSignal}
+                  </p>
+                  <p className="text-[9px] mt-1 leading-snug" style={{ color: 'var(--text-muted)' }}>
+                    {liveData.technicals.oiSignal === 'Long Build-up' ? 'New long contracts being created' :
+                     liveData.technicals.oiSignal === 'Short Covering' ? 'Short positions are actively closing out' :
+                     liveData.technicals.oiSignal === 'Short Build-up' ? 'New short contracts being opened' :
+                     liveData.technicals.oiSignal === 'Long Unwinding' ? 'Long contracts are booking profits' :
+                     'No significant derivative momentum build-up'}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Technical Indicators (14D) */}
+          {liveData && (
+            <div className="rounded-xl p-5 glass-card"
+              style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+              <h2 className="text-base font-bold mb-4" style={{ color: 'var(--text-primary)' }}>
+                📈 Technical Indicators (14D)
+              </h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Relative Strength Index */}
+                <div className="p-3 rounded-lg" style={{ background: 'var(--bg-primary)' }}>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-[10px] uppercase font-semibold tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                      RSI (14) Momentum
+                    </p>
+                    <span className="text-[9px] font-bold px-1.5 py-0.2 rounded"
+                      style={{
+                        background: liveData.technicals.rsi > 70 ? 'var(--accent-red-dim)' :
+                                   liveData.technicals.rsi < 30 ? 'var(--accent-green-dim)' : 'var(--accent-yellow-dim)',
+                        color: liveData.technicals.rsi > 70 ? 'var(--accent-red)' :
+                               liveData.technicals.rsi < 30 ? 'var(--accent-green)' : 'var(--accent-yellow)'
+                      }}>
+                      {liveData.technicals.rsi > 70 ? 'OVERBOUGHT (SELL)' :
+                       liveData.technicals.rsi < 30 ? 'OVERSOLD (BUY)' : 'NEUTRAL ZONE'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
+                      {liveData.technicals.rsi}
+                    </span>
+                    <div className="flex-1 bg-slate-800 h-2 rounded-full relative">
+                      {/* Safe zone boundary ticks (30 to 70) */}
+                      <div className="absolute left-[30%] right-[30%] top-0 bottom-0 bg-slate-700 bg-opacity-30 border-l border-r border-slate-600" />
+                      <div className="absolute w-2 h-2 rounded-full bg-white top-0 shadow"
+                        style={{ left: `calc(${liveData.technicals.rsi}% - 4px)` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* MACD Trend */}
+                <div className="p-3 rounded-lg" style={{ background: 'var(--bg-primary)' }}>
+                  <p className="text-[10px] uppercase font-semibold tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>
+                    MACD Signal (Crossover)
+                  </p>
+                  <p className="text-sm font-bold mt-1"
+                    style={{
+                      color: liveData.technicals.macd === 'bullish_crossover' ? 'var(--accent-green)' :
+                             liveData.technicals.macd === 'bearish_crossover' ? 'var(--accent-red)' : 'var(--text-secondary)'
+                    }}>
+                    {liveData.technicals.macd === 'bullish_crossover' ? '🟢 Bullish Crossover (Upward Trend)' :
+                     liveData.technicals.macd === 'bearish_crossover' ? '🔴 Bearish Crossover (Downward Trend)' : '⚪ Neutral / Sideways Crossover'}
+                  </p>
+                  <p className="text-[9px] mt-2 leading-snug" style={{ color: 'var(--text-muted)' }}>
+                    {liveData.technicals.macd === 'bullish_crossover' ? 'Short-term exponential average crossed above long-term line' :
+                     liveData.technicals.macd === 'bearish_crossover' ? 'Short-term exponential average crossed below long-term line' :
+                     'Moving averages are moving parallel with no breakout trend'}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Sentiment History */}
           <div className="rounded-xl p-5"
