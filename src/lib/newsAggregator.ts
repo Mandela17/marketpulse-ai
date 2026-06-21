@@ -49,6 +49,30 @@ const NEWS_FEEDS = [
     url: 'https://news.google.com/rss/search?q=India+auto+Maruti+Tata+Motors&hl=en-IN&gl=IN&ceid=IN:en',
     source: 'Google News',
   },
+  {
+    url: 'https://news.google.com/rss/search?q=site:moneycontrol.com+market+news&hl=en-IN&gl=IN&ceid=IN:en',
+    source: 'Moneycontrol',
+  },
+  {
+    url: 'https://news.google.com/rss/search?q=site:economictimes.indiatimes.com+stock+market&hl=en-IN&gl=IN&ceid=IN:en',
+    source: 'Economic Times',
+  },
+  {
+    url: 'https://news.google.com/rss/search?q=site:livemint.com+market&hl=en-IN&gl=IN&ceid=IN:en',
+    source: 'Livemint',
+  },
+  {
+    url: 'https://news.google.com/rss/search?q=Reddit+IndiaInvestments+stock&hl=en-IN&gl=IN&ceid=IN:en',
+    source: 'Reddit / IndiaInvestments',
+  },
+  {
+    url: 'https://news.google.com/rss/search?q=corporate+announcements+disclosures+NSE+BSE&hl=en-IN&gl=IN&ceid=IN:en',
+    source: 'Corporate Announcements',
+  },
+  {
+    url: 'https://news.google.com/rss/search?q=stock+market+rumors+mergers+acquisitions+India&hl=en-IN&gl=IN&ceid=IN:en',
+    source: 'Market Rumors',
+  },
 ];
 
 function parseXML(xml: string): RawArticle[] {

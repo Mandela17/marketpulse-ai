@@ -49,6 +49,7 @@ export interface NewsArticle {
   relatedStocks: string[];
   category: 'financial' | 'geopolitical' | 'policy' | 'earnings' | 'global';
   impactLevel: 'high' | 'medium' | 'low';
+  weight?: number;
 }
 
 export interface GeopoliticalEvent {

@@ -51,6 +51,11 @@ export default function NewsCard({ article, compact = false }: NewsCardProps) {
           </p>
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{article.source}</span>
+            {article.weight && (
+              <span className="text-[9px] px-1 rounded" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)' }}>
+                {article.weight}x
+              </span>
+            )}
             <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>·</span>
             <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{timeAgo}</span>
             <span className="sentiment-badge"
@@ -102,6 +107,16 @@ export default function NewsCard({ article, compact = false }: NewsCardProps) {
           <span className="text-xs font-medium" style={{ color: 'var(--accent-blue)' }}>
             {article.source}
           </span>
+          {article.weight && (
+            <span className="text-[9px] px-1.5 py-0.2 rounded font-bold"
+              style={{
+                background: article.weight >= 1.4 ? 'var(--accent-purple-dim)' : 'rgba(255,255,255,0.05)',
+                color: article.weight >= 1.4 ? 'var(--accent-purple)' : 'var(--text-secondary)',
+                border: article.weight >= 1.4 ? '1px solid var(--accent-purple-dim)' : '1px solid rgba(255,255,255,0.03)'
+              }}>
+              {article.weight}x Weight
+            </span>
+          )}
           <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
             {timeAgo}
           </span>

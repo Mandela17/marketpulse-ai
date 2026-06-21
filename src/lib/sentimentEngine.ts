@@ -7,6 +7,20 @@ import { NewsArticle } from './types';
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 
+export function getSourceWeight(source: string): number {
+  const src = source.toLowerCase();
+  if (src.includes('moneycontrol')) return 1.5;
+  if (src.includes('economic times')) return 1.5;
+  if (src.includes('mint') || src.includes('livemint')) return 1.4;
+  if (src.includes('bloomberg')) return 1.5;
+  if (src.includes('reuters')) return 1.5;
+  if (src.includes('reddit') || src.includes('r/indiainvestments')) return 0.7;
+  if (src.includes('twitter') || src.includes('x.com')) return 0.6;
+  if (src.includes('rumors') || src.includes('rumor')) return 0.6;
+  if (src.includes('blog') || src.includes('blogspot')) return 0.5;
+  return 1.0;
+}
+
 interface SentimentResult {
   sentiment: number; // -1 to 1
   label: 'positive' | 'negative' | 'neutral';
@@ -116,6 +130,7 @@ Return ONLY a valid JSON array, no markdown or explanation. Example:
       relatedStocks: detectStocks(article),
       category: analysis.category,
       impactLevel: analysis.impactLevel,
+      weight: getSourceWeight(article.source),
     };
   });
 }
@@ -154,19 +169,22 @@ function keywordFallback(article: RawArticle, id: string): NewsArticle {
     relatedStocks: detectStocks(article),
     category,
     impactLevel: Math.abs(score) > 0.5 ? 'high' : Math.abs(score) > 0.2 ? 'medium' : 'low',
+    weight: getSourceWeight(article.source),
   };
 }
 
-// Compute sector sentiment from analyzed articles
+// Compute sector sentiment from analyzed articles using weighted averages
 export function computeSectorSentiments(articles: NewsArticle[]): Record<string, { score: number; articleCount: number; keyDriver: string }> {
-  const sectorScores: Record<string, { total: number; count: number; topArticle: string; topScore: number }> = {};
+  const sectorScores: Record<string, { weightedTotal: number; totalWeight: number; count: number; topArticle: string; topScore: number }> = {};
 
   for (const article of articles) {
+    const weight = article.weight || 1.0;
     for (const sector of article.relatedSectors) {
       if (!sectorScores[sector]) {
-        sectorScores[sector] = { total: 0, count: 0, topArticle: '', topScore: 0 };
+        sectorScores[sector] = { weightedTotal: 0, totalWeight: 0, count: 0, topArticle: '', topScore: 0 };
       }
-      sectorScores[sector].total += article.sentiment;
+      sectorScores[sector].weightedTotal += article.sentiment * weight;
+      sectorScores[sector].totalWeight += weight;
       sectorScores[sector].count += 1;
 
       if (Math.abs(article.sentiment) > Math.abs(sectorScores[sector].topScore)) {
@@ -179,7 +197,7 @@ export function computeSectorSentiments(articles: NewsArticle[]): Record<string,
   const result: Record<string, { score: number; articleCount: number; keyDriver: string }> = {};
 
   for (const [sector, data] of Object.entries(sectorScores)) {
-    const avgSentiment = data.count > 0 ? data.total / data.count : 0;
+    const avgSentiment = data.totalWeight > 0 ? data.weightedTotal / data.totalWeight : 0;
     // Convert -1..1 range to 0..100
     const score = Math.round(Math.max(0, Math.min(100, (avgSentiment + 1) * 50)));
     result[sector] = {
