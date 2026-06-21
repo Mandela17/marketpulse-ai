@@ -26,7 +26,7 @@ export default function Sidebar() {
 
   return (
     <aside className="fixed left-0 top-0 h-full w-64 flex flex-col z-40"
-      style={{ background: 'var(--bg-secondary)', borderRight: '1px solid var(--border-color)' }}>
+      style={{ background: 'var(--bg-secondary)', borderRight: '1px solid var(--border-color)', width: '16rem' }}>
       
       {/* Logo */}
       <div className="p-5 flex items-center gap-3 border-b" style={{ borderColor: 'var(--border-color)' }}>

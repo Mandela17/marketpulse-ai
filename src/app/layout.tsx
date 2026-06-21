@@ -30,7 +30,7 @@ export default function RootLayout({
     >
       <body className="min-h-full flex">
         <Sidebar />
-        <main className="flex-1 ml-64 min-h-screen" style={{ background: 'var(--bg-primary)' }}>
+        <main className="flex-1 min-h-screen" style={{ background: 'var(--bg-primary)', marginLeft: '16rem' }}>
           {children}
         </main>
       </body>
