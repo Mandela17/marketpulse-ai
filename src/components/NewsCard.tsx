@@ -51,7 +51,17 @@ export default function NewsCard({ article, compact = false }: NewsCardProps) {
           </p>
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{article.source}</span>
-            {article.weight && (
+            {article.decayedWeight !== undefined ? (
+              <span className="text-[9px] px-1 rounded font-medium" 
+                style={{ 
+                  background: 'rgba(255,255,255,0.05)', 
+                  color: article.decayedWeight < (article.weight || 1.0) ? 'var(--accent-yellow)' : 'var(--text-muted)' 
+                }}
+                title={`Decayed weight due to age: ${article.decayedWeight}x (base ${article.weight}x)`}
+              >
+                {article.decayedWeight}x
+              </span>
+            ) : article.weight && (
               <span className="text-[9px] px-1 rounded" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)' }}>
                 {article.weight}x
               </span>
@@ -101,13 +111,48 @@ export default function NewsCard({ article, compact = false }: NewsCardProps) {
         {cleanText(article.summary).substring(0, 200)}
       </p>
 
+      {/* Aspect Breakdowns */}
+      {article.aspects && article.aspects.length > 0 && (
+        <div className="flex items-center gap-1.5 flex-wrap mb-3 border-t border-b py-2" style={{ borderColor: 'rgba(255,255,255,0.03)' }}>
+          <span className="text-[9px] uppercase tracking-wider font-semibold mr-1" style={{ color: 'var(--text-muted)' }}>
+            Aspects:
+          </span>
+          {article.aspects.map((asp, idx) => {
+            const aspectColor = asp.sentiment > 0.1 ? 'var(--accent-green)' :
+              asp.sentiment < -0.1 ? 'var(--accent-red)' : 'var(--accent-yellow)';
+            const aspectBg = asp.sentiment > 0.1 ? 'var(--accent-green-dim)' :
+              asp.sentiment < -0.1 ? 'var(--accent-red-dim)' : 'var(--accent-yellow-dim)';
+            return (
+              <span key={idx} className="text-[10px] px-2 py-0.5 rounded font-medium"
+                style={{ background: aspectBg, color: aspectColor }}>
+                {asp.entity} ({asp.aspect}): {asp.sentiment > 0 ? '+' : ''}{asp.sentiment.toFixed(1)}
+              </span>
+            );
+          })}
+        </div>
+      )}
+
       {/* Footer */}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-2">
           <span className="text-xs font-medium" style={{ color: 'var(--accent-blue)' }}>
             {article.source}
           </span>
-          {article.weight && (
+          {article.decayedWeight !== undefined ? (
+            <span className="text-[9px] px-1.5 py-0.2 rounded font-bold flex items-center gap-1"
+              style={{
+                background: article.decayedWeight >= 1.4 ? 'var(--accent-purple-dim)' : 'rgba(255,255,255,0.05)',
+                color: article.decayedWeight >= 1.4 ? 'var(--accent-purple)' : 'var(--text-secondary)',
+                border: article.decayedWeight >= 1.4 ? '1px solid var(--accent-purple-dim)' : '1px solid rgba(255,255,255,0.03)'
+              }}
+              title={`Base weight: ${article.weight}x. Reduced to ${article.decayedWeight}x due to age decay.`}
+            >
+              <span>{article.decayedWeight}x Authority</span>
+              {article.decayedWeight < (article.weight || 1.0) && (
+                <span className="text-[8px] opacity-75">⏳ decayed</span>
+              )}
+            </span>
+          ) : article.weight && (
             <span className="text-[9px] px-1.5 py-0.2 rounded font-bold"
               style={{
                 background: article.weight >= 1.4 ? 'var(--accent-purple-dim)' : 'rgba(255,255,255,0.05)',

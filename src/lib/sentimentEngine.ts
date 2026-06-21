@@ -3,7 +3,7 @@
 
 import { GoogleGenAI } from '@google/genai';
 import { RawArticle, detectSectors, detectStocks } from './newsAggregator';
-import { NewsArticle } from './types';
+import { NewsArticle, AspectSentiment } from './types';
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 
@@ -21,12 +21,25 @@ export function getSourceWeight(source: string): number {
   return 1.0;
 }
 
+export function computeDecayedWeight(baseWeight: number, publishedAtStr: string): number {
+  const publishedAt = new Date(publishedAtStr);
+  const diffMs = Date.now() - publishedAt.getTime();
+  const diffHours = Math.max(0, diffMs / (1000 * 60 * 60));
+  
+  // Exponential Time Decay: Weight = baseWeight * e^(-lambda * t)
+  const lambda = 0.03;
+  const decayed = baseWeight * Math.exp(-lambda * diffHours);
+  
+  return parseFloat(Math.max(0.1, decayed).toFixed(2));
+}
+
 interface SentimentResult {
   sentiment: number; // -1 to 1
   label: 'positive' | 'negative' | 'neutral';
   category: 'financial' | 'geopolitical' | 'policy' | 'earnings' | 'global';
   impactLevel: 'high' | 'medium' | 'low';
   summary: string;
+  aspects?: AspectSentiment[];
 }
 
 // Analyze a batch of articles using Gemini
@@ -86,12 +99,16 @@ Analyze each news article below and return a JSON array with one object per arti
 - "category": one of "financial", "geopolitical", "policy", "earnings", "global"
 - "impactLevel": "high", "medium", or "low" (based on how much it could move Indian markets)
 - "summary": a 1-2 sentence summary focused on market impact for Indian investors
+- "aspects": an array of aspect objects, where each object contains:
+  - "entity": string name of the company or asset (e.g. "Tata Motors", "Nifty", "Reliance")
+  - "aspect": must be one of "Demand/Sales", "Margins/Profit", "Regulatory/Legal", "Macro/Global", "Technical/Chart", "General"
+  - "sentiment": number from -1.0 to 1.0 representing the aspect-specific sentiment
 
 Articles:
 ${articleList}
 
 Return ONLY a valid JSON array, no markdown or explanation. Example:
-[{"sentiment": 0.7, "label": "positive", "category": "financial", "impactLevel": "high", "summary": "..."}]`;
+[{"sentiment": 0.7, "label": "positive", "category": "financial", "impactLevel": "high", "summary": "...", "aspects": [{"entity": "Tata Motors", "aspect": "Demand/Sales", "sentiment": 0.8}, {"entity": "Tata Motors", "aspect": "Margins/Profit", "sentiment": -0.6}]}]`;
 
   const response = await ai.models.generateContent({
     model: 'gemini-2.5-flash',
@@ -115,7 +132,11 @@ Return ONLY a valid JSON array, no markdown or explanation. Example:
       category: 'global' as const,
       impactLevel: 'low' as const,
       summary: article.description?.substring(0, 150) || article.title,
+      aspects: [],
     };
+
+    const baseWeight = getSourceWeight(article.source);
+    const decayedWeight = computeDecayedWeight(baseWeight, article.pubDate || new Date().toISOString());
 
     return {
       id: `news-${Date.now()}-${i}`,
@@ -130,7 +151,9 @@ Return ONLY a valid JSON array, no markdown or explanation. Example:
       relatedStocks: detectStocks(article),
       category: analysis.category,
       impactLevel: analysis.impactLevel,
-      weight: getSourceWeight(article.source),
+      weight: baseWeight,
+      decayedWeight: decayedWeight,
+      aspects: analysis.aspects || [],
     };
   });
 }
@@ -156,6 +179,36 @@ function keywordFallback(article: RawArticle, id: string): NewsArticle {
   else if (text.includes('earnings') || text.includes('quarterly') || text.includes('result') || text.includes('profit')) category = 'earnings';
   else if (text.includes('stock') || text.includes('market') || text.includes('nse') || text.includes('bse')) category = 'financial';
 
+  const baseWeight = getSourceWeight(article.source);
+  const decayedWeight = computeDecayedWeight(baseWeight, article.pubDate || new Date().toISOString());
+
+  // Simple aspect parser for fallback
+  const aspects: AspectSentiment[] = [];
+  const stockMentions = detectStocks(article);
+  const targetEntity = stockMentions.length > 0 ? stockMentions[0] : 'Market';
+  
+  if (text.includes('sale') || text.includes('demand') || text.includes('order') || text.includes('grow')) {
+    aspects.push({
+      entity: targetEntity,
+      aspect: 'Demand/Sales',
+      sentiment: score > 0 ? 0.7 : score < 0 ? -0.7 : 0,
+    });
+  }
+  if (text.includes('margin') || text.includes('profit') || text.includes('cost') || text.includes('loss')) {
+    aspects.push({
+      entity: targetEntity,
+      aspect: 'Margins/Profit',
+      sentiment: score > 0 ? 0.6 : score < 0 ? -0.6 : 0,
+    });
+  }
+  if (aspects.length === 0) {
+    aspects.push({
+      entity: targetEntity,
+      aspect: 'General',
+      sentiment: score,
+    });
+  }
+
   return {
     id,
     title: article.title,
@@ -169,16 +222,18 @@ function keywordFallback(article: RawArticle, id: string): NewsArticle {
     relatedStocks: detectStocks(article),
     category,
     impactLevel: Math.abs(score) > 0.5 ? 'high' : Math.abs(score) > 0.2 ? 'medium' : 'low',
-    weight: getSourceWeight(article.source),
+    weight: baseWeight,
+    decayedWeight: decayedWeight,
+    aspects,
   };
 }
 
-// Compute sector sentiment from analyzed articles using weighted averages
+// Compute sector sentiment from analyzed articles using weighted averages with time decay
 export function computeSectorSentiments(articles: NewsArticle[]): Record<string, { score: number; articleCount: number; keyDriver: string }> {
   const sectorScores: Record<string, { weightedTotal: number; totalWeight: number; count: number; topArticle: string; topScore: number }> = {};
 
   for (const article of articles) {
-    const weight = article.weight || 1.0;
+    const weight = article.decayedWeight ?? article.weight ?? 1.0;
     for (const sector of article.relatedSectors) {
       if (!sectorScores[sector]) {
         sectorScores[sector] = { weightedTotal: 0, totalWeight: 0, count: 0, topArticle: '', topScore: 0 };

@@ -36,6 +36,12 @@ export interface StockData {
   riskFactors: string[];
 }
 
+export interface AspectSentiment {
+  entity: string;
+  aspect: 'Demand/Sales' | 'Margins/Profit' | 'Regulatory/Legal' | 'Macro/Global' | 'Technical/Chart' | 'General';
+  sentiment: number; // -1 to 1
+}
+
 export interface NewsArticle {
   id: string;
   title: string;
@@ -50,6 +56,8 @@ export interface NewsArticle {
   category: 'financial' | 'geopolitical' | 'policy' | 'earnings' | 'global';
   impactLevel: 'high' | 'medium' | 'low';
   weight?: number;
+  decayedWeight?: number;
+  aspects?: AspectSentiment[];
 }
 
 export interface GeopoliticalEvent {
