@@ -69,10 +69,25 @@ export default function WatchlistPage() {
 
   // Update search results
   useEffect(() => {
-    if (searchQuery.trim().length > 0) {
-      const results = searchStocks(searchQuery);
-      // Filter out stocks already in watchlist
-      setSearchResults(results.filter(s => !watchlist.includes(s.symbol)));
+    const query = searchQuery.trim();
+    if (query.length > 0) {
+      const results = searchStocks(query);
+      const filtered = results.filter(s => !watchlist.includes(s.symbol));
+      
+      const cleanQuery = query.toUpperCase();
+      const alreadyInWatchlist = watchlist.includes(cleanQuery);
+      const exactMatchInStocks = ALL_STOCKS.some(s => s.symbol === cleanQuery);
+      
+      const listToShow = [...filtered];
+      if (cleanQuery.length >= 2 && !alreadyInWatchlist && !exactMatchInStocks) {
+        listToShow.push({
+          symbol: cleanQuery,
+          name: `Add "${cleanQuery}" as custom stock`,
+          sector: 'general',
+        });
+      }
+      
+      setSearchResults(listToShow);
       setShowDropdown(true);
     } else {
       setSearchResults([]);

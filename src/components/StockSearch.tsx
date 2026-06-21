@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { searchStocks } from '@/lib/sectorData';
+import { searchStocks, ALL_STOCKS } from '@/lib/sectorData';
 
 export default function StockSearch({ onClose }: { onClose?: () => void }) {
   const [query, setQuery] = useState('');
@@ -16,8 +16,21 @@ export default function StockSearch({ onClose }: { onClose?: () => void }) {
   }, []);
 
   useEffect(() => {
-    if (query.length >= 1) {
-      setResults(searchStocks(query));
+    const cleanQuery = query.trim().toUpperCase();
+    if (cleanQuery.length >= 1) {
+      const dbResults = searchStocks(cleanQuery);
+      const exactMatch = ALL_STOCKS.some(s => s.symbol === cleanQuery);
+
+      const listToShow = [...dbResults];
+      if (cleanQuery.length >= 2 && !exactMatch) {
+        listToShow.push({
+          symbol: cleanQuery,
+          name: `Go to details for "${cleanQuery}"`,
+          sector: 'general',
+        });
+      }
+
+      setResults(listToShow);
       setSelectedIndex(0);
     } else {
       setResults([]);

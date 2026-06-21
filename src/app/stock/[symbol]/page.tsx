@@ -36,8 +36,32 @@ function getOutlook(score: number): 'bullish' | 'bearish' | 'neutral' {
 export default function StockPage({ params }: { params: Promise<{ symbol: string }> }) {
   const { symbol } = use(params);
   const decodedSymbol = decodeURIComponent(symbol).toUpperCase();
-  const stock = getStockBySymbol(decodedSymbol);
   
+  // Use static db stock, or fallback to dynamically configured custom stock
+  let stock = getStockBySymbol(decodedSymbol);
+  if (!stock && decodedSymbol.length >= 2) {
+    // Attempt to guess sector based on common company keywords
+    let sector = 'general';
+    const cleanSym = decodedSymbol.toLowerCase();
+    if (cleanSym.includes('tata') || cleanSym.includes('auto') || cleanSym.includes('motor') || cleanSym === 'tmcv') {
+      sector = 'auto';
+    } else if (cleanSym.includes('power') || cleanSym.includes('energy') || cleanSym.includes('coal') || cleanSym.includes('oil')) {
+      sector = 'power';
+    } else if (cleanSym.includes('bank') || cleanSym.includes('fin')) {
+      sector = 'banking';
+    } else if (cleanSym.includes('gold') || cleanSym.includes('titan')) {
+      sector = 'gold';
+    } else if (cleanSym.includes('tcs') || cleanSym.includes('infy') || cleanSym.includes('wipro') || cleanSym.includes('tech')) {
+      sector = 'it';
+    }
+
+    stock = {
+      symbol: decodedSymbol,
+      name: `${decodedSymbol} (Custom Stock)`,
+      sector,
+    };
+  }
+
   const [inWatchlist, setInWatchlist] = useState(false);
 
   useEffect(() => {
