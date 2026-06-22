@@ -1,5 +1,6 @@
 // API Route: Fetch real market data (NIFTY, SENSEX, stock prices)
 import { NextResponse } from 'next/server';
+export const dynamic = 'force-dynamic';
 import { fetchNifty50, fetchSensex, fetchStockPrice } from '@/lib/stockData';
 
 export async function GET(request: Request) {

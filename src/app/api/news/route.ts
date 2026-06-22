@@ -5,6 +5,8 @@ import { analyzeArticlesBatch, computeSectorSentiments } from '@/lib/sentimentEn
 import { SECTORS } from '@/lib/sectorData';
 import { getServiceClient } from '@/lib/supabase';
 
+export const dynamic = 'force-dynamic';
+
 // Cache results for 10 minutes to avoid excessive API calls
 let cachedData: { articles: any[]; sectorSentiments: any; timestamp: number } | null = null;
 const CACHE_DURATION = 10 * 60 * 1000; // 10 minutes

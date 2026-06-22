@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+export const dynamic = 'force-dynamic';
 import { fetchStockPrice } from '@/lib/stockData';
 import { computeRealTechnicals } from '@/lib/technicalAnalysis';
 

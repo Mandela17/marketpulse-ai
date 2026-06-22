@@ -6,6 +6,8 @@
 // plus once at 8 AM and 6 PM for pre/post-market analysis
 
 import { NextResponse } from 'next/server';
+
+export const dynamic = 'force-dynamic';
 import { fetchAllNews } from '@/lib/newsAggregator';
 import { analyzeArticlesBatch, computeSectorSentiments } from '@/lib/sentimentEngine';
 import { SECTORS } from '@/lib/sectorData';
