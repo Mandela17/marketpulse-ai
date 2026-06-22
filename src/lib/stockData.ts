@@ -171,57 +171,6 @@ export async function fetchMultipleStocks(symbols: string[]): Promise<Record<str
   return results;
 }
 
-export interface StockTechnicals {
-  rsi: number;
-  macd: 'bullish_crossover' | 'bearish_crossover' | 'neutral';
-  deliveryPercent: number;
-  pcr: number;
-  oiSignal: 'Long Build-up' | 'Short Build-up' | 'Short Covering' | 'Long Unwinding' | 'Neutral';
-  institutionalSignal: 'Accumulation' | 'Distribution' | 'Neutral';
-}
-
-export function computeStockTechnicals(symbol: string, price: number, changePercent: number, volume: number): StockTechnicals {
-  // Deterministic calculation based on symbol, price change, and volume
-  const hash = symbol.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-  
-  // RSI: typical range 30-70. If changePercent is positive, RSI shifts higher.
-  let rsi = Math.round(50 + (changePercent * 5) + (hash % 10 - 5));
-  rsi = Math.max(15, Math.min(85, rsi));
-  
-  // Delivery %: standard NSE delivery is 30% to 65%. 
-  // Higher price changes + higher relative volume typically correlate with higher delivery (institutions buying).
-  let deliveryPercent = Math.round(40 + (Math.abs(changePercent) * 3) + (hash % 15 - 7));
-  deliveryPercent = Math.max(18, Math.min(78, deliveryPercent));
-  
-  // Put-Call Ratio (PCR): typical range 0.6 (bearish) to 1.6 (bullish).
-  let pcr = parseFloat((1.0 + (changePercent * 0.1) + (hash % 8 - 4) * 0.05).toFixed(2));
-  pcr = Math.max(0.4, Math.min(2.0, pcr));
-  
-  // Open Interest Signal
-  let oiSignal: StockTechnicals['oiSignal'] = 'Neutral';
-  if (changePercent > 1.5) {
-    oiSignal = (hash % 2 === 0) ? 'Long Build-up' : 'Short Covering';
-  } else if (changePercent < -1.5) {
-    oiSignal = (hash % 2 === 0) ? 'Short Build-up' : 'Long Unwinding';
-  } else {
-    oiSignal = 'Neutral';
-  }
-  
-  // MACD
-  let macd: StockTechnicals['macd'] = 'neutral';
-  if (changePercent > 0.5) {
-    macd = (hash % 3 === 0) ? 'neutral' : 'bullish_crossover';
-  } else if (changePercent < -0.5) {
-    macd = (hash % 3 === 0) ? 'neutral' : 'bearish_crossover';
-  }
-  
-  // Institutional Trade Signal: Combine delivery % and changePercent
-  let institutionalSignal: StockTechnicals['institutionalSignal'] = 'Neutral';
-  if (deliveryPercent > 50 && changePercent > 1.0) {
-    institutionalSignal = 'Accumulation';
-  } else if (deliveryPercent > 45 && changePercent < -1.0) {
-    institutionalSignal = 'Distribution';
-  }
-  
-  return { rsi, macd, deliveryPercent, pcr, oiSignal, institutionalSignal };
-}
+// Note: Real technical indicators (RSI, MACD, EMA, Bollinger Bands) are now
+// computed in src/lib/technicalAnalysis.ts from actual Yahoo Finance OHLCV data.
+// The old fake hash-based computeStockTechnicals() has been removed.
