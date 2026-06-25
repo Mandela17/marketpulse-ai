@@ -91,24 +91,32 @@ async function analyzeBatchWithGemini(articles: RawArticle[]): Promise<NewsArtic
     `[${i}] "${a.title}" - ${a.description?.substring(0, 200) || 'No description'}`
   ).join('\n');
 
-  const prompt = `You are a financial market sentiment analyst specializing in the Indian stock market (NSE/BSE).
+  const prompt = `You are an expert financial market sentiment analyst specializing in the Indian stock market (NSE/BSE).
 
-Analyze each news article below and return a JSON array with one object per article. Each object must have:
+Analyze each news article below with particular attention to factors that heavily drive Indian equity markets:
+1. **FII & DII Flows**: Net buying/selling by Foreign Institutional Investors and Domestic Institutional Investors, bulk/block deals, and foreign inflows.
+2. **RBI Policies**: Interest rate/repo rate decisions, CRR/SLR changes, monetary policy stance (hawkish/dovish/neutral), and RBI governor commentary.
+3. **SEBI Audits & Regulatory Actions**: Warnings, investigations, forensic audits, penalties, or compliance directives issued by SEBI (which are typically high-impact bearish signals for affected entities or broader mid/small-caps).
+4. **Government & Policy**: Union Budget allocations, GST rate changes, export duties, PLI schemes, and key macroeconomic indicators (CPI inflation, WPI, GDP growth).
+5. **Corporate Actions & Health**: Quarterly earnings results (focusing on margins and management commentary), promoter share buybacks, promoter stake dilution or share pledging/unpledging, and official exchanges (NSE/BSE) corporate announcements.
+6. **Market Rumors vs Disclosures**: Treat unconfirmed speculative rumors with lower weight/higher risk and flag them unless backed by official corporate filings on NSE/BSE.
+
+Analyze the text and return a JSON array with one object per article. Each object must have:
 - "sentiment": number from -1.0 (very bearish) to 1.0 (very bullish)
-- "label": "positive" or "negative" or "neutral"
+- "label": "positive" | "negative" | "neutral"
 - "category": one of "financial", "geopolitical", "policy", "earnings", "global"
-- "impactLevel": "high", "medium", or "low" (based on how much it could move Indian markets)
-- "summary": a 1-2 sentence summary focused on market impact for Indian investors
+- "impactLevel": "high" | "medium" | "low" (based on its potential to shift stock price or sector trends in India)
+- "summary": a 1-2 sentence summary focused on specific market impact for Indian investors and key drivers identified above.
 - "aspects": an array of aspect objects, where each object contains:
-  - "entity": string name of the company or asset (e.g. "Tata Motors", "Nifty", "Reliance")
+  - "entity": string name of the company or asset (e.g. "Reliance Industries", "Nifty", "HDFC Bank")
   - "aspect": must be one of "Demand/Sales", "Margins/Profit", "Regulatory/Legal", "Macro/Global", "Technical/Chart", "General"
   - "sentiment": number from -1.0 to 1.0 representing the aspect-specific sentiment
 
 Articles:
 ${articleList}
 
-Return ONLY a valid JSON array, no markdown or explanation. Example:
-[{"sentiment": 0.7, "label": "positive", "category": "financial", "impactLevel": "high", "summary": "...", "aspects": [{"entity": "Tata Motors", "aspect": "Demand/Sales", "sentiment": 0.8}, {"entity": "Tata Motors", "aspect": "Margins/Profit", "sentiment": -0.6}]}]`;
+Return ONLY a valid JSON array, no markdown and no explanation. Example:
+[{"sentiment": 0.7, "label": "positive", "category": "financial", "impactLevel": "high", "summary": "Strong FII inflows of ₹2,500 crore coupled with positive US inflation data drives Nifty sentiment higher.", "aspects": [{"entity": "Nifty", "aspect": "Macro/Global", "sentiment": 0.8}]}]`;
 
   const response = await ai.models.generateContent({
     model: 'gemini-2.5-flash',

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ALL_STOCKS, searchStocks, getStockBySymbol } from '@/lib/sectorData';
 import { getSentimentColor, getSentimentLabel, SectorData } from '@/lib/types';
 import { DEMO_SECTORS } from '@/lib/mockData';
+import { useAuth } from '@/context/AuthContext';
 
 const DEFAULT_WATCHLIST = [
   'RELIANCE', 'TATAMOTORS', 'ADANIGREEN', 'HAL', 'TITAN',
@@ -12,7 +13,7 @@ const DEFAULT_WATCHLIST = [
 ];
 
 export default function WatchlistPage() {
-  const [watchlist, setWatchlist] = useState<string[]>([]);
+  const { watchlist, toggleWatchlist } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<{ symbol: string; name: string; sector: string }[]>([]);
   const [sectors, setSectors] = useState<SectorData[]>(DEMO_SECTORS);
@@ -20,21 +21,8 @@ export default function WatchlistPage() {
   const [showDropdown, setShowDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Load watchlist from localStorage on mount
+  // Fetch live sentiments on mount
   useEffect(() => {
-    const saved = localStorage.getItem('marketpulse_watchlist');
-    if (saved) {
-      try {
-        setWatchlist(JSON.parse(saved));
-      } catch (e) {
-        setWatchlist(DEFAULT_WATCHLIST);
-      }
-    } else {
-      setWatchlist(DEFAULT_WATCHLIST);
-      localStorage.setItem('marketpulse_watchlist', JSON.stringify(DEFAULT_WATCHLIST));
-    }
-
-    // Fetch live sentiments
     async function fetchLiveSentiments() {
       try {
         const res = await fetch('/api/news').then(r => r.json());
@@ -49,12 +37,6 @@ export default function WatchlistPage() {
     }
     fetchLiveSentiments();
   }, []);
-
-  // Save watchlist to localStorage whenever it changes
-  const saveWatchlist = (newList: string[]) => {
-    setWatchlist(newList);
-    localStorage.setItem('marketpulse_watchlist', JSON.stringify(newList));
-  };
 
   // Handle outside click to close dropdown
   useEffect(() => {
@@ -98,8 +80,7 @@ export default function WatchlistPage() {
   const addStock = (symbol: string) => {
     const cleanSymbol = symbol.toUpperCase();
     if (!watchlist.includes(cleanSymbol)) {
-      const updated = [...watchlist, cleanSymbol];
-      saveWatchlist(updated);
+      toggleWatchlist(cleanSymbol);
     }
     setSearchQuery('');
     setShowDropdown(false);
@@ -108,8 +89,7 @@ export default function WatchlistPage() {
   const removeStock = (symbol: string, e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
-    const updated = watchlist.filter(s => s !== symbol);
-    saveWatchlist(updated);
+    toggleWatchlist(symbol);
   };
 
   const sectorIcons: Record<string, string> = {

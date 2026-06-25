@@ -6,6 +6,8 @@ import SectorCard from '@/components/SectorCard';
 import SentimentGauge from '@/components/SentimentGauge';
 import NewsCard from '@/components/NewsCard';
 import { DEMO_SECTORS, DEMO_NEWS, DEMO_MARKET_OVERVIEW, DEMO_GEOPOLITICAL_EVENTS } from '@/lib/mockData';
+import { getBrokerConfig } from '@/lib/brokerApi';
+import { Calendar } from 'lucide-react';
 
 interface MarketData {
   nifty50: { value: number; change: number; changePercent: number };
@@ -20,11 +22,17 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string>('');
   const [isLive, setIsLive] = useState(false);
+  const [brokerConnected, setBrokerConnected] = useState(false);
+  const [dataSource, setDataSource] = useState<'yahoo' | 'upstox'>('yahoo');
 
   useEffect(() => {
+    // Check broker connection status
+    const brokerConfig = getBrokerConfig();
+    const isUpstoxConnected = brokerConfig.provider === 'upstox' && brokerConfig.connected && !!brokerConfig.accessToken;
+    setBrokerConnected(isUpstoxConnected);
+
     async function fetchData() {
       try {
-        // Fetch real news + sentiment in parallel with market data
         const [newsRes, marketRes] = await Promise.all([
           fetch('/api/news').then(r => r.json()).catch(() => null),
           fetch('/api/market').then(r => r.json()).catch(() => null),
@@ -34,10 +42,8 @@ export default function Dashboard() {
           setNews(newsRes.articles);
           setIsLive(true);
 
-          // Convert sectorSentiments to SectorData array
           if (newsRes.sectorSentiments) {
             const sectorArray: SectorData[] = Object.values(newsRes.sectorSentiments);
-            // Sort by priority sectors first
             const priorityOrder = ['defense', 'power', 'gold', 'energy', 'ev', 'auto', 'banking', 'realestate', 'it', 'pharma', 'metals', 'fmcg'];
             sectorArray.sort((a: SectorData, b: SectorData) => {
               const aIdx = priorityOrder.indexOf(a.id);
@@ -53,6 +59,31 @@ export default function Dashboard() {
         if (marketRes && !marketRes.error) {
           setMarketData(marketRes);
         }
+
+        // If Upstox is connected, try to enrich NIFTY 50 with Upstox real-time data
+        if (isUpstoxConnected && brokerConfig.accessToken) {
+          try {
+            const niftyRes = await fetch('/api/broker/quote?symbol=NIFTY', {
+              headers: { 'X-Upstox-Token': brokerConfig.accessToken },
+            }).then(r => r.json());
+
+            if (niftyRes && !niftyRes.error && niftyRes.price > 0) {
+              setMarketData(prev => ({
+                ...prev,
+                nifty50: {
+                  value: niftyRes.price,
+                  change: niftyRes.change,
+                  changePercent: niftyRes.changePercent,
+                },
+                sensex: prev?.sensex || { value: 0, change: 0, changePercent: 0 },
+                marketStatus: prev?.marketStatus || 'closed',
+              }));
+              setDataSource('upstox');
+            }
+          } catch (upstoxErr) {
+            console.warn('[Dashboard] Upstox NIFTY quote failed:', upstoxErr);
+          }
+        }
       } catch (error) {
         console.error('Failed to fetch live data:', error);
       } finally {
@@ -61,9 +92,7 @@ export default function Dashboard() {
     }
 
     fetchData();
-
-    // Auto-refresh every 10 minutes
-    const interval = setInterval(fetchData, 10 * 60 * 1000);
+    const interval = setInterval(fetchData, 5 * 60 * 1000); // Refresh every 5 min when Upstox connected
     return () => clearInterval(interval);
   }, []);
 
@@ -73,220 +102,236 @@ export default function Dashboard() {
   const sensex = marketData?.sensex || overview.sensex;
   const mktStatus = marketData?.marketStatus || overview.marketStatus;
 
-  // Compute overall sentiment from sectors
   const overallSentiment = sectors.length > 0
     ? Math.round(sectors.reduce((sum, s) => sum + s.sentiment, 0) / sectors.length)
     : overview.overallSentiment;
 
-  // Biggest movers
-  const biggestMovers = [...sectors].sort((a, b) => Math.abs(b.change24h) - Math.abs(a.change24h)).slice(0, 5);
+  const today = new Date().toLocaleDateString('en-IN', {
+    weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
+  });
 
   return (
-    <div className="p-6">
-      {/* Market Overview Header */}
-      <div className="mb-6 animate-slide-up">
-        <div className="flex items-center justify-between mb-4">
+    <div className="p-4 sm:p-6 lg:p-8">
+      {/* ─── Header ─── */}
+      <div className="mb-6 animate-fade-in-up">
+        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
           <div>
-            <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
+            <h1 className="text-2xl sm:text-3xl font-bold text-white">
               Market Dashboard
             </h1>
-            <p className="text-sm mt-1 flex items-center gap-2" style={{ color: 'var(--text-secondary)' }}>
+            <p className="text-sm mt-1.5 flex items-center gap-2 flex-wrap" style={{ color: 'var(--text-secondary)' }}>
               AI-powered sentiment analysis for Indian markets
               {isLive && (
-                <span className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-bold"
+                <span className="flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-full font-bold"
                   style={{ background: 'var(--accent-green-dim)', color: 'var(--accent-green)' }}>
                   <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: 'var(--accent-green)' }} />
                   LIVE DATA
                 </span>
               )}
+              {brokerConnected && (
+                <span className="flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-full font-bold"
+                  style={{ background: 'rgba(139,92,246,0.15)', color: '#a78bfa', border: '1px solid rgba(139,92,246,0.3)' }}>
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#a78bfa' }} />
+                  UPSTOX CONNECTED
+                </span>
+              )}
               {loading && (
-                <span className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-bold"
+                <span className="flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-full font-bold"
                   style={{ background: 'var(--accent-yellow-dim)', color: 'var(--accent-yellow)' }}>
-                  ⏳ Loading live data...
+                  ⏳ Loading...
                 </span>
               )}
             </p>
           </div>
-          <div className="text-right">
-            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-              {lastUpdated
-                ? `Updated: ${new Date(lastUpdated).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}`
-                : `Last updated: ${new Date().toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}`
-              }
-            </p>
-          </div>
-        </div>
-
-        {/* Market Summary Strip */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          {/* Overall Sentiment */}
-          <div className="rounded-xl p-4 flex items-center gap-4"
-            style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
-            <SentimentGauge score={overallSentiment} size="sm" showLabel={false} />
-            <div>
-              <p className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: 'var(--text-muted)' }}>
-                Overall Sentiment
-              </p>
-              <p className="text-lg font-bold" style={{ color: getSentimentColor(overallSentiment) }}>
-                {getSentimentLabel(overallSentiment)}
-              </p>
-            </div>
-          </div>
-
-          {/* NIFTY 50 */}
-          <div className="rounded-xl p-4"
-            style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
-            <p className="text-[10px] uppercase tracking-wider font-semibold mb-1" style={{ color: 'var(--text-muted)' }}>
-              NIFTY 50 {mktStatus === 'open' ? '🟢' : '🔴'}
-            </p>
-            <p className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>
-              {nifty.value > 0 ? nifty.value.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '—'}
-            </p>
-            {nifty.value > 0 && (
-              <p className="text-sm font-medium" style={{
-                color: nifty.change >= 0 ? 'var(--accent-green)' : 'var(--accent-red)',
-              }}>
-                {nifty.change >= 0 ? '+' : ''}{nifty.change.toFixed(2)} ({nifty.changePercent >= 0 ? '+' : ''}{nifty.changePercent.toFixed(2)}%)
-              </p>
-            )}
-          </div>
-
-          {/* SENSEX */}
-          <div className="rounded-xl p-4"
-            style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
-            <p className="text-[10px] uppercase tracking-wider font-semibold mb-1" style={{ color: 'var(--text-muted)' }}>
-              SENSEX {mktStatus === 'open' ? '🟢' : '🔴'}
-            </p>
-            <p className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>
-              {sensex.value > 0 ? sensex.value.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '—'}
-            </p>
-            {sensex.value > 0 && (
-              <p className="text-sm font-medium" style={{
-                color: sensex.change >= 0 ? 'var(--accent-green)' : 'var(--accent-red)',
-              }}>
-                {sensex.change >= 0 ? '+' : ''}{sensex.change.toFixed(2)} ({sensex.changePercent >= 0 ? '+' : ''}{sensex.changePercent.toFixed(2)}%)
-              </p>
-            )}
-          </div>
-
-          {/* Geo Alerts + Article Count */}
-          <div className="rounded-xl p-4"
-            style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
-            <p className="text-[10px] uppercase tracking-wider font-semibold mb-1" style={{ color: 'var(--text-muted)' }}>
-              News Sentiment
-            </p>
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full" style={{ background: 'var(--accent-green)' }} />
-                <span className="text-sm font-bold" style={{ color: 'var(--accent-green)' }}>
-                  {news.filter(n => n.sentimentLabel === 'positive').length}
-                </span>
-                <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>Bull</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full" style={{ background: 'var(--accent-yellow)' }} />
-                <span className="text-sm font-bold" style={{ color: 'var(--accent-yellow)' }}>
-                  {news.filter(n => n.sentimentLabel === 'neutral').length}
-                </span>
-                <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>Neut</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full" style={{ background: 'var(--accent-red)' }} />
-                <span className="text-sm font-bold" style={{ color: 'var(--accent-red)' }}>
-                  {news.filter(n => n.sentimentLabel === 'negative').length}
-                </span>
-                <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>Bear</span>
-              </div>
-            </div>
-            <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>
-              {news.length} articles analyzed
-            </p>
+          <div
+            className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium shrink-0"
+            style={{
+              background: 'var(--bg-card)',
+              border: '1px solid var(--border-subtle)',
+              color: 'var(--text-muted)',
+            }}
+          >
+            <Calendar size={13} />
+            {lastUpdated
+              ? new Date(lastUpdated).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
+              : today
+            }
           </div>
         </div>
       </div>
 
-      {/* Main Content Grid */}
+      {/* ─── Market Summary Strip ─── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4 mb-6 animate-fade-in-up delay-100">
+        {/* Overall Sentiment */}
+        <div className="glass-card-static rounded-2xl p-4 sm:p-5 flex items-center gap-4">
+          <SentimentGauge score={overallSentiment} size="sm" showLabel={false} />
+          <div>
+            <p className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: 'var(--text-muted)' }}>
+              Overall Sentiment
+            </p>
+            <p className="text-lg font-bold" style={{ color: getSentimentColor(overallSentiment) }}>
+              {getSentimentLabel(overallSentiment)}
+            </p>
+          </div>
+        </div>
+
+        {/* NIFTY 50 */}
+        <div className="glass-card-static rounded-2xl p-4 sm:p-5">
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: 'var(--text-muted)' }}>
+              NIFTY 50
+            </p>
+            <span className="text-xs">{mktStatus === 'open' ? '🟢' : '🔴'}</span>
+          </div>
+          <p className="text-xl font-bold text-white">
+            {nifty.value > 0 ? nifty.value.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '—'}
+          </p>
+          {nifty.value > 0 && (
+            <p className="text-sm font-medium" style={{
+              color: nifty.change >= 0 ? 'var(--accent-green)' : 'var(--accent-red)',
+            }}>
+              {nifty.change >= 0 ? '+' : ''}{nifty.change.toFixed(2)} ({nifty.changePercent >= 0 ? '+' : ''}{nifty.changePercent.toFixed(2)}%)
+            </p>
+          )}
+        </div>
+
+        {/* SENSEX */}
+        <div className="glass-card-static rounded-2xl p-4 sm:p-5">
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: 'var(--text-muted)' }}>
+              SENSEX
+            </p>
+            <span className="text-xs">{mktStatus === 'open' ? '🟢' : '🔴'}</span>
+          </div>
+          <p className="text-xl font-bold text-white">
+            {sensex.value > 0 ? sensex.value.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '—'}
+          </p>
+          {sensex.value > 0 && (
+            <p className="text-sm font-medium" style={{
+              color: sensex.change >= 0 ? 'var(--accent-green)' : 'var(--accent-red)',
+            }}>
+              {sensex.change >= 0 ? '+' : ''}{sensex.change.toFixed(2)} ({sensex.changePercent >= 0 ? '+' : ''}{sensex.changePercent.toFixed(2)}%)
+            </p>
+          )}
+        </div>
+
+        {/* News Sentiment */}
+        <div className="glass-card-static rounded-2xl p-4 sm:p-5">
+          <p className="text-[10px] uppercase tracking-wider font-semibold mb-2" style={{ color: 'var(--text-muted)' }}>
+            News Sentiment
+          </p>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full" style={{ background: 'var(--accent-green)' }} />
+              <span className="text-sm font-bold" style={{ color: 'var(--accent-green)' }}>
+                {news.filter(n => n.sentimentLabel === 'positive').length}
+              </span>
+              <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>Bull</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full" style={{ background: 'var(--accent-yellow)' }} />
+              <span className="text-sm font-bold" style={{ color: 'var(--accent-yellow)' }}>
+                {news.filter(n => n.sentimentLabel === 'neutral').length}
+              </span>
+              <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>Neut</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full" style={{ background: 'var(--accent-red)' }} />
+              <span className="text-sm font-bold" style={{ color: 'var(--accent-red)' }}>
+                {news.filter(n => n.sentimentLabel === 'negative').length}
+              </span>
+              <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>Bear</span>
+            </div>
+          </div>
+          <p className="text-[10px] mt-1.5" style={{ color: 'var(--text-muted)' }}>
+            {news.length} articles analyzed
+          </p>
+        </div>
+      </div>
+
+      {/* ─── Main Content Grid ─── */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        {/* Sector Grid - 2 columns */}
+        {/* Left Column — Sectors + Rankings + Geo */}
         <div className="xl:col-span-2">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
+          {/* Sector Sentiment */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-2 animate-fade-in-up delay-200">
+            <h2 className="text-lg font-bold text-white">
               Sector Sentiment {isLive ? '(Live)' : ''}
             </h2>
-            <div className="flex items-center gap-4 text-xs" style={{ color: 'var(--text-muted)' }}>
-              <span className="flex items-center gap-1">
+            <div className="flex items-center gap-3 sm:gap-4 text-xs flex-wrap" style={{ color: 'var(--text-muted)' }}>
+              <span className="flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full" style={{ background: 'var(--accent-green)' }} />
                 Bullish (60+)
               </span>
-              <span className="flex items-center gap-1">
+              <span className="flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full" style={{ background: 'var(--accent-yellow)' }} />
                 Neutral (40-60)
               </span>
-              <span className="flex items-center gap-1">
+              <span className="flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full" style={{ background: 'var(--accent-red)' }} />
                 Bearish (&lt;40)
               </span>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mb-6">
             {sectors.map((sector, i) => (
               <SectorCard key={sector.id} sector={sector} index={i} />
             ))}
           </div>
 
-          {/* Biggest Sentiment Movers */}
-          <div className="mb-6">
-            <h2 className="text-lg font-bold mb-4" style={{ color: 'var(--text-primary)' }}>
+          {/* Sector Rankings Table */}
+          <div className="mb-6 animate-fade-in-up delay-300">
+            <h2 className="text-lg font-bold mb-4 text-white">
               🔥 Sector Sentiment Rankings
             </h2>
-            <div className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
-              <table className="w-full">
-                <thead>
-                  <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
-                    <th className="text-left px-4 py-3 text-[10px] uppercase tracking-wider font-semibold" style={{ color: 'var(--text-muted)' }}>Sector</th>
-                    <th className="text-center px-4 py-3 text-[10px] uppercase tracking-wider font-semibold" style={{ color: 'var(--text-muted)' }}>Score</th>
-                    <th className="text-center px-4 py-3 text-[10px] uppercase tracking-wider font-semibold" style={{ color: 'var(--text-muted)' }}>Articles</th>
-                    <th className="text-left px-4 py-3 text-[10px] uppercase tracking-wider font-semibold" style={{ color: 'var(--text-muted)' }}>Key Driver</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[...sectors].sort((a, b) => b.sentiment - a.sentiment).map((sector) => (
-                    <tr key={sector.id} className="transition-colors"
-                      style={{ borderBottom: '1px solid var(--border-color)' }}
-                      onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-card-hover)'}
-                      onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <span>{sector.icon}</span>
-                          <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{sector.name}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <span className="text-sm font-bold" style={{ color: getSentimentColor(sector.sentiment) }}>
-                          {sector.sentiment}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                          {(sector as any).articleCount || '—'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                          {sector.keyDriver.substring(0, 80)}{sector.keyDriver.length > 80 ? '...' : ''}
-                        </span>
-                      </td>
+            <div className="glass-card-static rounded-2xl overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                      <th className="text-left px-4 sm:px-5 py-3.5 text-[10px] uppercase tracking-wider font-semibold" style={{ color: 'var(--text-muted)' }}>Sector</th>
+                      <th className="text-center px-4 py-3.5 text-[10px] uppercase tracking-wider font-semibold" style={{ color: 'var(--text-muted)' }}>Score</th>
+                      <th className="text-center px-4 py-3.5 text-[10px] uppercase tracking-wider font-semibold hidden sm:table-cell" style={{ color: 'var(--text-muted)' }}>Articles</th>
+                      <th className="text-left px-4 py-3.5 text-[10px] uppercase tracking-wider font-semibold hidden md:table-cell" style={{ color: 'var(--text-muted)' }}>Key Driver</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {[...sectors].sort((a, b) => b.sentiment - a.sentiment).map((sector) => (
+                      <tr key={sector.id} className="transition-colors duration-150"
+                        style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                        <td className="px-4 sm:px-5 py-3.5">
+                          <div className="flex items-center gap-2.5">
+                            <span className="text-base">{sector.icon}</span>
+                            <span className="text-sm font-medium text-white">{sector.name}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3.5 text-center">
+                          <span className="text-sm font-bold" style={{ color: getSentimentColor(sector.sentiment) }}>
+                            {sector.sentiment}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3.5 text-center hidden sm:table-cell">
+                          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                            {(sector as any).articleCount || '—'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3.5 hidden md:table-cell">
+                          <span className="text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+                            {sector.keyDriver.substring(0, 80)}{sector.keyDriver.length > 80 ? '...' : ''}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
 
           {/* Geopolitical Alerts */}
-          <div>
-            <h2 className="text-lg font-bold mb-4" style={{ color: 'var(--text-primary)' }}>
+          <div className="animate-fade-in-up delay-400">
+            <h2 className="text-lg font-bold mb-4 text-white">
               🌍 Global Events Impacting India
             </h2>
             <div className="space-y-3">
@@ -299,11 +344,10 @@ export default function Dashboard() {
                 const cfg = severityConfig[event.severity];
 
                 return (
-                  <div key={event.id} className="card-hover rounded-xl p-4"
-                    style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
-                    <div className="flex items-start justify-between mb-2">
+                  <div key={event.id} className="glass-card-static rounded-2xl p-4 sm:p-5">
+                    <div className="flex items-start justify-between mb-2 gap-2 flex-wrap">
                       <div className="flex items-center gap-2">
-                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold"
+                        <span className="text-[10px] px-2.5 py-1 rounded-full font-bold"
                           style={{ background: cfg.bg, color: cfg.color }}>
                           {cfg.label}
                         </span>
@@ -312,15 +356,13 @@ export default function Dashboard() {
                         </span>
                       </div>
                     </div>
-                    <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>
-                      {event.title}
-                    </h3>
-                    <p className="text-xs mb-2" style={{ color: 'var(--text-secondary)' }}>
+                    <h3 className="text-sm font-semibold mb-1 text-white">{event.title}</h3>
+                    <p className="text-xs mb-2.5 leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
                       {event.description}
                     </p>
-                    <div className="flex gap-1 flex-wrap">
+                    <div className="flex gap-1.5 flex-wrap">
                       {event.impactedSectors.map((s) => (
-                        <span key={s} className="text-[10px] px-1.5 py-0.5 rounded capitalize"
+                        <span key={s} className="text-[10px] px-2 py-0.5 rounded-md capitalize"
                           style={{ background: 'var(--accent-purple-dim)', color: 'var(--accent-purple)' }}>
                           {s}
                         </span>
@@ -333,29 +375,28 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Right Column - News Feed */}
+        {/* Right Column — News Feed */}
         <div className="xl:col-span-1">
-          <div className="sticky top-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
+          <div className="xl:sticky xl:top-6">
+            <div className="flex items-center justify-between mb-4 animate-fade-in-up delay-200">
+              <h2 className="text-lg font-bold text-white">
                 📰 Live News Feed
               </h2>
               {isLive && (
-                <span className="text-[10px] px-2 py-0.5 rounded-full font-bold"
+                <span className="text-[10px] px-2.5 py-1 rounded-full font-bold"
                   style={{ background: 'var(--accent-green-dim)', color: 'var(--accent-green)' }}>
                   LIVE
                 </span>
               )}
             </div>
 
-            {/* News List */}
-            <div className="space-y-0 max-h-[calc(100vh-200px)] overflow-y-auto pr-1">
+            <div className="space-y-0 max-h-[calc(100vh-200px)] overflow-y-auto pr-1 no-scrollbar">
               {news.slice(0, 15).map((article) => (
                 <NewsCard key={article.id} article={article} />
               ))}
               {news.length === 0 && loading && (
-                <div className="text-center py-8">
-                  <div className="w-8 h-8 border-3 rounded-full animate-spin mx-auto mb-3"
+                <div className="text-center py-12">
+                  <div className="w-8 h-8 border-2 rounded-full animate-spin mx-auto mb-3"
                     style={{ borderColor: 'var(--border-color)', borderTopColor: 'var(--accent-blue)' }} />
                   <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Fetching live news & analyzing sentiment...</p>
                 </div>

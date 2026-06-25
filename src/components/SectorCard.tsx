@@ -53,24 +53,26 @@ export default function SectorCard({ sector, index }: SectorCardProps) {
   const history = DEMO_SENTIMENT_HISTORY[sector.id] || [50, 50, 50, 50, 50, 50, 50];
 
   const trendArrow = sector.trend === 'up' ? '↑' : sector.trend === 'down' ? '↓' : '→';
-  const trendRepeat = ''.padStart(sector.trendStrength, trendArrow.charAt(0));
 
   return (
     <Link href={`/sector/${sector.id}`}>
       <div
-        className="card-hover rounded-xl p-4 cursor-pointer"
+        className="card-hover"
         style={{
+          borderRadius: '12px',
+          padding: '16px',
+          cursor: 'pointer',
           background: 'var(--bg-card)',
           border: '1px solid var(--border-color)',
           animationDelay: `${index * 0.05}s`,
         }}
       >
         {/* Header */}
-        <div className="flex items-start justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <span className="text-xl">{sector.icon}</span>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '20px' }}>{sector.icon}</span>
             <div>
-              <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+              <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>
                 {sector.name}
               </h3>
             </div>
@@ -79,46 +81,69 @@ export default function SectorCard({ sector, index }: SectorCardProps) {
         </div>
 
         {/* Score Row */}
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <span className="text-2xl font-bold" style={{ color }}>{sector.sentiment}</span>
-            <span className="text-xs font-medium px-2 py-0.5 rounded-full"
-              style={{
-                background: sector.trend === 'up' ? 'var(--accent-green-dim)' :
-                  sector.trend === 'down' ? 'var(--accent-red-dim)' : 'var(--accent-yellow-dim)',
-                color: sector.trend === 'up' ? 'var(--accent-green)' :
-                  sector.trend === 'down' ? 'var(--accent-red)' : 'var(--accent-yellow)',
-              }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '24px', fontWeight: 700, color }}>{sector.sentiment}</span>
+            <span style={{
+              fontSize: '12px',
+              fontWeight: 500,
+              padding: '2px 8px',
+              borderRadius: '9999px',
+              background: sector.trend === 'up' ? 'var(--accent-green-dim)' :
+                sector.trend === 'down' ? 'var(--accent-red-dim)' : 'var(--accent-yellow-dim)',
+              color: sector.trend === 'up' ? 'var(--accent-green)' :
+                sector.trend === 'down' ? 'var(--accent-red)' : 'var(--accent-yellow)',
+            }}>
               {trendArrow.repeat(sector.trendStrength)}
             </span>
           </div>
-          <div className="text-right">
-            <span className="text-xs font-medium"
-              style={{
-                color: sector.change24h >= 0 ? 'var(--accent-green)' : 'var(--accent-red)',
-              }}>
+          <div style={{ textAlign: 'right' }}>
+            <span style={{
+              fontSize: '12px',
+              fontWeight: 500,
+              color: sector.change24h >= 0 ? 'var(--accent-green)' : 'var(--accent-red)',
+            }}>
               {sector.change24h >= 0 ? '+' : ''}{sector.change24h.toFixed(1)}%
             </span>
-            <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>24h change</p>
+            <p style={{ fontSize: '10px', color: 'var(--text-muted)' }}>24h change</p>
           </div>
         </div>
 
         {/* Key Driver */}
-        <p className="text-xs leading-relaxed mb-3 line-clamp-2" style={{ color: 'var(--text-secondary)' }}>
+        <p style={{
+          fontSize: '12px',
+          lineHeight: 1.5,
+          marginBottom: '12px',
+          color: 'var(--text-secondary)',
+          overflow: 'hidden',
+          display: '-webkit-box',
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: 'vertical',
+        }}>
           {sector.keyDriver.length > 90 ? sector.keyDriver.substring(0, 90) + '...' : sector.keyDriver}
         </p>
 
         {/* Stock chips */}
-        <div className="flex flex-wrap gap-1">
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
           {sector.stocks.slice(0, 4).map((stock) => (
-            <span key={stock} className="text-[10px] px-1.5 py-0.5 rounded"
-              style={{ background: 'var(--bg-primary)', color: 'var(--text-muted)' }}>
+            <span key={stock} style={{
+              fontSize: '10px',
+              padding: '2px 6px',
+              borderRadius: '4px',
+              background: 'var(--bg-primary)',
+              color: 'var(--text-muted)',
+            }}>
               {stock}
             </span>
           ))}
           {sector.stocks.length > 4 && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded"
-              style={{ background: 'var(--bg-primary)', color: 'var(--text-muted)' }}>
+            <span style={{
+              fontSize: '10px',
+              padding: '2px 6px',
+              borderRadius: '4px',
+              background: 'var(--bg-primary)',
+              color: 'var(--text-muted)',
+            }}>
               +{sector.stocks.length - 4}
             </span>
           )}

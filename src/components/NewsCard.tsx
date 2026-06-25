@@ -43,31 +43,46 @@ export default function NewsCard({ article, compact = false }: NewsCardProps) {
 
   if (compact) {
     return (
-      <div className="flex items-start gap-3 py-3 border-b" style={{ borderColor: 'var(--border-color)' }}>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium leading-snug mb-1 hover:underline cursor-pointer"
-            style={{ color: 'var(--text-primary)' }}>
+      <div style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: '12px',
+        padding: '12px 0',
+        borderBottom: '1px solid var(--border-color)',
+      }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={{
+            fontSize: '14px',
+            fontWeight: 500,
+            lineHeight: 1.4,
+            marginBottom: '4px',
+            color: 'var(--text-primary)',
+            cursor: 'pointer',
+          }}>
             {cleanText(article.title)}
           </p>
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{article.source}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{article.source}</span>
             {article.decayedWeight !== undefined ? (
-              <span className="text-[9px] px-1 rounded font-medium" 
-                style={{ 
-                  background: 'rgba(255,255,255,0.05)', 
-                  color: article.decayedWeight < (article.weight || 1.0) ? 'var(--accent-yellow)' : 'var(--text-muted)' 
-                }}
+              <span style={{
+                fontSize: '9px',
+                padding: '0 4px',
+                borderRadius: '4px',
+                fontWeight: 500,
+                background: 'rgba(255,255,255,0.05)',
+                color: article.decayedWeight < (article.weight || 1.0) ? 'var(--accent-yellow)' : 'var(--text-muted)',
+              }}
                 title={`Decayed weight due to age: ${article.decayedWeight}x (base ${article.weight}x)`}
               >
                 {article.decayedWeight}x
               </span>
             ) : article.weight && (
-              <span className="text-[9px] px-1 rounded" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)' }}>
+              <span style={{ fontSize: '9px', padding: '0 4px', borderRadius: '4px', background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)' }}>
                 {article.weight}x
               </span>
             )}
-            <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>·</span>
-            <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{timeAgo}</span>
+            <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>·</span>
+            <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{timeAgo}</span>
             <span className="sentiment-badge"
               style={{ background: sentimentBg, color: sentimentColor, fontSize: '10px', padding: '1px 6px' }}>
               {article.sentimentLabel === 'positive' ? '▲' : article.sentimentLabel === 'negative' ? '▼' : '—'}
@@ -79,42 +94,78 @@ export default function NewsCard({ article, compact = false }: NewsCardProps) {
   }
 
   return (
-    <div className="card-hover rounded-xl p-4 mb-3"
-      style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+    <div className="card-hover"
+      style={{
+        borderRadius: '12px',
+        padding: '16px',
+        marginBottom: '12px',
+        background: 'var(--bg-card)',
+        border: '1px solid var(--border-color)',
+      }}>
       {/* Header badges */}
-      <div className="flex items-center gap-2 mb-2 flex-wrap">
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
         <span className="sentiment-badge"
           style={{ background: sentimentBg, color: sentimentColor }}>
           {article.sentimentLabel === 'positive' ? '▲ Bullish' : article.sentimentLabel === 'negative' ? '▼ Bearish' : '— Neutral'}
         </span>
-        <span className="text-[10px] px-2 py-0.5 rounded-full font-medium"
-          style={{
-            background: 'var(--bg-primary)',
-            color: impactColor,
-            border: `1px solid ${impactColor}30`,
-          }}>
+        <span style={{
+          fontSize: '10px',
+          padding: '2px 8px',
+          borderRadius: '9999px',
+          fontWeight: 500,
+          background: 'var(--bg-primary)',
+          color: impactColor,
+          border: `1px solid ${impactColor}30`,
+        }}>
           {article.impactLevel.toUpperCase()} IMPACT
         </span>
-        <span className="text-xs ml-auto" style={{ color: 'var(--text-muted)' }}>
+        <span style={{ fontSize: '12px', marginLeft: 'auto', color: 'var(--text-muted)' }}>
           {categoryIcons[article.category]} {article.category}
         </span>
       </div>
 
       {/* Title */}
-      <h3 className="text-base font-semibold mb-2 leading-snug cursor-pointer hover:underline"
-        style={{ color: 'var(--text-primary)' }}>
+      <h3 style={{
+        fontSize: '16px',
+        fontWeight: 600,
+        marginBottom: '8px',
+        lineHeight: 1.4,
+        cursor: 'pointer',
+        color: 'var(--text-primary)',
+      }}>
         {cleanText(article.title)}
       </h3>
 
       {/* Summary */}
-      <p className="text-xs leading-relaxed mb-3" style={{ color: 'var(--text-secondary)' }}>
+      <p style={{
+        fontSize: '12px',
+        lineHeight: 1.6,
+        marginBottom: '12px',
+        color: 'var(--text-secondary)',
+      }}>
         {cleanText(article.summary).substring(0, 200)}
       </p>
 
       {/* Aspect Breakdowns */}
       {article.aspects && article.aspects.length > 0 && (
-        <div className="flex items-center gap-1.5 flex-wrap mb-3 border-t border-b py-2" style={{ borderColor: 'rgba(255,255,255,0.03)' }}>
-          <span className="text-[9px] uppercase tracking-wider font-semibold mr-1" style={{ color: 'var(--text-muted)' }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          flexWrap: 'wrap',
+          marginBottom: '12px',
+          borderTop: '1px solid rgba(255,255,255,0.03)',
+          borderBottom: '1px solid rgba(255,255,255,0.03)',
+          padding: '8px 0',
+        }}>
+          <span style={{
+            fontSize: '9px',
+            textTransform: 'uppercase',
+            letterSpacing: '0.05em',
+            fontWeight: 600,
+            marginRight: '4px',
+            color: 'var(--text-muted)',
+          }}>
             Aspects:
           </span>
           {article.aspects.map((asp, idx) => {
@@ -123,8 +174,14 @@ export default function NewsCard({ article, compact = false }: NewsCardProps) {
             const aspectBg = asp.sentiment > 0.1 ? 'var(--accent-green-dim)' :
               asp.sentiment < -0.1 ? 'var(--accent-red-dim)' : 'var(--accent-yellow-dim)';
             return (
-              <span key={idx} className="text-[10px] px-2 py-0.5 rounded font-medium"
-                style={{ background: aspectBg, color: aspectColor }}>
+              <span key={idx} style={{
+                fontSize: '10px',
+                padding: '2px 8px',
+                borderRadius: '4px',
+                fontWeight: 500,
+                background: aspectBg,
+                color: aspectColor,
+              }}>
                 {asp.entity} ({asp.aspect}): {asp.sentiment > 0 ? '+' : ''}{asp.sentiment.toFixed(1)}
               </span>
             );
@@ -133,49 +190,69 @@ export default function NewsCard({ article, compact = false }: NewsCardProps) {
       )}
 
       {/* Footer */}
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-medium" style={{ color: 'var(--accent-blue)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--accent-blue)' }}>
             {article.source}
           </span>
           {article.decayedWeight !== undefined ? (
-            <span className="text-[9px] px-1.5 py-0.2 rounded font-bold flex items-center gap-1"
-              style={{
-                background: article.decayedWeight >= 1.4 ? 'var(--accent-purple-dim)' : 'rgba(255,255,255,0.05)',
-                color: article.decayedWeight >= 1.4 ? 'var(--accent-purple)' : 'var(--text-secondary)',
-                border: article.decayedWeight >= 1.4 ? '1px solid var(--accent-purple-dim)' : '1px solid rgba(255,255,255,0.03)'
-              }}
+            <span style={{
+              fontSize: '9px',
+              padding: '1px 6px',
+              borderRadius: '4px',
+              fontWeight: 700,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              background: article.decayedWeight >= 1.4 ? 'var(--accent-purple-dim)' : 'rgba(255,255,255,0.05)',
+              color: article.decayedWeight >= 1.4 ? 'var(--accent-purple)' : 'var(--text-secondary)',
+              border: article.decayedWeight >= 1.4 ? '1px solid var(--accent-purple-dim)' : '1px solid rgba(255,255,255,0.03)',
+            }}
               title={`Base weight: ${article.weight}x. Reduced to ${article.decayedWeight}x due to age decay.`}
             >
               <span>{article.decayedWeight}x Authority</span>
               {article.decayedWeight < (article.weight || 1.0) && (
-                <span className="text-[8px] opacity-75">⏳ decayed</span>
+                <span style={{ fontSize: '8px', opacity: 0.75 }}>⏳ decayed</span>
               )}
             </span>
           ) : article.weight && (
-            <span className="text-[9px] px-1.5 py-0.2 rounded font-bold"
-              style={{
-                background: article.weight >= 1.4 ? 'var(--accent-purple-dim)' : 'rgba(255,255,255,0.05)',
-                color: article.weight >= 1.4 ? 'var(--accent-purple)' : 'var(--text-secondary)',
-                border: article.weight >= 1.4 ? '1px solid var(--accent-purple-dim)' : '1px solid rgba(255,255,255,0.03)'
-              }}>
+            <span style={{
+              fontSize: '9px',
+              padding: '1px 6px',
+              borderRadius: '4px',
+              fontWeight: 700,
+              background: article.weight >= 1.4 ? 'var(--accent-purple-dim)' : 'rgba(255,255,255,0.05)',
+              color: article.weight >= 1.4 ? 'var(--accent-purple)' : 'var(--text-secondary)',
+              border: article.weight >= 1.4 ? '1px solid var(--accent-purple-dim)' : '1px solid rgba(255,255,255,0.03)',
+            }}>
               {article.weight}x Weight
             </span>
           )}
-          <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+          <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
             {timeAgo}
           </span>
         </div>
-        <div className="flex gap-1 flex-wrap">
+        <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
           {article.relatedStocks.slice(0, 3).map((stock) => (
-            <span key={stock} className="text-[10px] px-1.5 py-0.5 rounded font-medium"
-              style={{ background: 'var(--accent-blue-dim)', color: 'var(--accent-blue)' }}>
+            <span key={stock} style={{
+              fontSize: '10px',
+              padding: '2px 6px',
+              borderRadius: '4px',
+              fontWeight: 500,
+              background: 'var(--accent-blue-dim)',
+              color: 'var(--accent-blue)',
+            }}>
               {stock}
             </span>
           ))}
           {article.relatedSectors.map((sector) => (
-            <span key={sector} className="text-[10px] px-1.5 py-0.5 rounded"
-              style={{ background: 'var(--accent-purple-dim)', color: 'var(--accent-purple)' }}>
+            <span key={sector} style={{
+              fontSize: '10px',
+              padding: '2px 6px',
+              borderRadius: '4px',
+              background: 'var(--accent-purple-dim)',
+              color: 'var(--accent-purple)',
+            }}>
               {sector}
             </span>
           ))}
