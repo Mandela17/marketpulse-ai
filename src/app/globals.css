@@ -758,10 +758,19 @@ tr:hover {
 .hover\:bg-opacity-25:hover { background-color: rgba(255, 255, 255, 0.25); }
 .group:hover .group-hover\:scale-110 { transform: scale(1.1); }
 
+/* ─── Additional Size Utilities ────────────────────────── */
+.w-5 { width: 20px; }
+.h-5 { height: 20px; }
+.w-14 { width: 56px; }
+.h-14 { height: 56px; }
+.font-extrabold { font-weight: 800; }
+.leading-tight { line-height: 1.25; }
+
 /* ─── Responsive: sm (≥640px) ──────────────────────────── */
 @media (min-width: 640px) {
   .sm\:p-5 { padding: 20px; }
   .sm\:p-6 { padding: 24px; }
+  .sm\:p-8 { padding: 32px; }
   .sm\:px-6 { padding-left: 24px; padding-right: 24px; }
   .sm\:flex-row { flex-direction: row; }
   .sm\:items-end { align-items: flex-end; }
@@ -784,6 +793,8 @@ tr:hover {
 /* ─── Responsive: lg (≥1024px) ─────────────────────────── */
 @media (min-width: 1024px) {
   .lg\:hidden { display: none; }
+  .lg\:flex { display: flex; }
+  .lg\:block { display: block; }
   .lg\:p-8 { padding: 32px; }
   .lg\:px-8 { padding-left: 32px; padding-right: 32px; }
   .lg\:translate-x-0 { transform: translateX(0); }
@@ -794,6 +805,7 @@ tr:hover {
 
 /* ─── Responsive: xl (≥1280px) ─────────────────────────── */
 @media (min-width: 1280px) {
+  .xl\:text-5xl { font-size: 48px; line-height: 48px; }
   .xl\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .xl\:grid-cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .xl\:col-span-1 { grid-column: span 1 / span 1; }
