@@ -18,6 +18,13 @@ export default function BrokerPage() {
 
   useEffect(() => {
     const currentConfig = getBrokerConfig();
+    // Auto-fill Upstox Client ID from env var if available
+    const envClientId = process.env.NEXT_PUBLIC_UPSTOX_CLIENT_ID;
+    if (envClientId && (currentConfig.provider === 'upstox' || currentConfig.provider === 'mock')) {
+      currentConfig.apiKey = envClientId;
+      currentConfig.apiSecret = '••••••••••'; // Secret is server-side only
+      currentConfig.provider = currentConfig.provider === 'mock' && envClientId ? 'upstox' : currentConfig.provider;
+    }
     setConfig(currentConfig);
     if (typeof window !== 'undefined') {
       setRedirectUri(`${window.location.origin}/broker`);
@@ -66,7 +73,7 @@ export default function BrokerPage() {
       }
 
       // ─── Upstox callback (?code=) ───
-      if (upstoxCode && currentConfig.provider === 'upstox' && currentConfig.apiKey && currentConfig.apiSecret) {
+      if (upstoxCode && currentConfig.provider === 'upstox') {
         window.history.replaceState({}, document.title, window.location.pathname);
         setSaveStatus('saving');
 

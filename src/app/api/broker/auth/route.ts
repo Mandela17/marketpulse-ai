@@ -9,8 +9,13 @@ export async function POST(request: Request) {
 
     // ─── UPSTOX OAuth2 Token Exchange ───────────────────────────
     if (provider === 'upstox') {
-      if (!apiKey || !apiSecret || !code || !redirectUri) {
-        return NextResponse.json({ error: 'Missing Upstox OAuth parameters (apiKey, apiSecret, code, redirectUri)' }, { status: 400 });
+      // Prefer server-side env vars (secret never leaves the server)
+      const clientId = process.env.NEXT_PUBLIC_UPSTOX_CLIENT_ID || apiKey;
+      const clientSecret = process.env.UPSTOX_CLIENT_SECRET || apiSecret;
+      const callbackUri = redirectUri || `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/broker`;
+
+      if (!clientId || !clientSecret || !code) {
+        return NextResponse.json({ error: 'Missing Upstox OAuth parameters (clientId, clientSecret, code)' }, { status: 400 });
       }
 
       const response = await fetch('https://api.upstox.com/v2/login/authorization/token', {
@@ -21,9 +26,9 @@ export async function POST(request: Request) {
         },
         body: new URLSearchParams({
           code: code,
-          client_id: apiKey,
-          client_secret: apiSecret,
-          redirect_uri: redirectUri,
+          client_id: clientId,
+          client_secret: clientSecret,
+          redirect_uri: callbackUri,
           grant_type: 'authorization_code',
         }),
       });

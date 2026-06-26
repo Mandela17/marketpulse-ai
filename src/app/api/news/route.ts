@@ -7,9 +7,13 @@ import { getServiceClient } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 
-// Cache results for 10 minutes to avoid excessive API calls
+// Stale-While-Revalidate Cache Strategy
+// Serve cached data instantly (even if stale), refresh in background if older than FRESH_DURATION.
+// Data older than MAX_STALE_DURATION is discarded entirely.
 let cachedData: { articles: any[]; sectorSentiments: any; timestamp: number } | null = null;
-const CACHE_DURATION = 10 * 60 * 1000; // 10 minutes
+let isRevalidating = false; // Prevent concurrent background refreshes
+const FRESH_DURATION = 10 * 60 * 1000;     // 10 minutes — data considered "fresh"
+const MAX_STALE_DURATION = 30 * 60 * 1000; // 30 minutes — serve stale up to this limit
 
 // Save analyzed articles to Supabase
 async function saveArticlesToDB(articles: any[]) {
@@ -110,10 +114,68 @@ async function saveStockSnapshots(articles: any[]) {
   }
 }
 
+// Core data refresh logic — extracted so it can run in the foreground or background
+async function refreshNewsCache(): Promise<{ articles: any[]; sectorSentiments: Record<string, any> }> {
+  // 1. Fetch raw news from RSS feeds
+  console.log('[News API] Fetching news from RSS feeds...');
+  const rawArticles = await fetchAllNews();
+  console.log(`[News API] Fetched ${rawArticles.length} articles`);
+
+  // 2. Analyze sentiment using Gemini
+  console.log('[News API] Analyzing sentiment with Gemini...');
+  const analyzedArticles = await analyzeArticlesBatch(rawArticles);
+  console.log(`[News API] Analyzed ${analyzedArticles.length} articles`);
+
+  // 3. Compute sector-level sentiments
+  const sectorSentiments = computeSectorSentiments(analyzedArticles);
+
+  // Build full sector data with defaults for sectors with no news
+  const fullSectorSentiments: Record<string, any> = {};
+  for (const [id, sector] of Object.entries(SECTORS)) {
+    const computed = sectorSentiments[id];
+    fullSectorSentiments[id] = {
+      id,
+      name: sector.name,
+      icon: sector.icon || '📊',
+      sentiment: computed?.score ?? 50,
+      trend: computed ? (computed.score > 55 ? 'up' : computed.score < 45 ? 'down' : 'flat') : 'flat',
+      trendStrength: computed ? (Math.abs(computed.score - 50) > 25 ? 3 : Math.abs(computed.score - 50) > 15 ? 2 : 1) : 1,
+      keyDriver: computed?.keyDriver || sector.globalExposure,
+      change24h: computed ? parseFloat(((computed.score - 50) * 0.3).toFixed(1)) : 0,
+      stocks: sector.stocks.slice(0, 5),
+      globalExposure: sector.globalExposure,
+      articleCount: computed?.articleCount || 0,
+    };
+  }
+
+  // Update cache
+  cachedData = {
+    articles: analyzedArticles,
+    sectorSentiments: fullSectorSentiments,
+    timestamp: Date.now(),
+  };
+
+  // 4. Persist to Supabase (fire-and-forget — don't block response)
+  Promise.all([
+    saveArticlesToDB(analyzedArticles),
+    saveSectorSnapshots(fullSectorSentiments),
+    saveStockSnapshots(analyzedArticles),
+  ]).then(() => {
+    console.log('[News API] ✅ Data persisted to Supabase');
+  }).catch((err) => {
+    console.error('[News API] ⚠️ Supabase persistence error:', err);
+  });
+
+  return { articles: analyzedArticles, sectorSentiments: fullSectorSentiments };
+}
+
 export async function GET() {
   try {
-    // Return cached data if still fresh
-    if (cachedData && Date.now() - cachedData.timestamp < CACHE_DURATION) {
+    const now = Date.now();
+    const cacheAge = cachedData ? now - cachedData.timestamp : Infinity;
+
+    // CASE 1: Fresh cache — return immediately
+    if (cachedData && cacheAge < FRESH_DURATION) {
       return NextResponse.json({
         articles: cachedData.articles,
         sectorSentiments: cachedData.sectorSentiments,
@@ -122,67 +184,53 @@ export async function GET() {
       });
     }
 
-    // 1. Fetch raw news from RSS feeds
-    console.log('[News API] Fetching news from RSS feeds...');
-    const rawArticles = await fetchAllNews();
-    console.log(`[News API] Fetched ${rawArticles.length} articles`);
+    // CASE 2: Stale cache (10-30 min old) — return stale data instantly, refresh in background
+    if (cachedData && cacheAge < MAX_STALE_DURATION) {
+      // Kick off background refresh (only if not already running)
+      if (!isRevalidating) {
+        isRevalidating = true;
+        refreshNewsCache()
+          .catch(err => console.error('[News API] Background revalidation failed:', err))
+          .finally(() => { isRevalidating = false; });
+      }
 
-    // 2. Analyze sentiment using Gemini
-    console.log('[News API] Analyzing sentiment with Gemini...');
-    const analyzedArticles = await analyzeArticlesBatch(rawArticles);
-    console.log(`[News API] Analyzed ${analyzedArticles.length} articles`);
-
-    // 3. Compute sector-level sentiments
-    const sectorSentiments = computeSectorSentiments(analyzedArticles);
-
-    // Build full sector data with defaults for sectors with no news
-    const fullSectorSentiments: Record<string, any> = {};
-    for (const [id, sector] of Object.entries(SECTORS)) {
-      const computed = sectorSentiments[id];
-      fullSectorSentiments[id] = {
-        id,
-        name: sector.name,
-        icon: sector.icon || '📊',
-        sentiment: computed?.score ?? 50,
-        trend: computed ? (computed.score > 55 ? 'up' : computed.score < 45 ? 'down' : 'flat') : 'flat',
-        trendStrength: computed ? (Math.abs(computed.score - 50) > 25 ? 3 : Math.abs(computed.score - 50) > 15 ? 2 : 1) : 1,
-        keyDriver: computed?.keyDriver || sector.globalExposure,
-        change24h: computed ? parseFloat(((computed.score - 50) * 0.3).toFixed(1)) : 0,
-        stocks: sector.stocks.slice(0, 5),
-        globalExposure: sector.globalExposure,
-        articleCount: computed?.articleCount || 0,
-      };
+      return NextResponse.json({
+        articles: cachedData.articles,
+        sectorSentiments: cachedData.sectorSentiments,
+        cached: true,
+        stale: true,
+        lastUpdated: new Date(cachedData.timestamp).toISOString(),
+      });
     }
 
-    // Cache the results
-    cachedData = {
-      articles: analyzedArticles,
-      sectorSentiments: fullSectorSentiments,
-      timestamp: Date.now(),
-    };
-
-    // 4. Persist to Supabase (fire-and-forget — don't block response)
-    Promise.all([
-      saveArticlesToDB(analyzedArticles),
-      saveSectorSnapshots(fullSectorSentiments),
-      saveStockSnapshots(analyzedArticles),
-    ]).then(() => {
-      console.log('[News API] ✅ Data persisted to Supabase');
-    }).catch((err) => {
-      console.error('[News API] ⚠️ Supabase persistence error:', err);
-    });
+    // CASE 3: No cache or expired (>30 min) — must wait for fresh data
+    const { articles, sectorSentiments } = await refreshNewsCache();
 
     return NextResponse.json({
-      articles: analyzedArticles,
-      sectorSentiments: fullSectorSentiments,
+      articles,
+      sectorSentiments,
       cached: false,
       lastUpdated: new Date().toISOString(),
     });
   } catch (error: any) {
     console.error('[News API] Error:', error);
+
+    // If we have any cached data at all, return it as fallback
+    if (cachedData) {
+      return NextResponse.json({
+        articles: cachedData.articles,
+        sectorSentiments: cachedData.sectorSentiments,
+        cached: true,
+        stale: true,
+        fallback: true,
+        lastUpdated: new Date(cachedData.timestamp).toISOString(),
+      });
+    }
+
     return NextResponse.json(
       { error: 'Failed to fetch and analyze news', details: error.message },
       { status: 500 }
     );
   }
 }
+

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 import { createChart, ColorType, IChartApi, CandlestickSeries, HistogramSeries, AreaSeries, createSeriesMarkers } from 'lightweight-charts';
 
 interface ChartPricePoint {
@@ -31,8 +31,14 @@ export default function TradingViewChart({ priceData, sentimentHistory, symbol }
   const priceChartApi = useRef<IChartApi | null>(null);
   const sentimentChartApi = useRef<IChartApi | null>(null);
 
+  // Store series references for incremental data updates
+  const candleSeriesRef = useRef<any>(null);
+  const volumeSeriesRef = useRef<any>(null);
+  const sentimentSeriesRef = useRef<any>(null);
+
+  // ── CHART CREATION (runs once on mount) ──
   useEffect(() => {
-    if (!priceChartRef.current || !sentimentChartRef.current || priceData.length === 0) return;
+    if (!priceChartRef.current || !sentimentChartRef.current) return;
 
     const chartWidth = priceChartRef.current.clientWidth || 600;
 
@@ -41,8 +47,8 @@ export default function TradingViewChart({ priceData, sentimentHistory, symbol }
       width: chartWidth,
       height: 260,
       layout: {
-        background: { type: ColorType.Solid, color: '#0f172a' }, // Slate-900 matching theme
-        textColor: '#94a3b8', // Slate-400
+        background: { type: ColorType.Solid, color: '#0f172a' },
+        textColor: '#94a3b8',
       },
       grid: {
         vertLines: { color: 'rgba(51, 65, 85, 0.2)' },
@@ -50,7 +56,7 @@ export default function TradingViewChart({ priceData, sentimentHistory, symbol }
       },
       timeScale: {
         borderColor: 'rgba(51, 65, 85, 0.4)',
-        visible: false, // Hide timescale on top chart to avoid duplication
+        visible: false,
       },
       rightPriceScale: {
         borderColor: 'rgba(51, 65, 85, 0.4)',
@@ -58,48 +64,25 @@ export default function TradingViewChart({ priceData, sentimentHistory, symbol }
     });
 
     const candleSeries = priceChart.addSeries(CandlestickSeries, {
-      upColor: '#10b981', // emerald-500
-      downColor: '#ef4444', // red-500
+      upColor: '#10b981',
+      downColor: '#ef4444',
       borderUpColor: '#10b981',
       borderDownColor: '#ef4444',
       wickUpColor: '#10b981',
       wickDownColor: '#ef4444',
     });
 
-    // Formatting price data
-    const formattedPriceData = priceData.map(d => ({
-      time: d.date,
-      open: d.open,
-      high: d.high,
-      low: d.low,
-      close: d.close,
-    }));
-    candleSeries.setData(formattedPriceData);
-
-    // ─── 2. Overlay Volume Series on Price Chart ───
     const volumeSeries = priceChart.addSeries(HistogramSeries, {
-      color: '#3b82f6', // blue-500
-      priceFormat: {
-        type: 'volume',
-      },
-      priceScaleId: '', // set overlay scale
+      color: '#3b82f6',
+      priceFormat: { type: 'volume' },
+      priceScaleId: '',
     });
 
     volumeSeries.priceScale().applyOptions({
-      scaleMargins: {
-        top: 0.7, // Place volume at the bottom 30% of the price chart
-        bottom: 0,
-      },
+      scaleMargins: { top: 0.7, bottom: 0 },
     });
 
-    const formattedVolumeData = priceData.map(d => ({
-      time: d.date,
-      value: d.volume,
-      color: d.close >= d.open ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)',
-    }));
-    volumeSeries.setData(formattedVolumeData);
-
-    // ─── 3. Sentiment Area Chart ───
+    // ─── 2. Sentiment Area Chart ───
     const sentimentChart = createChart(sentimentChartRef.current, {
       width: chartWidth,
       height: 120,
@@ -122,65 +105,16 @@ export default function TradingViewChart({ priceData, sentimentHistory, symbol }
     });
 
     const sentimentSeries = sentimentChart.addSeries(AreaSeries, {
-      topColor: 'rgba(139, 92, 246, 0.4)', // purple-500
+      topColor: 'rgba(139, 92, 246, 0.4)',
       bottomColor: 'rgba(139, 92, 246, 0.05)',
       lineColor: '#8b5cf6',
       lineWidth: 2,
       autoscaleInfoProvider: () => ({
-        priceRange: {
-          minValue: 0,
-          maxValue: 100,
-        },
+        priceRange: { minValue: 0, maxValue: 100 },
       }),
     });
 
-    // Match sentiment history by date
-    const sentimentMap = new Map<string, number>();
-    for (const item of sentimentHistory) {
-      sentimentMap.set(item.date, item.sentiment);
-    }
-
-    const formattedSentimentData = priceData.map(d => {
-      // If we don't have matching historical DB sentiment, default to neutral 50
-      const score = sentimentMap.get(d.date) ?? 50;
-      return {
-        time: d.date,
-        value: score,
-      };
-    });
-    sentimentSeries.setData(formattedSentimentData);
-
-    // ─── 4. Sentiment Markers overlay on Price Candlesticks ───
-    const markers: any[] = [];
-    for (const candle of priceData) {
-      const score = sentimentMap.get(candle.date);
-      if (score !== undefined) {
-        if (score >= 70) {
-          markers.push({
-            time: candle.date,
-            position: 'belowBar',
-            color: '#10b981', // green
-            shape: 'arrowUp',
-            text: 'BULL',
-            size: 1,
-          });
-        } else if (score <= 30) {
-          markers.push({
-            time: candle.date,
-            position: 'aboveBar',
-            color: '#ef4444', // red
-            shape: 'arrowDown',
-            text: 'BEAR',
-            size: 1,
-          });
-        }
-      }
-    }
-    if (markers.length > 0) {
-      createSeriesMarkers(candleSeries, markers);
-    }
-
-    // ─── 5. Synchronise Zoom/Scroll Timescales ───
+    // ─── 3. Synchronise Zoom/Scroll Timescales ───
     let isReflecting = false;
     
     const syncTimeScale = (fromChart: IChartApi, toChart: IChartApi) => {
@@ -198,11 +132,7 @@ export default function TradingViewChart({ priceData, sentimentHistory, symbol }
     syncTimeScale(priceChart, sentimentChart);
     syncTimeScale(sentimentChart, priceChart);
 
-    // Save chart APIs to refs for window resizing handler
-    priceChartApi.current = priceChart;
-    sentimentChartApi.current = sentimentChart;
-
-    // ─── 6. Handle Window Resizing ───
+    // ─── 4. Handle Window Resizing ───
     const handleResize = () => {
       if (!containerRef.current) return;
       const width = containerRef.current.clientWidth;
@@ -212,25 +142,106 @@ export default function TradingViewChart({ priceData, sentimentHistory, symbol }
 
     window.addEventListener('resize', handleResize);
 
+    // Store refs for data updates and cleanup
+    priceChartApi.current = priceChart;
+    sentimentChartApi.current = sentimentChart;
+    candleSeriesRef.current = candleSeries;
+    volumeSeriesRef.current = volumeSeries;
+    sentimentSeriesRef.current = sentimentSeries;
+
     return () => {
       window.removeEventListener('resize', handleResize);
       if (priceChartApi.current) {
-        try {
-          priceChartApi.current.remove();
-        } catch (err) {
+        try { priceChartApi.current.remove(); } catch (err) {
           console.warn('[TradingViewChart] Price chart cleanup failed:', err);
         }
         priceChartApi.current = null;
       }
       if (sentimentChartApi.current) {
-        try {
-          sentimentChartApi.current.remove();
-        } catch (err) {
+        try { sentimentChartApi.current.remove(); } catch (err) {
           console.warn('[TradingViewChart] Sentiment chart cleanup failed:', err);
         }
         sentimentChartApi.current = null;
       }
+      candleSeriesRef.current = null;
+      volumeSeriesRef.current = null;
+      sentimentSeriesRef.current = null;
     };
+  }, []); // Mount only — chart infrastructure created once
+
+  // ── DATA UPDATES (runs when priceData or sentimentHistory changes) ──
+  // Instead of destroying and recreating charts, we call setData() on existing series.
+  useEffect(() => {
+    if (!candleSeriesRef.current || !volumeSeriesRef.current || !sentimentSeriesRef.current) return;
+    if (priceData.length === 0) return;
+
+    // Update candlestick data
+    const formattedPriceData = priceData.map(d => ({
+      time: d.date,
+      open: d.open,
+      high: d.high,
+      low: d.low,
+      close: d.close,
+    }));
+    candleSeriesRef.current.setData(formattedPriceData);
+
+    // Update volume data
+    const formattedVolumeData = priceData.map(d => ({
+      time: d.date,
+      value: d.volume,
+      color: d.close >= d.open ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)',
+    }));
+    volumeSeriesRef.current.setData(formattedVolumeData);
+
+    // Update sentiment data
+    const sentimentMap = new Map<string, number>();
+    for (const item of sentimentHistory) {
+      sentimentMap.set(item.date, item.sentiment);
+    }
+
+    const formattedSentimentData = priceData.map(d => ({
+      time: d.date,
+      value: sentimentMap.get(d.date) ?? 50,
+    }));
+    sentimentSeriesRef.current.setData(formattedSentimentData);
+
+    // Update sentiment markers on candlestick chart
+    const markers: any[] = [];
+    for (const candle of priceData) {
+      const score = sentimentMap.get(candle.date);
+      if (score !== undefined) {
+        if (score >= 70) {
+          markers.push({
+            time: candle.date,
+            position: 'belowBar',
+            color: '#10b981',
+            shape: 'arrowUp',
+            text: 'BULL',
+            size: 1,
+          });
+        } else if (score <= 30) {
+          markers.push({
+            time: candle.date,
+            position: 'aboveBar',
+            color: '#ef4444',
+            shape: 'arrowDown',
+            text: 'BEAR',
+            size: 1,
+          });
+        }
+      }
+    }
+    if (markers.length > 0) {
+      createSeriesMarkers(candleSeriesRef.current, markers);
+    }
+
+    // Auto-fit the time scale to show all data
+    if (priceChartApi.current) {
+      priceChartApi.current.timeScale().fitContent();
+    }
+    if (sentimentChartApi.current) {
+      sentimentChartApi.current.timeScale().fitContent();
+    }
   }, [priceData, sentimentHistory]);
 
   return (

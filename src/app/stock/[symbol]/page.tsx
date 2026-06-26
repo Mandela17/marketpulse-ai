@@ -1,6 +1,7 @@
 'use client';
 
-import { use, useState, useEffect } from 'react';
+import { use, useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { getStockBySymbol } from '@/lib/sectorData';
 import { getSentimentColor, getSentimentLabel } from '@/lib/types';
@@ -9,9 +10,19 @@ import NewsCard from '@/components/NewsCard';
 import type { NewsArticle } from '@/lib/types';
 import type { RealTechnicals } from '@/lib/technicalAnalysis';
 import { getDerivativesData, DerivativesData, getBrokerConfig } from '@/lib/brokerApi';
-import { trainAndPredict } from '@/lib/mlPrediction';
-import TradingViewChart from '@/components/TradingViewChart';
 import { useAuth } from '@/context/AuthContext';
+
+// Lazy-load heavy chart component (defers ~48KB lightweight-charts from initial bundle)
+const TradingViewChart = dynamic(() => import('@/components/TradingViewChart'), {
+  ssr: false,
+  loading: () => (
+    <div className="rounded-xl p-16 text-center border bg-slate-900" style={{ borderColor: 'var(--border-color)' }}>
+      <div className="w-8 h-8 border-3 rounded-full animate-spin mx-auto mb-3"
+        style={{ borderColor: 'var(--border-color)', borderTopColor: 'var(--accent-blue)' }} />
+      <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Loading chart engine...</p>
+    </div>
+  ),
+});
 
 // Deterministic pseudo-random number generator based on stock symbol + date string
 function getDeterministicVal(sym: string, dateStr: string, min: number, max: number): number {
@@ -130,88 +141,107 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
   const [derivatives, setDerivatives] = useState<DerivativesData | null>(null);
   const [mlResult, setMlResult] = useState<any>(null);
   const [activeTab, setActiveTab] = useState<'technicals' | 'derivatives'>('technicals');
+  const [lookbackDays, setLookbackDays] = useState<number>(90);
 
-  // Fetch live market data and real technicals
+  // Track if ML has been computed for current chart data to prevent double-compute
+  const mlComputedRef = useRef<string>('');
+
+  // ── PARALLELIZED DATA FETCH ──
+  // Fetch live quote + news in parallel (independent of lookback)
   useEffect(() => {
-    async function fetchLiveQuote() {
-      try {
-        // Pass Upstox token if connected — backend will use Upstox prices over Yahoo Finance
-        const brokerConfig = getBrokerConfig();
-        const headers: Record<string, string> = {};
-        if (brokerConfig.provider === 'upstox' && brokerConfig.connected && brokerConfig.accessToken) {
-          headers['X-Upstox-Token'] = brokerConfig.accessToken;
-        }
+    const controller = new AbortController();
 
-        const res = await fetch(`/api/stock?symbol=${encodeURIComponent(decodedSymbol)}`, { headers }).then(r => r.json());
-        if (res && !res.error) {
-          setLiveData(res);
-        }
-      } catch (e) {
-        console.error('Failed to fetch live stock indicators:', e);
-      } finally {
-        setLoadingLive(false);
+    async function fetchCoreData() {
+      const brokerConfig = getBrokerConfig();
+      const headers: Record<string, string> = {};
+      if (brokerConfig.provider === 'upstox' && brokerConfig.connected && brokerConfig.accessToken) {
+        headers['X-Upstox-Token'] = brokerConfig.accessToken;
       }
+
+      // Fire both requests simultaneously
+      const [stockRes, newsRes] = await Promise.allSettled([
+        fetch(`/api/stock?symbol=${encodeURIComponent(decodedSymbol)}`, { headers, signal: controller.signal }).then(r => r.json()),
+        fetch('/api/news', { signal: controller.signal }).then(r => r.json()),
+      ]);
+
+      // Process stock quote
+      if (stockRes.status === 'fulfilled' && stockRes.value && !stockRes.value.error) {
+        setLiveData(stockRes.value);
+      }
+      setLoadingLive(false);
+
+      // Process news articles — filter to this stock/sector
+      if (newsRes.status === 'fulfilled' && newsRes.value?.articles) {
+        const related = newsRes.value.articles.filter((a: NewsArticle) =>
+          a.relatedStocks.includes(decodedSymbol) ||
+          (stock && a.relatedSectors.includes(stock.sector))
+        );
+        setNewsArticles(related.slice(0, 8));
+      }
+      setLoadingNews(false);
     }
-    fetchLiveQuote();
+
+    fetchCoreData().catch(e => {
+      if (e.name !== 'AbortError') console.error('Failed to fetch core data:', e);
+      setLoadingLive(false);
+      setLoadingNews(false);
+    });
+
+    return () => controller.abort();
   }, [decodedSymbol]);
 
-  // Fetch real analyzed news articles
+  // Fetch historical OHLCV + sentiment history in parallel (depends on lookbackDays)
   useEffect(() => {
-    async function fetchNews() {
-      try {
-        const res = await fetch('/api/news').then(r => r.json());
-        if (res?.articles) {
-          // Filter articles related to this stock or its sector
-          const related = res.articles.filter((a: NewsArticle) =>
-            a.relatedStocks.includes(decodedSymbol) ||
-            (stock && a.relatedSectors.includes(stock.sector))
-          );
-          setNewsArticles(related.slice(0, 8));
-        }
-      } catch (e) {
-        console.error('Failed to fetch news:', e);
-      } finally {
-        setLoadingNews(false);
-      }
-    }
-    fetchNews();
-  }, [decodedSymbol, stock]);
+    const controller = new AbortController();
+    setLoadingChart(true);
+    setLoadingHistory(true);
+    // Reset ML computation tracker when lookback changes
+    mlComputedRef.current = '';
 
-  // Fetch historical OHLCV and database sentiment history for chart and ML training
-  useEffect(() => {
     async function fetchChartAndHistory() {
-      setLoadingChart(true);
-      setLoadingHistory(true);
-      try {
-        const chartRes = await fetch(`/api/stock/ohlcv?symbol=${encodeURIComponent(decodedSymbol)}&days=60`).then(r => r.json());
-        if (chartRes && chartRes.data) {
-          setChartData(chartRes.data);
-        }
-        const histRes = await fetch(`/api/history?type=stock&id=${encodeURIComponent(decodedSymbol)}&days=60`).then(r => r.json());
-        if (histRes && histRes.history) {
-          setSentimentHistory(histRes.history);
-        }
-      } catch (e) {
-        console.error('Failed to fetch chart or history:', e);
-      } finally {
-        setLoadingChart(false);
-        setLoadingHistory(false);
-      }
-    }
-    fetchChartAndHistory();
-  }, [decodedSymbol]);
+      const [chartRes, histRes] = await Promise.allSettled([
+        fetch(`/api/stock/ohlcv?symbol=${encodeURIComponent(decodedSymbol)}&days=${lookbackDays}`, { signal: controller.signal }).then(r => r.json()),
+        fetch(`/api/history?type=stock&id=${encodeURIComponent(decodedSymbol)}&days=${lookbackDays}`, { signal: controller.signal }).then(r => r.json()),
+      ]);
 
-  // Fetch derivatives option chain data (real or mock)
+      if (chartRes.status === 'fulfilled' && chartRes.value?.data) {
+        setChartData(chartRes.value.data);
+      }
+      if (histRes.status === 'fulfilled' && histRes.value?.history) {
+        setSentimentHistory(histRes.value.history);
+      }
+      setLoadingChart(false);
+      setLoadingHistory(false);
+    }
+
+    fetchChartAndHistory().catch(e => {
+      if (e.name !== 'AbortError') console.error('Failed to fetch chart or history:', e);
+      setLoadingChart(false);
+      setLoadingHistory(false);
+    });
+
+    return () => controller.abort();
+  }, [decodedSymbol, lookbackDays]);
+
+  // Fetch derivatives option chain data (real or mock) — only when live quote is available
   useEffect(() => {
     if (liveData?.quote?.price) {
       getDerivativesData(decodedSymbol, liveData.quote.price).then(setDerivatives);
     }
   }, [decodedSymbol, liveData]);
 
-  // Train and evaluate ML predictive model on historical inputs
+  // Train ML model — only depends on chartData + sentimentHistory (NOT derivatives)
+  // This prevents the expensive retrain triggered when derivatives load after chart data.
   useEffect(() => {
-    if (chartData.length >= 35) {
-      import('@/lib/technicalAnalysis').then(({ calculateEMA, calculateRSI, calculateMACD, calculateVolumeProfile }) => {
+    // Skip if already computed for this data fingerprint
+    const fingerprint = `${chartData.length}-${sentimentHistory.length}-${decodedSymbol}-${lookbackDays}`;
+    if (mlComputedRef.current === fingerprint) return;
+    if (chartData.length < 35) return;
+
+    mlComputedRef.current = fingerprint;
+
+    import('@/lib/technicalAnalysis').then(({ calculateEMA, calculateRSI, calculateMACD, calculateVolumeProfile }) => {
+      import('@/lib/mlPrediction').then(({ trainAndPredict }) => {
         const closes = chartData.map(c => c.close);
         const volumes = chartData.map(c => c.volume);
         const ema20Arr = calculateEMA(closes, 20);
@@ -232,26 +262,12 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
 
           const dateStr = chartData[i].date;
 
-          // Determine delivery percentage (typically 35% - 60%)
-          // If available in latest live derivatives history, override with that actual value
-          let deliveryPercent = getDeterministicVal(decodedSymbol, dateStr, 35, 60);
-          if (derivatives) {
-            const histMatch = derivatives.deliveryHistory.find(d => d.date === dateStr);
-            if (histMatch) {
-              deliveryPercent = histMatch.deliveryPercent;
-            }
-          }
+          // Deterministic delivery/PCR values for historical days
+          const deliveryPercent = getDeterministicVal(decodedSymbol, dateStr, 35, 60);
 
-          // Determine Put-Call Ratio (PCR) (typically 0.8 - 1.4)
-          // If this is the current/latest day in chartData and live derivatives are loaded, use the actual live PCR
-          let pcr: number;
-          if (i === chartData.length - 1 && derivatives) {
-            pcr = derivatives.pcr;
-          } else {
-            const basePcr = getDeterministicVal(decodedSymbol, dateStr, 0.8, 1.4);
-            const rsiSkew = (rsi - 50) / 100; // skew PCR based on RSI
-            pcr = parseFloat(Math.min(1.8, Math.max(0.4, basePcr + rsiSkew)).toFixed(2));
-          }
+          const basePcr = getDeterministicVal(decodedSymbol, dateStr, 0.8, 1.4);
+          const rsiSkew = (rsi - 50) / 100;
+          const pcr = parseFloat(Math.min(1.8, Math.max(0.4, basePcr + rsiSkew)).toFixed(2));
 
           mlInputs.push({
             date: dateStr,
@@ -269,34 +285,38 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
         const result = trainAndPredict(mlInputs);
         setMlResult(result);
       });
-    }
-  }, [chartData, sentimentHistory, derivatives, decodedSymbol]);
+    });
+  }, [chartData, sentimentHistory, decodedSymbol, lookbackDays]);
 
   if (!stock) return null;
 
+  // ── MEMOIZED EXPENSIVE COMPUTATIONS ──
   // Real sentiment computed from actual news articles
-  const sentiment = computeRealStockSentiment(newsArticles);
+  const sentiment = useMemo(() => computeRealStockSentiment(newsArticles), [newsArticles]);
   const tech = liveData?.technicals;
 
   // Sentiment prediction validation loop analysis
-  const validationLoop = calculateValidationAccuracy(sentimentHistory);
+  const validationLoop = useMemo(() => calculateValidationAccuracy(sentimentHistory), [sentimentHistory]);
 
   // Dynamic risk factors from real data
-  const risks: string[] = [];
-  if (tech) {
-    if (tech.rsiSignal === 'Overbought') risks.push('RSI above 70 — overbought territory, potential pullback risk');
-    if (tech.rsiSignal === 'Oversold') risks.push('RSI below 30 — oversold, could see dead cat bounce or genuine recovery');
-    if (tech.emaTrend === 'Strong Downtrend') risks.push('Price below both EMA-20 and EMA-50 — strong bearish momentum');
-    if (tech.bollingerPosition === 'Above Upper') risks.push('Trading above Bollinger upper band — statistically likely to revert to mean');
-    if (tech.volumeSignal === 'Volume Dry-up') risks.push('Volume significantly below average — low conviction in current price');
-    if (tech.priceChange1M < -10) risks.push(`Stock down ${Math.abs(tech.priceChange1M).toFixed(1)}% this month — sustained selling pressure`);
-  }
-  if (sentiment && sentiment.highImpactCount > 0) {
-    risks.push(`${sentiment.highImpactCount} high-impact news event(s) detected — elevated volatility expected`);
-  }
-  if (risks.length === 0) {
-    risks.push('No significant technical or sentiment risk flags detected');
-  }
+  const risks = useMemo(() => {
+    const r: string[] = [];
+    if (tech) {
+      if (tech.rsiSignal === 'Overbought') r.push('RSI above 70 — overbought territory, potential pullback risk');
+      if (tech.rsiSignal === 'Oversold') r.push('RSI below 30 — oversold, could see dead cat bounce or genuine recovery');
+      if (tech.emaTrend === 'Strong Downtrend') r.push('Price below both EMA-20 and EMA-50 — strong bearish momentum');
+      if (tech.bollingerPosition === 'Above Upper') r.push('Trading above Bollinger upper band — statistically likely to revert to mean');
+      if (tech.volumeSignal === 'Volume Dry-up') r.push('Volume significantly below average — low conviction in current price');
+      if (tech.priceChange1M < -10) r.push(`Stock down ${Math.abs(tech.priceChange1M).toFixed(1)}% this month — sustained selling pressure`);
+    }
+    if (sentiment && sentiment.highImpactCount > 0) {
+      r.push(`${sentiment.highImpactCount} high-impact news event(s) detected — elevated volatility expected`);
+    }
+    if (r.length === 0) {
+      r.push('No significant technical or sentiment risk flags detected');
+    }
+    return r;
+  }, [tech, sentiment]);
 
   const outlookConfig = {
     bullish: { icon: '▲', color: 'var(--accent-green)', bg: 'var(--accent-green-dim)', label: 'Bullish' },
@@ -442,6 +462,40 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         {/* Left Column */}
         <div className="xl:col-span-2 space-y-6">
+          {/* Chart Header with Lookback Tabs */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 rounded-xl border bg-slate-900" style={{ borderColor: 'var(--border-color)' }}>
+            <div>
+              <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
+                📈 Interactive Stock Analytics
+              </h3>
+              <p className="text-[10px] text-slate-500 font-medium">Chart indicators & ML model train dynamically on selection</p>
+            </div>
+            
+            {/* Lookback Selection tabs */}
+            <div className="flex gap-1.5 p-1 bg-slate-950 rounded-lg border border-slate-800 self-start sm:self-auto">
+              {[
+                { label: '3M', days: 90 },
+                { label: '6M', days: 180 },
+                { label: '1Y', days: 365 },
+                { label: '2Y', days: 730 },
+                { label: '5Y', days: 1825 },
+                { label: '10Y', days: 3650 },
+              ].map(opt => (
+                <button
+                  key={opt.label}
+                  onClick={() => setLookbackDays(opt.days)}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer ${
+                    lookbackDays === opt.days
+                      ? 'bg-blue-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Interactive TradingView Candlestick & Sentiment Charts */}
           {loadingChart || loadingHistory ? (
             <div className="rounded-xl p-24 text-center border bg-slate-900" style={{ borderColor: 'var(--border-color)' }}>
@@ -991,12 +1045,14 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
                     <div className="space-y-2">
                       {[
                         { name: 'Gemini News Sentiment', val: mlResult.featureImportance.sentiment, color: 'var(--accent-purple)' },
+                        { name: 'Sentiment Velocity (1D)', val: mlResult.featureImportance.sentimentMomentum, color: '#a78bfa' },
                         { name: 'Relative Strength Index (RSI)', val: mlResult.featureImportance.rsi, color: 'var(--accent-yellow)' },
                         { name: 'MACD Momentum Histogram', val: mlResult.featureImportance.macd, color: 'var(--accent-blue)' },
                         { name: 'EMA Deviation (20D Trend)', val: mlResult.featureImportance.emaTrend, color: 'var(--accent-green)' },
                         { name: 'Volume Ratio Today', val: mlResult.featureImportance.volume, color: 'var(--accent-red)' },
                         { name: 'Options Put-Call Ratio (PCR)', val: mlResult.featureImportance.pcr, color: 'var(--accent-teal)' },
                         { name: 'Delivery Volume Percentage', val: mlResult.featureImportance.delivery, color: 'var(--accent-pink)' },
+                        { name: 'Price Momentum (1D Return)', val: mlResult.featureImportance.priceMomentum, color: '#f43f5e' },
                       ].map(f => (
                         <div key={f.name}>
                           <div className="flex justify-between text-[10px] text-slate-400 mb-1">
@@ -1012,8 +1068,9 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
                   </div>
                   
                   <div className="flex justify-between text-[9px] text-slate-500 pt-1 border-t border-slate-800">
-                    <span>Backtest Accuracy: {mlResult.metrics.trainingAccuracy}%</span>
-                    <span>Total Datapoints: {mlResult.metrics.totalSamples} days</span>
+                    <span>Train Accuracy: {mlResult.metrics.trainingAccuracy}%</span>
+                    <span>OOS Validation: {mlResult.metrics.validationAccuracy}%</span>
+                    <span>Datapoints: {mlResult.metrics.totalSamples} days</span>
                   </div>
                 </div>
               ) : (

@@ -70,8 +70,18 @@ export async function fetchHistoricalOHLCV(symbol: string, days: number = 60): P
 
   const nseSym = symbol.includes('.') || symbol.startsWith('^') ? symbol : `${symbol}.NS`;
 
-  // Fetch enough data for 50-period EMA (need ~60 trading days = ~90 calendar days)
-  const range = days <= 30 ? '3mo' : '6mo';
+  // Map days to Yahoo API range values dynamically
+  let range = '6mo';
+  if (days <= 5) range = '5d';
+  else if (days <= 30) range = '1mo';
+  else if (days <= 90) range = '3mo';
+  else if (days <= 180) range = '6mo';
+  else if (days <= 365) range = '1y';
+  else if (days <= 730) range = '2y';
+  else if (days <= 1825) range = '5y';
+  else if (days <= 3650) range = '10y';
+  else range = 'max';
+
   const endpoints = [
     `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(nseSym)}?interval=1d&range=${range}`,
     `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(nseSym)}?interval=1d&range=${range}`,

@@ -92,8 +92,24 @@ export default function Dashboard() {
     }
 
     fetchData();
-    const interval = setInterval(fetchData, 5 * 60 * 1000); // Refresh every 5 min when Upstox connected
-    return () => clearInterval(interval);
+
+    // Only auto-refresh during Indian market hours (Mon-Fri 9:15-15:30 IST)
+    // Saves unnecessary RSS + Gemini API calls during off-hours
+    function isMarketOpenNow(): boolean {
+      const now = new Date();
+      const utc = now.getTime() + now.getTimezoneOffset() * 60000;
+      const ist = new Date(utc + 5.5 * 3600000);
+      const day = ist.getDay();
+      if (day === 0 || day === 6) return false;
+      const totalMinutes = ist.getHours() * 60 + ist.getMinutes();
+      return totalMinutes >= 555 && totalMinutes <= 930;
+    }
+
+    let interval: NodeJS.Timeout | undefined;
+    if (isMarketOpenNow()) {
+      interval = setInterval(fetchData, 5 * 60 * 1000);
+    }
+    return () => { if (interval) clearInterval(interval); };
   }, []);
 
   const overview = DEMO_MARKET_OVERVIEW;
