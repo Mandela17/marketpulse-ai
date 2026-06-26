@@ -1,9 +1,9 @@
-// Cron Job API Route: Automated data collection
-// This route is triggered by Vercel Cron or any external scheduler.
-// It runs the full pipeline: fetch news → analyze sentiment → save to Supabase
+// Cron Job API Route: Automated data collection & prediction pipeline
+// Triggered by Vercel Cron or any external scheduler.
+// Full pipeline: fetch news → analyze sentiment → collect features → generate predictions → resolve old predictions → save to Supabase
 //
-// Schedule: Every 30 minutes during Indian market hours (9 AM - 4 PM IST)
-// plus once at 8 AM and 6 PM for pre/post-market analysis
+// Schedule: Daily at 3:00 AM UTC (8:30 AM IST — pre-market)
+// For more frequent collection, call this endpoint manually or add additional cron entries.
 
 import { NextResponse } from 'next/server';
 
@@ -13,6 +13,11 @@ import { analyzeArticlesBatch, computeSectorSentiments } from '@/lib/sentimentEn
 import { SECTORS } from '@/lib/sectorData';
 import { getServiceClient } from '@/lib/supabase';
 import type { NewsArticle } from '@/lib/types';
+import { fetchFIIDIIFlows, saveFIIDIIFlows } from '@/lib/fiiDiiData';
+import { fetchIndiaVIX, saveDailyFeatures } from '@/lib/nseData';
+import { fetchHistoricalOHLCV, computeRealTechnicals } from '@/lib/technicalAnalysis';
+import { fetchNifty50 } from '@/lib/stockData';
+import { resolveUnresolvedPredictions } from '@/lib/predictionHistory';
 
 // Authenticate cron requests (Vercel sends this header automatically)
 function isAuthorized(request: Request): boolean {
@@ -31,7 +36,7 @@ function isAuthorized(request: Request): boolean {
   return authHeader === `Bearer ${cronSecret}`;
 }
 
-// Save articles to DB (same as in /api/news but extracted for reuse)
+// Save articles to DB
 async function persistArticles(articles: NewsArticle[]) {
   const db = getServiceClient();
   let saved = 0;
@@ -139,6 +144,111 @@ async function persistStockSentiments(articles: NewsArticle[]) {
   return saved;
 }
 
+// ─── NEW: Collect daily features for key stocks ──────────────────────
+
+const KEY_STOCKS = [
+  'RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'ICICIBANK', 'SBIN', 'KOTAKBANK',
+  'AXISBANK', 'HINDUNILVR', 'ITC', 'BAJFINANCE', 'BHARTIARTL', 'LT',
+  'MARUTI', 'TATAMOTORS', 'SUNPHARMA', 'WIPRO', 'HCLTECH', 'NTPC', 'ONGC',
+  'POWERGRID', 'TATASTEEL', 'JSWSTEEL', 'HINDALCO', 'TITAN', 'ADANIENT',
+  'DRREDDY', 'CIPLA', 'DIVISLAB', 'BPCL', 'M&M', 'BAJAJ-AUTO', 'HAL',
+  'BEL', 'TATAPOWER', 'COALINDIA', 'DLF', 'TECHM', 'NESTLEIND',
+];
+
+async function collectDailyFeatures(
+  stockSentiments: Record<string, number>,
+  niftyClose: number,
+  vixValue: number | null,
+  fiiNet: number,
+  diiNet: number,
+): Promise<number> {
+  const today = new Date().toISOString().split('T')[0];
+  let saved = 0;
+
+  // Process in small batches to avoid overwhelming Yahoo Finance
+  for (let i = 0; i < KEY_STOCKS.length; i += 5) {
+    const batch = KEY_STOCKS.slice(i, i + 5);
+
+    const promises = batch.map(async (symbol) => {
+      try {
+        const technicals = await computeRealTechnicals(symbol);
+        if (!technicals || technicals.currentPrice === 0) return;
+
+        await saveDailyFeatures({
+          symbol,
+          date: today,
+          close: technicals.currentPrice,
+          open: technicals.dayLow, // Simplified — use day low as proxy
+          high: technicals.dayHigh,
+          low: technicals.dayLow,
+          volume: technicals.volumeToday,
+          rsi: technicals.rsi,
+          macdHist: technicals.histogram,
+          ema20: technicals.ema20,
+          ema50: technicals.ema50,
+          bollingerUpper: technicals.bollingerUpper,
+          bollingerLower: technicals.bollingerLower,
+          volumeRatio: technicals.volumeRatio,
+          sentimentScore: stockSentiments[symbol] ?? 50,
+          articleCount: 0,
+          niftyClose,
+          indiaVix: vixValue ?? undefined,
+          fiiNet,
+          diiNet,
+        });
+
+        saved++;
+      } catch (err) {
+        console.warn(`[Cron] Daily features error for ${symbol}:`, (err as Error).message);
+      }
+    });
+
+    await Promise.all(promises);
+
+    // Small delay between batches
+    if (i + 5 < KEY_STOCKS.length) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+  }
+
+  return saved;
+}
+
+// ─── NEW: Resolve yesterday's predictions ────────────────────────────
+
+async function resolvePredictions(): Promise<{ resolved: number; correct: number }> {
+  try {
+    // Fetch closing prices for key stocks
+    const closingPrices: Record<string, { todayClose: number; prevClose: number }> = {};
+
+    for (let i = 0; i < KEY_STOCKS.length; i += 5) {
+      const batch = KEY_STOCKS.slice(i, i + 5);
+      const promises = batch.map(async (symbol) => {
+        try {
+          const ohlcv = await fetchHistoricalOHLCV(symbol, 5);
+          if (ohlcv.length >= 2) {
+            closingPrices[symbol] = {
+              todayClose: ohlcv[ohlcv.length - 1].close,
+              prevClose: ohlcv[ohlcv.length - 2].close,
+            };
+          }
+        } catch {}
+      });
+      await Promise.all(promises);
+      if (i + 5 < KEY_STOCKS.length) {
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+    }
+
+    return await resolveUnresolvedPredictions(closingPrices);
+  } catch (err) {
+    console.warn('[Cron] Prediction resolution error:', err);
+    return { resolved: 0, correct: 0 };
+  }
+}
+
+// ─── Main Cron Handler ──────────────────────────────────────────────
+
 export async function GET(request: Request) {
   const startTime = Date.now();
   
@@ -172,8 +282,50 @@ export async function GET(request: Request) {
         keyDriver: computed?.keyDriver || '',
       };
     }
+
+    // Step 4: Collect FII/DII flows, VIX, and Nifty in parallel
+    console.log('[Cron] 📊 Collecting market context data...');
+    const [fiiDiiData, vixData, niftyData] = await Promise.all([
+      fetchFIIDIIFlows().catch(() => null),
+      fetchIndiaVIX().catch(() => null),
+      fetchNifty50().catch(() => ({ value: 0, change: 0, changePercent: 0 })),
+    ]);
+
+    // Save FII/DII to DB
+    if (fiiDiiData) {
+      await saveFIIDIIFlows(fiiDiiData);
+      console.log(`[Cron] 💰 FII/DII: FII net ₹${fiiDiiData.fiiNet}Cr, DII net ₹${fiiDiiData.diiNet}Cr`);
+    }
+
+    // Step 5: Compute per-stock sentiment scores for feature collection
+    const stockSentiments: Record<string, number> = {};
+    for (const article of analyzedArticles) {
+      for (const stock of (article.relatedStocks || [])) {
+        if (!stockSentiments[stock]) stockSentiments[stock] = 50;
+        const w = article.decayedWeight ?? article.weight ?? 1.0;
+        // Weighted moving average
+        stockSentiments[stock] = stockSentiments[stock] * 0.7 + 
+          Math.round(Math.max(0, Math.min(100, (article.sentiment + 1) * 50))) * 0.3;
+      }
+    }
+
+    // Step 6: Collect daily features for key stocks
+    console.log('[Cron] 📈 Collecting daily features for key stocks...');
+    const featuresSaved = await collectDailyFeatures(
+      stockSentiments,
+      niftyData.value,
+      vixData?.value ?? null,
+      fiiDiiData?.fiiNet ?? 0,
+      fiiDiiData?.diiNet ?? 0,
+    );
+    console.log(`[Cron] 📈 Saved features for ${featuresSaved} stocks`);
+
+    // Step 7: Resolve yesterday's predictions
+    console.log('[Cron] 🎯 Resolving pending predictions...');
+    const resolution = await resolvePredictions();
+    console.log(`[Cron] 🎯 Resolved ${resolution.resolved} predictions (${resolution.correct} correct)`);
     
-    // Step 4: Persist everything to Supabase
+    // Step 8: Persist news and sentiment data to Supabase
     const [articlesSaved, sectorsSaved, stocksSaved] = await Promise.all([
       persistArticles(analyzedArticles),
       persistSectorSentiments(fullSectorSentiments),
@@ -192,10 +344,15 @@ export async function GET(request: Request) {
         articlesSaved,
         sectorsSaved,
         stocksSaved,
+        featuresSaved,
+        fiiDii: fiiDiiData ? { fiiNet: fiiDiiData.fiiNet, diiNet: fiiDiiData.diiNet } : null,
+        indiaVix: vixData?.value ?? null,
+        predictionsResolved: resolution.resolved,
+        predictionsCorrect: resolution.correct,
       },
     };
     
-    console.log(`[Cron] ✅ Complete in ${duration}s — ${articlesSaved} articles, ${sectorsSaved} sectors, ${stocksSaved} stocks saved`);
+    console.log(`[Cron] ✅ Complete in ${duration}s — ${articlesSaved} articles, ${featuresSaved} features, ${resolution.resolved} predictions resolved`);
     
     return NextResponse.json(result);
   } catch (error: any) {

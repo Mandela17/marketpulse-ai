@@ -13,6 +13,7 @@ export interface RawArticle {
 
 // Google News RSS search for Indian market topics
 const NEWS_FEEDS = [
+  // ─── Core Market Coverage ───
   {
     url: 'https://news.google.com/rss/search?q=indian+stock+market+NSE+BSE&hl=en-IN&gl=IN&ceid=IN:en',
     source: 'Google News',
@@ -25,6 +26,7 @@ const NEWS_FEEDS = [
     url: 'https://news.google.com/rss/search?q=india+economy+RBI+policy&hl=en-IN&gl=IN&ceid=IN:en',
     source: 'Google News',
   },
+  // ─── Sector-Specific Feeds ───
   {
     url: 'https://news.google.com/rss/search?q=crude+oil+OPEC+energy+India&hl=en-IN&gl=IN&ceid=IN:en',
     source: 'Google News',
@@ -49,6 +51,36 @@ const NEWS_FEEDS = [
     url: 'https://news.google.com/rss/search?q=India+auto+Maruti+Tata+Motors&hl=en-IN&gl=IN&ceid=IN:en',
     source: 'Google News',
   },
+  // ─── Financial Data Source Feeds ───
+  {
+    url: 'https://news.google.com/rss/search?q=FII+DII+activity+India+market&hl=en-IN&gl=IN&ceid=IN:en',
+    source: 'Google News',
+  },
+  {
+    url: 'https://news.google.com/rss/search?q=India+banking+HDFC+ICICI+SBI+NPA+credit+growth&hl=en-IN&gl=IN&ceid=IN:en',
+    source: 'Google News',
+  },
+  {
+    url: 'https://news.google.com/rss/search?q=India+pharma+FDA+drug+approval+generic&hl=en-IN&gl=IN&ceid=IN:en',
+    source: 'Google News',
+  },
+  {
+    url: 'https://news.google.com/rss/search?q=India+steel+metal+mining+copper+aluminium&hl=en-IN&gl=IN&ceid=IN:en',
+    source: 'Google News',
+  },
+  {
+    url: 'https://news.google.com/rss/search?q=India+real+estate+housing+DLF+Godrej+property&hl=en-IN&gl=IN&ceid=IN:en',
+    source: 'Google News',
+  },
+  {
+    url: 'https://news.google.com/rss/search?q=SEBI+regulation+circular+order+India&hl=en-IN&gl=IN&ceid=IN:en',
+    source: 'Google News',
+  },
+  {
+    url: 'https://news.google.com/rss/search?q=India+IT+TCS+Infosys+Wipro+outsourcing+AI&hl=en-IN&gl=IN&ceid=IN:en',
+    source: 'Google News',
+  },
+  // ─── Publication-Specific Feeds ───
   {
     url: 'https://news.google.com/rss/search?q=site:moneycontrol.com+market+news&hl=en-IN&gl=IN&ceid=IN:en',
     source: 'Moneycontrol',
@@ -62,16 +94,21 @@ const NEWS_FEEDS = [
     source: 'Livemint',
   },
   {
-    url: 'https://news.google.com/rss/search?q=Reddit+IndiaInvestments+stock&hl=en-IN&gl=IN&ceid=IN:en',
-    source: 'Reddit / IndiaInvestments',
+    url: 'https://news.google.com/rss/search?q=site:ndtvprofit.com+stock+market&hl=en-IN&gl=IN&ceid=IN:en',
+    source: 'NDTV Profit',
   },
+  {
+    url: 'https://news.google.com/rss/search?q=site:business-standard.com+stock+market+India&hl=en-IN&gl=IN&ceid=IN:en',
+    source: 'Business Standard',
+  },
+  // ─── Miscellaneous ───
   {
     url: 'https://news.google.com/rss/search?q=corporate+announcements+disclosures+NSE+BSE&hl=en-IN&gl=IN&ceid=IN:en',
     source: 'Corporate Announcements',
   },
   {
-    url: 'https://news.google.com/rss/search?q=stock+market+rumors+mergers+acquisitions+India&hl=en-IN&gl=IN&ceid=IN:en',
-    source: 'Market Rumors',
+    url: 'https://news.google.com/rss/search?q=bulk+deal+block+deal+NSE+BSE+India&hl=en-IN&gl=IN&ceid=IN:en',
+    source: 'Bulk/Block Deals',
   },
 ];
 
@@ -164,19 +201,13 @@ export async function fetchAllNews(): Promise<RawArticle[]> {
   const results = await Promise.all(feedPromises);
   results.forEach(articles => allArticles.push(...articles));
   
-  // Deduplicate by title similarity
-  const seen = new Set<string>();
-  const unique = allArticles.filter(article => {
-    const key = article.title.toLowerCase().substring(0, 50);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  // Deduplicate using Jaccard similarity on word sets (much better than 50-char prefix)
+  const unique = deduplicateArticles(allArticles);
   
   // Sort by date (newest first)
   unique.sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime());
   
-  return unique.slice(0, 40); // Return top 40 articles
+  return unique.slice(0, 80); // Return top 80 articles (was 40)
 }
 
 // Detect which sectors an article relates to based on keywords
@@ -210,4 +241,63 @@ export function detectStocks(article: RawArticle): string[] {
   }
   
   return Array.from(matchedStocks);
+}
+
+// ─── Jaccard Similarity Deduplication ────────────────────────────────
+
+function getWordSet(text: string): Set<string> {
+  return new Set(
+    text.toLowerCase()
+      .replace(/[^a-z0-9\s]/g, '')
+      .split(/\s+/)
+      .filter(w => w.length > 2) // skip short words
+  );
+}
+
+function jaccardSimilarity(setA: Set<string>, setB: Set<string>): number {
+  if (setA.size === 0 && setB.size === 0) return 1;
+  let intersection = 0;
+  for (const word of setA) {
+    if (setB.has(word)) intersection++;
+  }
+  const union = setA.size + setB.size - intersection;
+  return union > 0 ? intersection / union : 0;
+}
+
+function deduplicateArticles(articles: RawArticle[]): RawArticle[] {
+  const unique: RawArticle[] = [];
+  const wordSets: Set<string>[] = [];
+  const SIMILARITY_THRESHOLD = 0.6; // Articles with >60% word overlap are duplicates
+
+  for (const article of articles) {
+    const titleWords = getWordSet(article.title);
+    let isDuplicate = false;
+
+    for (const existingSet of wordSets) {
+      if (jaccardSimilarity(titleWords, existingSet) > SIMILARITY_THRESHOLD) {
+        isDuplicate = true;
+        break;
+      }
+    }
+
+    if (!isDuplicate) {
+      unique.push(article);
+      wordSets.push(titleWords);
+    }
+  }
+
+  return unique;
+}
+
+// ─── Article Hash (for preventing re-analysis) ──────────────────────
+
+export function computeArticleHash(article: RawArticle): string {
+  const str = `${article.title}|${article.link}`.toLowerCase();
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const chr = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + chr;
+    hash |= 0; // Convert to 32bit integer
+  }
+  return Math.abs(hash).toString(36);
 }

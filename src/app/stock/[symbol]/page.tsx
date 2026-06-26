@@ -143,6 +143,10 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
   const [activeTab, setActiveTab] = useState<'technicals' | 'derivatives'>('technicals');
   const [lookbackDays, setLookbackDays] = useState<number>(90);
 
+  // Server-side AI Prediction state
+  const [aiPrediction, setAiPrediction] = useState<any>(null);
+  const [loadingPrediction, setLoadingPrediction] = useState(true);
+
   // Track if ML has been computed for current chart data to prevent double-compute
   const mlComputedRef = useRef<string>('');
 
@@ -229,6 +233,20 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
       getDerivativesData(decodedSymbol, liveData.quote.price).then(setDerivatives);
     }
   }, [decodedSymbol, liveData]);
+
+  // Fetch server-side AI prediction
+  useEffect(() => {
+    setLoadingPrediction(true);
+    fetch(`/api/predict?symbol=${encodeURIComponent(decodedSymbol)}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data && !data.error) {
+          setAiPrediction(data);
+        }
+      })
+      .catch(err => console.warn('AI prediction fetch failed:', err))
+      .finally(() => setLoadingPrediction(false));
+  }, [decodedSymbol]);
 
   // Train ML model — only depends on chartData + sentimentHistory (NOT derivatives)
   // This prevents the expensive retrain triggered when derivatives load after chart data.
@@ -620,6 +638,165 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
                     );
                   })}
                 </div>
+              </div>
+
+              {/* 🤖 AI Prediction Panel — Server-Side Ensemble Model */}
+              <div className="rounded-xl p-5"
+                style={{ background: 'linear-gradient(135deg, rgba(59,130,246,0.08), rgba(139,92,246,0.08))', border: '1px solid rgba(99,102,241,0.3)' }}>
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-base font-bold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
+                    🤖 AI Prediction Engine
+                  </h2>
+                  {aiPrediction?.prediction?.metrics && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full font-medium"
+                      style={{ background: 'rgba(139,92,246,0.15)', color: '#a78bfa', border: '1px solid rgba(139,92,246,0.3)' }}>
+                      {aiPrediction.prediction.metrics.modelVersion} • {aiPrediction.prediction.metrics.totalSamples} samples
+                    </span>
+                  )}
+                </div>
+
+                {loadingPrediction ? (
+                  <div className="text-center py-8">
+                    <div className="w-6 h-6 border-2 rounded-full animate-spin mx-auto mb-2"
+                      style={{ borderColor: 'rgba(139,92,246,0.3)', borderTopColor: '#a78bfa' }} />
+                    <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Running ensemble model...</p>
+                  </div>
+                ) : aiPrediction?.prediction ? (
+                  <div className="space-y-4">
+                    {/* Direction + Confidence */}
+                    <div className="flex items-center gap-4">
+                      <div className="flex-1 p-4 rounded-xl text-center"
+                        style={{
+                          background: aiPrediction.prediction.direction === 'up'
+                            ? 'rgba(0,214,143,0.1)' : 'rgba(255,77,106,0.1)',
+                          border: `1px solid ${aiPrediction.prediction.direction === 'up'
+                            ? 'rgba(0,214,143,0.3)' : 'rgba(255,77,106,0.3)'}`,
+                        }}>
+                        <p className="text-3xl mb-1">
+                          {aiPrediction.prediction.direction === 'up' ? '📈' : '📉'}
+                        </p>
+                        <p className="text-lg font-bold" style={{
+                          color: aiPrediction.prediction.direction === 'up' ? 'var(--accent-green)' : 'var(--accent-red)'
+                        }}>
+                          {aiPrediction.prediction.direction === 'up' ? 'BULLISH' : 'BEARISH'}
+                        </p>
+                        <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Next-Day Direction</p>
+                      </div>
+                      <div className="flex-1 p-4 rounded-xl text-center"
+                        style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)' }}>
+                        <p className="text-3xl font-bold" style={{
+                          color: aiPrediction.prediction.confidence >= 70 ? 'var(--accent-green)' :
+                                 aiPrediction.prediction.confidence >= 60 ? 'var(--accent-yellow)' : 'var(--text-muted)'
+                        }}>
+                          {aiPrediction.prediction.confidence}%
+                        </p>
+                        <p className="text-xs font-medium capitalize" style={{ color: 'var(--accent-purple)' }}>
+                          {aiPrediction.prediction.confidenceLevel?.replace('_', ' ')}
+                        </p>
+                        <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Confidence</p>
+                      </div>
+                    </div>
+
+                    {/* Risk/Reward */}
+                    {aiPrediction.prediction.riskReward && (
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="p-3 rounded-lg text-center" style={{ background: 'rgba(0,214,143,0.08)' }}>
+                          <p className="text-[10px] uppercase font-semibold" style={{ color: 'var(--text-muted)' }}>Target</p>
+                          <p className="text-sm font-bold" style={{ color: 'var(--accent-green)' }}>
+                            ₹{aiPrediction.prediction.riskReward.targetPrice?.toLocaleString('en-IN')}
+                          </p>
+                          <p className="text-[10px]" style={{ color: 'var(--accent-green)' }}>
+                            {aiPrediction.prediction.riskReward.targetPct}
+                          </p>
+                        </div>
+                        <div className="p-3 rounded-lg text-center" style={{ background: 'rgba(255,77,106,0.08)' }}>
+                          <p className="text-[10px] uppercase font-semibold" style={{ color: 'var(--text-muted)' }}>Stop-Loss</p>
+                          <p className="text-sm font-bold" style={{ color: 'var(--accent-red)' }}>
+                            ₹{aiPrediction.prediction.riskReward.stopLoss?.toLocaleString('en-IN')}
+                          </p>
+                          <p className="text-[10px]" style={{ color: 'var(--accent-red)' }}>
+                            {aiPrediction.prediction.riskReward.stopLossPct}
+                          </p>
+                        </div>
+                        <div className="p-3 rounded-lg text-center" style={{ background: 'rgba(139,92,246,0.08)' }}>
+                          <p className="text-[10px] uppercase font-semibold" style={{ color: 'var(--text-muted)' }}>R:R Ratio</p>
+                          <p className="text-sm font-bold" style={{ color: 'var(--accent-purple)' }}>
+                            {aiPrediction.prediction.riskReward.riskRewardRatio}x
+                          </p>
+                          <p className="text-[10px] capitalize" style={{ color: 'var(--text-muted)' }}>
+                            {aiPrediction.prediction.riskReward.riskLevel} risk
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Supporting / Contradicting Signals */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {aiPrediction.prediction.supportingSignals?.length > 0 && (
+                        <div className="p-3 rounded-lg" style={{ background: 'rgba(0,214,143,0.05)', border: '1px solid rgba(0,214,143,0.15)' }}>
+                          <p className="text-[10px] uppercase font-bold mb-2" style={{ color: 'var(--accent-green)' }}>✅ Supporting Signals</p>
+                          <div className="space-y-1">
+                            {aiPrediction.prediction.supportingSignals.map((s: string, i: number) => (
+                              <p key={i} className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>• {s}</p>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {aiPrediction.prediction.contradictingSignals?.length > 0 && (
+                        <div className="p-3 rounded-lg" style={{ background: 'rgba(255,77,106,0.05)', border: '1px solid rgba(255,77,106,0.15)' }}>
+                          <p className="text-[10px] uppercase font-bold mb-2" style={{ color: 'var(--accent-red)' }}>⚠️ Contradicting Signals</p>
+                          <div className="space-y-1">
+                            {aiPrediction.prediction.contradictingSignals.map((s: string, i: number) => (
+                              <p key={i} className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>• {s}</p>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Sub-Model Votes */}
+                    {aiPrediction.prediction.subModelVotes && (
+                      <div className="p-3 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                        <p className="text-[10px] uppercase font-semibold mb-2" style={{ color: 'var(--text-muted)' }}>Ensemble Sub-Model Votes</p>
+                        <div className="grid grid-cols-3 gap-2">
+                          {[
+                            { name: 'LogReg', data: aiPrediction.prediction.subModelVotes.logisticRegression },
+                            { name: 'AdaBoost', data: aiPrediction.prediction.subModelVotes.stumpEnsemble },
+                            { name: 'Heuristic', data: aiPrediction.prediction.subModelVotes.heuristic },
+                          ].map(m => (
+                            <div key={m.name} className="text-center p-2 rounded" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                              <p className="text-[10px] font-bold" style={{ color: 'var(--text-muted)' }}>{m.name}</p>
+                              <p className="text-xs font-bold" style={{
+                                color: m.data.direction === 'up' ? 'var(--accent-green)' : 'var(--accent-red)'
+                              }}>
+                                {m.data.direction === 'up' ? '▲' : '▼'} {m.data.probability}%
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Position Sizing Hint */}
+                    {aiPrediction.prediction.riskReward?.positionSizeHint && (
+                      <p className="text-[10px] text-center px-3 py-1.5 rounded-lg" style={{ background: 'rgba(255,255,255,0.03)', color: 'var(--text-muted)' }}>
+                        💼 Suggested position: {aiPrediction.prediction.riskReward.positionSizeHint}
+                      </p>
+                    )}
+
+                    {/* Disclaimer */}
+                    <p className="text-[9px] text-center" style={{ color: 'var(--text-muted)', opacity: 0.6 }}>
+                      {aiPrediction.disclaimer || 'AI-assisted analysis for informational purposes only. Not financial advice.'}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="text-center py-6">
+                    <p className="text-sm" style={{ color: 'var(--text-muted)' }}>⏳ Accumulating data for this stock...</p>
+                    <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)', opacity: 0.6 }}>
+                      Predictions available after 10+ days of data collection
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Volume & Momentum Analysis (Real data) */}
