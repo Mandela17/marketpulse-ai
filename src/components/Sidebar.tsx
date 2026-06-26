@@ -9,6 +9,7 @@ import { LayoutDashboard, Newspaper, TrendingUp, Star, Plug, ChevronRight, LogOu
 const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/news', label: 'News Feed', icon: Newspaper },
+  { href: '/predictions', label: 'AI Predictions', icon: TrendingUp },
   { href: '/sectors', label: 'Sectors', icon: TrendingUp },
   { href: '/watchlist', label: 'Watchlist', icon: Star },
   { href: '/broker', label: 'Broker API', icon: Plug },

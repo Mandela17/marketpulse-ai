@@ -1,6 +1,12 @@
 -- MarketPulse AI — Supabase Schema Migration
 -- Run this in Supabase SQL Editor (Dashboard → SQL Editor → New Query)
 
+-- Drop existing tables/views if they exist to ensure a clean slate with the new schema
+DROP VIEW IF EXISTS prediction_accuracy;
+DROP TABLE IF EXISTS predictions CASCADE;
+DROP TABLE IF EXISTS daily_features CASCADE;
+DROP TABLE IF EXISTS fii_dii_flows CASCADE;
+
 -- ─── 1. Predictions Table ────────────────────────────────────────────
 -- Tracks every prediction the model makes, and its resolution after market close.
 CREATE TABLE IF NOT EXISTS predictions (
@@ -27,7 +33,7 @@ CREATE TABLE IF NOT EXISTS predictions (
 
 CREATE INDEX IF NOT EXISTS idx_predictions_symbol ON predictions(symbol);
 CREATE INDEX IF NOT EXISTS idx_predictions_predicted_at ON predictions(predicted_at DESC);
-CREATE INDEX IF NOT EXISTS idx_predictions_unresolved ON predictions(symbol) WHERE resolved_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_predictions_unresolved ON predictions(symbol, resolved_at);
 
 -- ─── 2. Daily Features Table ─────────────────────────────────────────
 -- One row per stock per day — the feature vector for ML training.

@@ -15,6 +15,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   const pageNames: Record<string, string> = {
     '/': 'Dashboard',
     '/news': 'News Feed',
+    '/predictions': 'AI Predictions',
     '/sectors': 'Sectors',
     '/watchlist': 'Watchlist',
     '/broker': 'Broker API',
