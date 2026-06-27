@@ -409,19 +409,36 @@ export async function generatePrediction(
       const direction: 'up' | 'down' = heurResult.probability >= 0.5 ? 'up' : 'down';
       const confidence = Math.round((direction === 'up' ? heurResult.probability : 1 - heurResult.probability) * 100);
 
+      const supportingSignals = heurResult.signals.filter(s =>
+        (direction === 'up' && !s.toLowerCase().includes('bearish') && !s.toLowerCase().includes('selling') && !s.toLowerCase().includes('overbought')) ||
+        (direction === 'down' && !s.toLowerCase().includes('bullish') && !s.toLowerCase().includes('buying') && !s.toLowerCase().includes('oversold'))
+      ).slice(0, 5);
+
+      const contradictingSignals = heurResult.signals.filter(s =>
+        (direction === 'up' && (s.toLowerCase().includes('bearish') || s.toLowerCase().includes('selling') || s.toLowerCase().includes('overbought'))) ||
+        (direction === 'down' && (s.toLowerCase().includes('bullish') || s.toLowerCase().includes('buying') || s.toLowerCase().includes('oversold')))
+      ).slice(0, 3);
+
+      // Save heuristic prediction to DB so dashboard can show it
+      await savePrediction({
+        symbol,
+        predictedDirection: direction,
+        probability: confidence,
+        confidenceLevel: getConfidenceLevel(confidence),
+        featuresJson: { heuristicSignals: heurResult.signals },
+        supportingSignals,
+        contradictingSignals,
+        modelVersion: 'v2-heuristic-only',
+        predictedAt: new Date().toISOString(),
+      });
+
       return {
         symbol,
         direction,
         confidence,
         confidenceLevel: getConfidenceLevel(confidence),
-        supportingSignals: heurResult.signals.filter(s =>
-          (direction === 'up' && !s.toLowerCase().includes('bearish') && !s.toLowerCase().includes('selling') && !s.toLowerCase().includes('overbought')) ||
-          (direction === 'down' && !s.toLowerCase().includes('bullish') && !s.toLowerCase().includes('buying') && !s.toLowerCase().includes('oversold'))
-        ).slice(0, 5),
-        contradictingSignals: heurResult.signals.filter(s =>
-          (direction === 'up' && (s.toLowerCase().includes('bearish') || s.toLowerCase().includes('selling') || s.toLowerCase().includes('overbought'))) ||
-          (direction === 'down' && (s.toLowerCase().includes('bullish') || s.toLowerCase().includes('buying') || s.toLowerCase().includes('oversold')))
-        ).slice(0, 3),
+        supportingSignals,
+        contradictingSignals,
         featureImportance: {},
         subModelVotes: {
           logisticRegression: { direction, probability: confidence },

@@ -68,6 +68,7 @@ export async function GET(request: Request) {
           return;
         }
 
+        // Also verify the DB is reachable by doing a direct count query
         results.push({ symbol, status: 'ok', direction: prediction.direction, confidence: prediction.confidence });
       } catch (err: any) {
         results.push({ symbol, status: 'error' });

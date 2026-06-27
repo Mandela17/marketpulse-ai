@@ -49,13 +49,14 @@ export async function savePrediction(prediction: Omit<PredictionRecord, 'id'>): 
     }).select('id').single();
 
     if (error) {
-      console.warn('[Predictions] Save failed:', error.message);
+      console.error('[Predictions] Save FAILED for', prediction.symbol, '— Supabase error:', error.code, error.message, error.details);
       return null;
     }
 
+    console.log('[Predictions] Saved prediction for', prediction.symbol, '— id:', data?.id);
     return data?.id ?? null;
   } catch (err) {
-    console.warn('[Predictions] Save error:', err);
+    console.error('[Predictions] Save THREW for', prediction.symbol, ':', err);
     return null;
   }
 }
@@ -155,7 +156,14 @@ export async function getActivePredictions(): Promise<PredictionRecord[]> {
       .is('resolved_at', null)
       .order('probability', { ascending: false });
 
-    if (error || !data) return [];
+    if (error) {
+      console.error('[Predictions] getActivePredictions error:', error.code, error.message);
+      return [];
+    }
+
+    if (!data) return [];
+
+    console.log('[Predictions] getActivePredictions returned', data.length, 'rows');
 
     return data.map((row: any) => ({
       id: row.id,
@@ -169,7 +177,8 @@ export async function getActivePredictions(): Promise<PredictionRecord[]> {
       modelVersion: row.model_version,
       predictedAt: row.predicted_at,
     }));
-  } catch {
+  } catch (err) {
+    console.error('[Predictions] getActivePredictions threw:', err);
     return [];
   }
 }
