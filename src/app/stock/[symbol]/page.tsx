@@ -799,6 +799,147 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
                 )}
               </div>
 
+              {/* 🌐 Market Regime + Upcoming Events Row */}
+              {aiPrediction && (aiPrediction.regime || aiPrediction.events?.upcoming?.length > 0) && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Market Regime */}
+                  {aiPrediction.regime && (
+                    <div className="rounded-xl p-4"
+                      style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+                      <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>
+                          🌐 Market Regime
+                        </h3>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold"
+                          style={{ background: `${aiPrediction.regime.color}20`, color: aiPrediction.regime.color }}>
+                          {aiPrediction.regime.confidence}% confidence
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3 mb-2">
+                        <span className="text-2xl">{aiPrediction.regime.emoji}</span>
+                        <div>
+                          <p className="text-sm font-bold" style={{ color: aiPrediction.regime.color }}>
+                            {aiPrediction.regime.label}
+                          </p>
+                          <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                            {aiPrediction.regime.description?.slice(0, 100)}...
+                          </p>
+                        </div>
+                      </div>
+                      {aiPrediction.regime.adjustments && (
+                        <div className="flex gap-2 mt-2">
+                          {[
+                            { label: 'Confidence', val: `${(aiPrediction.regime.adjustments.confidenceMultiplier * 100 - 100).toFixed(0)}%` },
+                            { label: 'Risk', val: `${aiPrediction.regime.adjustments.riskMultiplier}x` },
+                            { label: 'Size', val: `${aiPrediction.regime.adjustments.positionSizeMultiplier}x` },
+                          ].map(a => (
+                            <span key={a.label} className="text-[9px] px-2 py-0.5 rounded"
+                              style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)' }}>
+                              {a.label}: {a.val}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Upcoming Events */}
+                  {aiPrediction.events?.upcoming?.length > 0 && (
+                    <div className="rounded-xl p-4"
+                      style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+                      <h3 className="text-sm font-bold mb-3" style={{ color: 'var(--text-primary)' }}>
+                        📅 Upcoming Events
+                      </h3>
+                      <div className="space-y-2">
+                        {aiPrediction.events.upcoming.slice(0, 3).map((evt: any) => (
+                          <div key={evt.id} className="flex items-center gap-3 p-2 rounded-lg"
+                            style={{ background: 'rgba(255,255,255,0.03)' }}>
+                            <span className="text-xs font-mono font-bold px-2 py-1 rounded"
+                              style={{
+                                background: evt.impact === 'high' ? 'rgba(239,68,68,0.15)' : 'rgba(251,191,36,0.15)',
+                                color: evt.impact === 'high' ? '#f87171' : '#fbbf24'
+                              }}>
+                              {new Date(evt.date).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-medium truncate" style={{ color: 'var(--text-primary)' }}>
+                                {evt.title}
+                              </p>
+                              <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                                {evt.impact.toUpperCase()} impact • {evt.expectedVolatility} volatility
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      {aiPrediction.events.volatilityAdjustment?.reason && (
+                        <p className="text-[10px] mt-2 px-2 py-1 rounded"
+                          style={{ background: 'rgba(251,191,36,0.08)', color: '#fbbf24' }}>
+                          ⚡ Volatility elevated due to: {aiPrediction.events.volatilityAdjustment.reason}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 📝 AI Narrative Report */}
+              {aiPrediction?.narrative && (
+                <div className="rounded-xl p-5"
+                  style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-base font-bold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
+                      📝 AI Research Report
+                    </h2>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full"
+                      style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)' }}>
+                      Generated {new Date(aiPrediction.narrative.generatedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                  
+                  {/* Summary */}
+                  <div className="p-3 rounded-lg mb-4"
+                    style={{ background: 'linear-gradient(135deg, rgba(59,130,246,0.06), rgba(139,92,246,0.06))', border: '1px solid rgba(99,102,241,0.2)' }}>
+                    <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                      {aiPrediction.narrative.summary}
+                    </p>
+                  </div>
+
+                  {/* Full Analysis */}
+                  <div className="space-y-3 mb-4">
+                    {aiPrediction.narrative.analysis.split('\n\n').map((para: string, i: number) => (
+                      <p key={i} className="text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+                        {para}
+                      </p>
+                    ))}
+                  </div>
+
+                  {/* Key Takeaways & Risks in columns */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {aiPrediction.narrative.keyTakeaways?.length > 0 && (
+                      <div className="p-3 rounded-lg" style={{ background: 'rgba(0,214,143,0.05)' }}>
+                        <p className="text-[10px] uppercase font-bold mb-2" style={{ color: 'var(--accent-green)' }}>
+                          🎯 Key Takeaways
+                        </p>
+                        {aiPrediction.narrative.keyTakeaways.map((t: string, i: number) => (
+                          <p key={i} className="text-[11px] mb-1" style={{ color: 'var(--text-secondary)' }}>• {t}</p>
+                        ))}
+                      </div>
+                    )}
+                    {aiPrediction.narrative.riskWarnings?.length > 0 && (
+                      <div className="p-3 rounded-lg" style={{ background: 'rgba(255,77,106,0.05)' }}>
+                        <p className="text-[10px] uppercase font-bold mb-2" style={{ color: 'var(--accent-red)' }}>
+                          ⚠️ Risk Warnings
+                        </p>
+                        {aiPrediction.narrative.riskWarnings.map((w: string, i: number) => (
+                          <p key={i} className="text-[11px] mb-1" style={{ color: 'var(--text-secondary)' }}>• {w}</p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Volume & Momentum Analysis (Real data) */}
               {tech && (
                 <div className="rounded-xl p-5 glass-card"
