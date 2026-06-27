@@ -1,188 +1,310 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { SystemHealth } from '@/lib/dataQuality';
 
 export default function PredictionsDashboard() {
   const [activePredictions, setActivePredictions] = useState<any[]>([]);
-  const [history, setHistory] = useState<any[]>([]);
   const [accuracy, setAccuracy] = useState<any>(null);
-  const [health, setHealth] = useState<SystemHealth | null>(null);
+  const [health, setHealth] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<'active' | 'history'>('active');
+  const [seeding, setSeeding] = useState(false);
+  const [seedResult, setSeedResult] = useState<any>(null);
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
 
-  useEffect(() => {
-    async function fetchData() {
-      setLoading(true);
-      try {
-        const [activeRes, accuracyRes, healthRes] = await Promise.all([
-          fetch('/api/predictions?type=active').then(r => r.json()),
-          fetch('/api/predictions?type=accuracy').then(r => r.json()),
-          // Creating a quick inline health check endpoint or just assuming it's healthy for now 
-          // if we don't have an API route for health yet.
-          fetch('/api/health').then(r => r.ok ? r.json() : null).catch(() => null)
-        ]);
-        
-        if (activeRes.predictions) setActivePredictions(activeRes.predictions);
-        if (accuracyRes) setAccuracy(accuracyRes);
-        if (healthRes) setHealth(healthRes);
-      } catch (err) {
-        console.error('Failed to fetch predictions data:', err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchData();
-  }, []);
-
-  const fetchHistory = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      // In a real app we would paginate this or filter by symbol
-      // For now, let's just use the active view since history requires a symbol in our current API
-      setTab('history');
+      const [activeRes, accuracyRes, healthRes] = await Promise.all([
+        fetch('/api/predictions?type=active').then(r => r.json()).catch(() => ({ predictions: [] })),
+        fetch('/api/predictions?type=accuracy').then(r => r.json()).catch(() => null),
+        fetch('/api/health').then(r => r.json()).catch(() => null),
+      ]);
+
+      if (activeRes.predictions) setActivePredictions(activeRes.predictions);
+      if (accuracyRes) setAccuracy(accuracyRes);
+      if (healthRes) setHealth(healthRes);
+      setLastRefresh(new Date());
+    } catch (err) {
+      console.error('Failed to fetch predictions data:', err);
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  const handleSeed = async () => {
+    setSeeding(true);
+    setSeedResult(null);
+    try {
+      const res = await fetch('/api/seed-predictions');
+      const data = await res.json();
+      setSeedResult(data);
+      // Re-fetch data after seeding
+      await fetchData();
+    } catch (err) {
+      setSeedResult({ success: false, error: 'Failed to seed predictions' });
+    } finally {
+      setSeeding(false);
+    }
   };
+
+  const isEmpty = !loading && activePredictions.length === 0;
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6 animate-fade-in">
+      {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>🤖 AI Predictions Center</h1>
+          <h1 className="text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>
+            🤖 AI Predictions Center
+          </h1>
           <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
             Track active ML model forecasts and historical accuracy scoreboard
           </p>
         </div>
-        
-        {/* Health Badge */}
-        {health && (
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-bold"
-            style={{ 
-              background: health.status === 'healthy' ? 'rgba(0,214,143,0.1)' : 'rgba(255,184,0,0.1)',
-              borderColor: health.status === 'healthy' ? 'rgba(0,214,143,0.3)' : 'rgba(255,184,0,0.3)',
-              color: health.status === 'healthy' ? 'var(--accent-green)' : 'var(--accent-yellow)'
-            }}>
-            <span className={health.status === 'healthy' ? 'animate-pulse' : ''}>
-              {health.status === 'healthy' ? '🟢 System Healthy' : '🟡 Degraded'}
-            </span>
-          </div>
-        )}
+
+        <div className="flex items-center gap-3">
+          {/* System Health Badge */}
+          {health && (
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-bold`}
+              style={{
+                background: health.status === 'healthy' ? 'rgba(0,214,143,0.1)' : 'rgba(255,184,0,0.1)',
+                borderColor: health.status === 'healthy' ? 'rgba(0,214,143,0.3)' : 'rgba(255,184,0,0.3)',
+                color: health.status === 'healthy' ? 'var(--accent-green)' : 'var(--accent-yellow)'
+              }}>
+              <span className={`w-1.5 h-1.5 rounded-full ${health.status === 'healthy' ? 'bg-green-400 animate-pulse' : 'bg-yellow-400'}`} />
+              {health.status === 'healthy' ? 'System Healthy' : 'Degraded'}
+            </div>
+          )}
+
+          {/* Refresh Button */}
+          <button
+            onClick={fetchData}
+            disabled={loading}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold border transition-all cursor-pointer hover:bg-white hover:bg-opacity-5"
+            style={{ borderColor: 'var(--border-color)', color: 'var(--text-secondary)' }}>
+            <span className={loading ? 'animate-spin' : ''}>↻</span>
+            Refresh
+          </button>
+        </div>
       </div>
+
+      {/* Health Warnings */}
+      {health?.warnings?.length > 0 && (
+        <div className="p-3 rounded-xl border" style={{ background: 'rgba(255,184,0,0.05)', borderColor: 'rgba(255,184,0,0.2)' }}>
+          <p className="text-xs font-bold mb-1" style={{ color: '#fbbf24' }}>⚠️ System Notices</p>
+          {health.warnings.map((w: string, i: number) => (
+            <p key={i} className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>• {w}</p>
+          ))}
+        </div>
+      )}
 
       {/* Scoreboard */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="p-5 rounded-xl border glass-card" style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
-          <p className="text-xs uppercase font-bold tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>Overall Accuracy</p>
-          <div className="flex items-end gap-2">
-            <h2 className="text-3xl font-bold" style={{ color: 'var(--accent-blue)' }}>
-              {accuracy?.overall?.accuracy_pct || '--'}%
-            </h2>
-          </div>
+        <div className="p-5 rounded-xl border" style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
+          <p className="text-[10px] uppercase font-bold tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>Overall Accuracy</p>
+          <h2 className="text-3xl font-bold" style={{ color: 'var(--accent-blue)' }}>
+            {accuracy?.overall?.accuracy_pct ?? '--'}%
+          </h2>
           <p className="text-xs mt-2" style={{ color: 'var(--text-secondary)' }}>
-            {accuracy?.overall?.correct_count || 0} correct out of {accuracy?.overall?.total_resolved || 0}
-          </p>
-        </div>
-        
-        <div className="p-5 rounded-xl border glass-card" style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
-          <p className="text-xs uppercase font-bold tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>30-Day Accuracy</p>
-          <div className="flex items-end gap-2">
-            <h2 className="text-3xl font-bold" style={{ color: 'var(--accent-purple)' }}>
-              {accuracy?.overall?.accuracy_30d_pct || '--'}%
-            </h2>
-          </div>
-          <p className="text-xs mt-2" style={{ color: 'var(--text-secondary)' }}>
-            {accuracy?.overall?.correct_30d || 0} correct out of {accuracy?.overall?.resolved_30d || 0}
+            {accuracy?.overall?.correct_count ?? 0} correct of {accuracy?.overall?.total_resolved ?? 0} resolved
           </p>
         </div>
 
-        <div className="p-5 rounded-xl border glass-card md:col-span-2" style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
-           <p className="text-xs uppercase font-bold tracking-wider mb-3" style={{ color: 'var(--text-muted)' }}>Top Performing Stocks</p>
-           {accuracy?.perStock && accuracy.perStock.length > 0 ? (
-             <div className="flex gap-4">
-               {accuracy.perStock.slice(0, 3).map((st: any) => (
-                 <div key={st.symbol} className="flex-1 p-2 rounded bg-slate-900 border border-slate-800 text-center">
-                   <Link href={`/stock/${st.symbol}`} className="font-bold text-blue-400 hover:underline">{st.symbol}</Link>
-                   <p className="text-lg font-bold text-white">{st.accuracy_pct}%</p>
-                   <p className="text-[10px] text-slate-400">{st.correct_count}/{st.total_resolved} wins</p>
-                 </div>
-               ))}
-             </div>
-           ) : (
-             <p className="text-sm text-slate-500 py-4 text-center">Not enough resolved predictions yet</p>
-           )}
+        <div className="p-5 rounded-xl border" style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
+          <p className="text-[10px] uppercase font-bold tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>30-Day Accuracy</p>
+          <h2 className="text-3xl font-bold" style={{ color: 'var(--accent-purple)' }}>
+            {accuracy?.overall?.accuracy_30d_pct ?? '--'}%
+          </h2>
+          <p className="text-xs mt-2" style={{ color: 'var(--text-secondary)' }}>
+            {accuracy?.overall?.correct_30d ?? 0} correct of {accuracy?.overall?.resolved_30d ?? 0}
+          </p>
+        </div>
+
+        <div className="p-5 rounded-xl border" style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
+          <p className="text-[10px] uppercase font-bold tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>Active Predictions</p>
+          <h2 className="text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>
+            {loading ? '...' : activePredictions.length}
+          </h2>
+          <p className="text-xs mt-2" style={{ color: 'var(--text-secondary)' }}>
+            {lastRefresh ? `Updated ${lastRefresh.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}` : 'Loading...'}
+          </p>
+        </div>
+
+        {/* Top Stocks */}
+        <div className="p-5 rounded-xl border" style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
+          <p className="text-[10px] uppercase font-bold tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>Top Stock</p>
+          {accuracy?.perStock?.[0] ? (
+            <>
+              <Link href={`/stock/${accuracy.perStock[0].symbol}`}
+                className="text-xl font-bold hover:underline" style={{ color: 'var(--accent-blue)' }}>
+                {accuracy.perStock[0].symbol}
+              </Link>
+              <p className="text-2xl font-bold" style={{ color: 'var(--accent-green)' }}>
+                {accuracy.perStock[0].accuracy_pct}%
+              </p>
+              <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>
+                {accuracy.perStock[0].correct_count}/{accuracy.perStock[0].total_resolved} correct
+              </p>
+            </>
+          ) : (
+            <p className="text-xs mt-4" style={{ color: 'var(--text-muted)' }}>No resolved predictions</p>
+          )}
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex border-b" style={{ borderColor: 'var(--border-color)' }}>
-        <button 
-          onClick={() => setTab('active')}
-          className={`px-6 py-3 font-bold border-b-2 transition-all ${tab === 'active' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
-          Active Predictions ({activePredictions.length})
-        </button>
-      </div>
+      {/* Seed Result Banner */}
+      {seedResult && (
+        <div className="p-4 rounded-xl border animate-fade-in"
+          style={{
+            background: seedResult.success ? 'rgba(0,214,143,0.08)' : 'rgba(255,77,106,0.08)',
+            borderColor: seedResult.success ? 'rgba(0,214,143,0.3)' : 'rgba(255,77,106,0.3)',
+          }}>
+          {seedResult.success ? (
+            <p className="text-sm font-bold" style={{ color: 'var(--accent-green)' }}>
+              ✅ Generated predictions: {seedResult.summary.ok} stocks predicted, {seedResult.summary.skipped} skipped, {seedResult.summary.errors} errors
+            </p>
+          ) : (
+            <p className="text-sm font-bold" style={{ color: 'var(--accent-red)' }}>
+              ❌ {seedResult.error}
+            </p>
+          )}
+        </div>
+      )}
 
-      {/* Active Predictions Table */}
-      {tab === 'active' && (
+      {/* Predictions Table */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-bold border-b pb-2 w-full" style={{ color: 'var(--text-primary)', borderColor: 'var(--border-color)' }}>
+            Active Predictions ({activePredictions.length})
+          </h2>
+        </div>
+
         <div className="rounded-xl border overflow-hidden" style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
           {loading ? (
             <div className="p-12 text-center">
-              <div className="w-8 h-8 border-3 rounded-full animate-spin mx-auto mb-3" style={{ borderColor: 'var(--border-color)', borderTopColor: 'var(--accent-blue)' }} />
+              <div className="w-8 h-8 border-2 rounded-full animate-spin mx-auto mb-3"
+                style={{ borderColor: 'var(--border-color)', borderTopColor: 'var(--accent-blue)' }} />
               <p className="text-sm text-slate-400">Loading predictions...</p>
             </div>
-          ) : activePredictions.length === 0 ? (
-             <div className="p-12 text-center">
-              <p className="text-4xl mb-3">📭</p>
-              <h3 className="text-lg font-bold text-white mb-1">No Active Predictions</h3>
-              <p className="text-sm text-slate-400">The ML engine runs daily after market close.</p>
+          ) : isEmpty ? (
+            <div className="p-10 text-center space-y-4">
+              <p className="text-4xl">📊</p>
+              <div>
+                <h3 className="text-lg font-bold text-white mb-1">No Active Predictions Yet</h3>
+                <p className="text-sm text-slate-400 max-w-md mx-auto">
+                  The ML engine hasn't run yet. Click the button below to generate predictions for the top 25 Nifty stocks right now, or visit individual stock pages to trigger predictions one at a time.
+                </p>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-3 mt-4">
+                <button
+                  onClick={handleSeed}
+                  disabled={seeding}
+                  className="flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-sm transition-all cursor-pointer"
+                  style={{
+                    background: seeding ? 'rgba(255,255,255,0.05)' : 'linear-gradient(135deg, #3b82f6, #8b5cf6)',
+                    color: 'white',
+                    opacity: seeding ? 0.7 : 1,
+                  }}>
+                  {seeding ? (
+                    <>
+                      <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      Generating ({KEY_STOCKS_COUNT} stocks)...
+                    </>
+                  ) : (
+                    <>🚀 Generate Predictions Now</>
+                  )}
+                </button>
+
+                <span className="text-xs text-slate-500">or visit a stock page to trigger individually</span>
+              </div>
+
+              <div className="mt-4 p-3 rounded-lg text-left max-w-sm mx-auto"
+                style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)' }}>
+                <p className="text-[10px] font-bold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
+                  Quick Links — Popular Stocks
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {['RELIANCE', 'TCS', 'HDFCBANK', 'ICICIBANK', 'INFY', 'SBIN', 'BHARTIARTL'].map(s => (
+                    <Link key={s} href={`/stock/${s}`}
+                      className="text-[11px] px-2 py-1 rounded font-medium hover:bg-blue-600 transition-colors"
+                      style={{ background: 'rgba(59,130,246,0.15)', color: '#60a5fa' }}>
+                      {s}
+                    </Link>
+                  ))}
+                </div>
+              </div>
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
+              <table className="w-full text-left">
                 <thead>
-                  <tr className="border-b bg-slate-900" style={{ borderColor: 'var(--border-color)' }}>
-                    <th className="p-4 text-xs font-bold uppercase tracking-wider text-slate-400">Symbol</th>
-                    <th className="p-4 text-xs font-bold uppercase tracking-wider text-slate-400">Direction</th>
-                    <th className="p-4 text-xs font-bold uppercase tracking-wider text-slate-400">Confidence</th>
-                    <th className="p-4 text-xs font-bold uppercase tracking-wider text-slate-400">Risk/Reward</th>
-                    <th className="p-4 text-xs font-bold uppercase tracking-wider text-slate-400 text-right">Predicted At</th>
+                  <tr className="border-b" style={{ background: 'rgba(255,255,255,0.03)', borderColor: 'var(--border-color)' }}>
+                    <th className="p-4 text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Symbol</th>
+                    <th className="p-4 text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Direction</th>
+                    <th className="p-4 text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Confidence</th>
+                    <th className="p-4 text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Level</th>
+                    <th className="p-4 text-[10px] font-bold uppercase tracking-wider text-right" style={{ color: 'var(--text-muted)' }}>Predicted At</th>
+                    <th className="p-4 text-[10px] font-bold uppercase tracking-wider text-right" style={{ color: 'var(--text-muted)' }}>Action</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y" style={{ borderColor: 'var(--border-color)' }}>
-                  {activePredictions.map((pred) => (
-                    <tr key={pred.id} className="hover:bg-slate-800/50 transition-colors">
+                <tbody>
+                  {activePredictions.map((pred, idx) => (
+                    <tr key={pred.id}
+                      className="border-b transition-colors hover:bg-white hover:bg-opacity-[0.02]"
+                      style={{ borderColor: 'var(--border-color)' }}>
                       <td className="p-4">
-                        <Link href={`/stock/${pred.symbol}`} className="font-bold text-blue-400 hover:underline">
+                        <Link href={`/stock/${pred.symbol}`}
+                          className="font-bold hover:underline" style={{ color: 'var(--accent-blue)' }}>
                           {pred.symbol}
                         </Link>
                       </td>
                       <td className="p-4">
-                        <span className="flex items-center gap-1.5 font-bold" style={{ color: pred.predicted_direction === 'up' ? 'var(--accent-green)' : 'var(--accent-red)' }}>
+                        <span className="flex items-center gap-1.5 text-sm font-bold"
+                          style={{ color: pred.predicted_direction === 'up' ? 'var(--accent-green)' : 'var(--accent-red)' }}>
                           {pred.predicted_direction === 'up' ? '📈 BULLISH' : '📉 BEARISH'}
                         </span>
                       </td>
                       <td className="p-4">
                         <div className="flex items-center gap-2">
-                          <span className="font-bold">{pred.probability}%</span>
-                          <span className="text-[10px] px-2 py-0.5 rounded capitalize" 
-                            style={{ 
-                              background: pred.confidence_level === 'high' || pred.confidence_level === 'very_high' ? 'rgba(0,214,143,0.1)' : 'rgba(255,255,255,0.05)',
-                              color: pred.confidence_level === 'high' || pred.confidence_level === 'very_high' ? 'var(--accent-green)' : 'var(--text-secondary)'
-                            }}>
-                            {pred.confidence_level.replace('_', ' ')}
-                          </span>
+                          <span className="font-bold text-sm" style={{ color: 'var(--text-primary)' }}>{pred.probability}%</span>
+                          {/* Confidence bar */}
+                          <div className="w-16 h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.1)' }}>
+                            <div className="h-full rounded-full transition-all"
+                              style={{
+                                width: `${pred.probability}%`,
+                                background: pred.probability >= 70 ? 'var(--accent-green)' :
+                                            pred.probability >= 60 ? 'var(--accent-yellow)' : 'var(--text-muted)',
+                              }} />
+                          </div>
                         </div>
                       </td>
                       <td className="p-4">
-                        {/* We don't store risk/reward directly in the table currently, it's computed on the fly on stock page, 
-                            but we could extract it from features_json if we saved it there. For now, placeholder */}
-                         <span className="text-xs text-slate-400">See Details</span>
+                        <span className="text-[10px] px-2 py-0.5 rounded capitalize font-medium"
+                          style={{
+                            background: pred.confidence_level === 'high' || pred.confidence_level === 'very_high'
+                              ? 'rgba(0,214,143,0.1)' : 'rgba(255,255,255,0.05)',
+                            color: pred.confidence_level === 'high' || pred.confidence_level === 'very_high'
+                              ? 'var(--accent-green)' : 'var(--text-secondary)',
+                          }}>
+                          {pred.confidence_level?.replace('_', ' ')}
+                        </span>
                       </td>
-                      <td className="p-4 text-right text-sm text-slate-400">
-                        {new Date(pred.predicted_at).toLocaleString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      <td className="p-4 text-right text-xs" style={{ color: 'var(--text-muted)' }}>
+                        {new Date(pred.predicted_at).toLocaleString('en-IN', {
+                          month: 'short', day: 'numeric',
+                          hour: '2-digit', minute: '2-digit'
+                        })}
+                      </td>
+                      <td className="p-4 text-right">
+                        <Link href={`/stock/${pred.symbol}`}
+                          className="text-[11px] px-2 py-1 rounded font-bold hover:bg-blue-600 transition-colors"
+                          style={{ background: 'rgba(59,130,246,0.15)', color: '#60a5fa' }}>
+                          View →
+                        </Link>
                       </td>
                     </tr>
                   ))}
@@ -191,7 +313,14 @@ export default function PredictionsDashboard() {
             </div>
           )}
         </div>
-      )}
+      </div>
+
+      {/* Footer note */}
+      <p className="text-[10px] text-center" style={{ color: 'var(--text-muted)', opacity: 0.5 }}>
+        AI predictions are for informational purposes only. Not financial advice. Accuracy improves as the model accumulates more historical data.
+      </p>
     </div>
   );
 }
+
+const KEY_STOCKS_COUNT = 25;
