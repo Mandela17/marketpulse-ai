@@ -4,11 +4,12 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-import { LayoutDashboard, Newspaper, TrendingUp, Star, Plug, ChevronRight, LogOut, X, Grid3x3 } from 'lucide-react';
+import { LayoutDashboard, Newspaper, TrendingUp, Star, Plug, ChevronRight, LogOut, X, Grid3x3, Search } from 'lucide-react';
 
 const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/heatmap', label: 'Heatmap', icon: Grid3x3 },
+  { href: '/screener', label: 'Screener', icon: Search },
   { href: '/news', label: 'News Feed', icon: Newspaper },
   { href: '/predictions', label: 'AI Predictions', icon: TrendingUp },
   { href: '/sectors', label: 'Sectors', icon: TrendingUp },

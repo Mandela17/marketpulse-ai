@@ -11,6 +11,8 @@ import { Calendar } from 'lucide-react';
 import FIIDIIWidget from '@/components/FIIDIIWidget';
 import MarketRegimeWidget from '@/components/MarketRegimeWidget';
 import TopMoversWidget from '@/components/TopMoversWidget';
+import VIXGaugeWidget from '@/components/VIXGaugeWidget';
+import GlobalMarketsWidget from '@/components/GlobalMarketsWidget';
 
 interface MarketData {
   nifty50: { value: number; change: number; changePercent: number };
@@ -444,6 +446,12 @@ export default function Dashboard() {
 
           {/* Top Movers */}
           <TopMoversWidget />
+
+          {/* India VIX Fear Gauge */}
+          <VIXGaugeWidget />
+
+          {/* Global Markets */}
+          <GlobalMarketsWidget />
 
           {/* News Feed */}
           <div className="xl:sticky xl:top-6">
