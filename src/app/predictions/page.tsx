@@ -107,20 +107,20 @@ export default function PredictionsDashboard() {
         <div className="p-5 rounded-xl border" style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
           <p className="text-[10px] uppercase font-bold tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>Overall Accuracy</p>
           <h2 className="text-3xl font-bold" style={{ color: 'var(--accent-blue)' }}>
-            {accuracy?.overall?.accuracy_pct ?? '--'}%
+            {accuracy?.overall?.overallAccuracy ?? '--'}%
           </h2>
           <p className="text-xs mt-2" style={{ color: 'var(--text-secondary)' }}>
-            {accuracy?.overall?.correct_count ?? 0} correct of {accuracy?.overall?.total_resolved ?? 0} resolved
+            {accuracy?.overall?.totalCorrect ?? 0} correct of {accuracy?.overall?.totalResolved ?? 0} resolved
           </p>
         </div>
 
         <div className="p-5 rounded-xl border" style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
           <p className="text-[10px] uppercase font-bold tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>30-Day Accuracy</p>
           <h2 className="text-3xl font-bold" style={{ color: 'var(--accent-purple)' }}>
-            {accuracy?.overall?.accuracy_30d_pct ?? '--'}%
+            {accuracy?.overall?.accuracy30d ?? '--'}%
           </h2>
           <p className="text-xs mt-2" style={{ color: 'var(--text-secondary)' }}>
-            {accuracy?.overall?.correct_30d ?? 0} correct of {accuracy?.overall?.resolved_30d ?? 0}
+            Recent 30-day window
           </p>
         </div>
 
@@ -134,21 +134,19 @@ export default function PredictionsDashboard() {
           </p>
         </div>
 
-        {/* Top Stocks */}
+        {/* Best Stock */}
         <div className="p-5 rounded-xl border" style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
-          <p className="text-[10px] uppercase font-bold tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>Top Stock</p>
-          {accuracy?.perStock?.[0] ? (
+          <p className="text-[10px] uppercase font-bold tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>Best Stock</p>
+          {accuracy?.overall?.bestStock ? (
             <>
-              <Link href={`/stock/${accuracy.perStock[0].symbol}`}
+              <Link href={`/stock/${accuracy.overall.bestStock.symbol}`}
                 className="text-xl font-bold hover:underline" style={{ color: 'var(--accent-blue)' }}>
-                {accuracy.perStock[0].symbol}
+                {accuracy.overall.bestStock.symbol}
               </Link>
               <p className="text-2xl font-bold" style={{ color: 'var(--accent-green)' }}>
-                {accuracy.perStock[0].accuracy_pct}%
+                {accuracy.overall.bestStock.accuracy}%
               </p>
-              <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>
-                {accuracy.perStock[0].correct_count}/{accuracy.perStock[0].total_resolved} correct
-              </p>
+              <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>Highest win rate</p>
             </>
           ) : (
             <p className="text-xs mt-4" style={{ color: 'var(--text-muted)' }}>No resolved predictions</p>

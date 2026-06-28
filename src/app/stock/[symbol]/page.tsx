@@ -11,6 +11,8 @@ import type { NewsArticle } from '@/lib/types';
 import type { RealTechnicals } from '@/lib/technicalAnalysis';
 import { getDerivativesData, DerivativesData, getBrokerConfig } from '@/lib/brokerApi';
 import { useAuth } from '@/context/AuthContext';
+import AlertManager from '@/components/AlertManager';
+import { checkPredictionAlerts, checkPriceAlerts } from '@/lib/priceAlerts';
 
 // Lazy-load heavy chart component (defers ~48KB lightweight-charts from initial bundle)
 const TradingViewChart = dynamic(() => import('@/components/TradingViewChart'), {
@@ -171,6 +173,10 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
       // Process stock quote
       if (stockRes.status === 'fulfilled' && stockRes.value && !stockRes.value.error) {
         setLiveData(stockRes.value);
+        // Fire price alerts
+        if (stockRes.value.quote?.price) {
+          checkPriceAlerts(decodedSymbol, stockRes.value.quote.price);
+        }
       }
       setLoadingLive(false);
 
@@ -242,6 +248,10 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
       .then(data => {
         if (data && !data.error) {
           setAiPrediction(data);
+          // Fire any matching alerts
+          if (data.direction && data.confidence) {
+            checkPredictionAlerts(decodedSymbol, { direction: data.direction, confidence: data.confidence });
+          }
         }
       })
       .catch(err => console.warn('AI prediction fetch failed:', err))
@@ -1440,8 +1450,18 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
 
         {/* Right Column - Related News (Real) */}
         <div className="xl:col-span-1">
-          <div className="sticky top-6">
-            <h2 className="text-base font-bold mb-4" style={{ color: 'var(--text-primary)' }}>
+          <div className="sticky top-6 space-y-5">
+            {/* Alert Manager */}
+            <AlertManager
+              symbol={decodedSymbol}
+              currentPrice={liveData?.quote?.price}
+              currentPrediction={aiPrediction ? {
+                direction: aiPrediction.direction as 'up' | 'down',
+                confidence: aiPrediction.confidence || 50,
+              } : null}
+            />
+
+            <h2 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>
               📰 Related News
             </h2>
             <div className="space-y-0">

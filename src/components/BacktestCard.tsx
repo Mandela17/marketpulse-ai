@@ -26,17 +26,16 @@ export default function BacktestCard() {
         const res = await fetch('/api/predictions?type=accuracy');
         const json = await res.json();
 
-        if (!json.accuracy) {
-          // No resolved predictions yet — show placeholder
+        const overall = json.overall;
+        if (!overall || overall.totalResolved === 0) {
           setData(null);
           setLoading(false);
           return;
         }
 
-        // Build backtest from accuracy data
-        const totalResolved = json.accuracy.totalResolved || 0;
-        const correctCount = json.accuracy.correctCount || 0;
-        const accuracy = totalResolved > 0 ? Math.round((correctCount / totalResolved) * 100) : 0;
+        const totalResolved = overall.totalResolved || 0;
+        const correctCount = overall.totalCorrect || 0;
+        const accuracy = overall.overallAccuracy || 0;
 
         // Simulated metrics based on what we have
         const avgGain = 1.8;
