@@ -19,7 +19,7 @@ export interface UserRoleRecord {
 }
 
 // ─── Super Admin Email ──────────────────────────────────────────────
-const SUPER_ADMIN_EMAIL = process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAIL || 'mandelakarna@gmail.com';
+const SUPER_ADMIN_EMAIL = process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAIL || 'mendela4cazz@gmail.com';
 
 // ─── Get user role record ────────────────────────────────────────────
 export async function getUserRole(userId: string): Promise<UserRoleRecord | null> {
