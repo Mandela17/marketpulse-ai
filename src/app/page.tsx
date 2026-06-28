@@ -8,6 +8,8 @@ import NewsCard from '@/components/NewsCard';
 import { DEMO_SECTORS, DEMO_NEWS, DEMO_MARKET_OVERVIEW, DEMO_GEOPOLITICAL_EVENTS } from '@/lib/mockData';
 import { getBrokerConfig } from '@/lib/brokerApi';
 import { Calendar } from 'lucide-react';
+import FIIDIIWidget from '@/components/FIIDIIWidget';
+import MarketRegimeWidget from '@/components/MarketRegimeWidget';
 
 interface MarketData {
   nifty50: { value: number; change: number; changePercent: number };
@@ -431,8 +433,15 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Right Column — News Feed */}
-        <div className="xl:col-span-1">
+        {/* Right Column — Widgets + News Feed */}
+        <div className="xl:col-span-1 space-y-4">
+          {/* Market Regime */}
+          <MarketRegimeWidget />
+
+          {/* FII/DII Flows */}
+          <FIIDIIWidget />
+
+          {/* News Feed */}
           <div className="xl:sticky xl:top-6">
             <div className="flex items-center justify-between mb-4 animate-fade-in-up delay-200">
               <h2 className="text-lg font-bold text-white">
