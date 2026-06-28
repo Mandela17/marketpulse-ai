@@ -311,3 +311,72 @@ export function getConfidenceLevel(probability: number): 'low' | 'moderate' | 'h
   if (probability >= 60) return 'moderate';
   return 'low';
 }
+
+// ─── Accuracy trend over time (weekly buckets) ─────────────────────
+
+export interface AccuracyTrendPoint {
+  weekStart: string;
+  total: number;
+  correct: number;
+  accuracy: number;
+  cumulativeTotal: number;
+  cumulativeCorrect: number;
+  cumulativeAccuracy: number;
+}
+
+export async function getAccuracyTrend(weeks: number = 12): Promise<AccuracyTrendPoint[]> {
+  try {
+    const db = getServiceClient();
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - weeks * 7);
+
+    const { data } = await db
+      .from('predictions')
+      .select('resolved_at, is_correct')
+      .not('resolved_at', 'is', null)
+      .gte('resolved_at', cutoff.toISOString())
+      .order('resolved_at', { ascending: true });
+
+    if (!data || data.length === 0) return [];
+
+    // Bucket by week
+    const buckets = new Map<string, { total: number; correct: number }>();
+
+    for (const row of data) {
+      const d = new Date(row.resolved_at);
+      // Get Monday of that week
+      const day = d.getDay();
+      const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+      const monday = new Date(d.setDate(diff));
+      const weekKey = monday.toISOString().split('T')[0];
+
+      if (!buckets.has(weekKey)) {
+        buckets.set(weekKey, { total: 0, correct: 0 });
+      }
+      const bucket = buckets.get(weekKey)!;
+      bucket.total++;
+      if (row.is_correct) bucket.correct++;
+    }
+
+    // Build cumulative trend
+    const sorted = Array.from(buckets.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+    let cumTotal = 0;
+    let cumCorrect = 0;
+
+    return sorted.map(([weekStart, { total, correct }]) => {
+      cumTotal += total;
+      cumCorrect += correct;
+      return {
+        weekStart,
+        total,
+        correct,
+        accuracy: total > 0 ? parseFloat(((correct / total) * 100).toFixed(1)) : 0,
+        cumulativeTotal: cumTotal,
+        cumulativeCorrect: cumCorrect,
+        cumulativeAccuracy: cumTotal > 0 ? parseFloat(((cumCorrect / cumTotal) * 100).toFixed(1)) : 0,
+      };
+    });
+  } catch {
+    return [];
+  }
+}

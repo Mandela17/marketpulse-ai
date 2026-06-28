@@ -130,3 +130,23 @@ CREATE POLICY "Service update predictions" ON predictions FOR UPDATE USING (true
 CREATE POLICY "Service write daily_features" ON daily_features FOR INSERT WITH CHECK (true);
 CREATE POLICY "Service update daily_features" ON daily_features FOR UPDATE USING (true);
 CREATE POLICY "Service write fii_dii_flows" ON fii_dii_flows FOR INSERT WITH CHECK (true);
+
+-- ─── 4. Broker Tokens Table ─────────────────────────────────────────
+-- Stores OAuth access tokens for broker APIs (Upstox/Zerodha) for server-side cron access.
+CREATE TABLE IF NOT EXISTS broker_tokens (
+  id          BIGSERIAL PRIMARY KEY,
+  provider    TEXT NOT NULL DEFAULT 'upstox',
+  user_id     TEXT NOT NULL DEFAULT 'default',
+  access_token TEXT NOT NULL,
+  expires_at  TIMESTAMPTZ,
+  updated_at  TIMESTAMPTZ DEFAULT NOW(),
+  is_valid    BOOLEAN DEFAULT TRUE,
+  UNIQUE(provider, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_broker_tokens_provider ON broker_tokens (provider, is_valid);
+
+ALTER TABLE broker_tokens ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public read broker_tokens" ON broker_tokens FOR SELECT USING (true);
+CREATE POLICY "Service write broker_tokens" ON broker_tokens FOR INSERT WITH CHECK (true);
+CREATE POLICY "Service update broker_tokens" ON broker_tokens FOR UPDATE USING (true);

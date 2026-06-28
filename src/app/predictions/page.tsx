@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import BacktestCard from '@/components/BacktestCard';
+import AccuracyTrendChart from '@/components/AccuracyTrendChart';
 
 export default function PredictionsDashboard() {
   const [activePredictions, setActivePredictions] = useState<any[]>([]);
@@ -156,6 +157,7 @@ export default function PredictionsDashboard() {
 
       {/* Backtest Results */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <AccuracyTrendChart />
         <BacktestCard />
         
         {/* Generate Button */}

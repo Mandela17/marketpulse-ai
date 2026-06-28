@@ -5,6 +5,7 @@ import {
   getPredictions,
   getOverallAccuracy,
   getAccuracyMetrics,
+  getAccuracyTrend,
 } from '@/lib/predictionHistory';
 
 export const dynamic = 'force-dynamic';
@@ -33,6 +34,11 @@ export async function GET(request: Request) {
           symbol ? getAccuracyMetrics(symbol) : getAccuracyMetrics(),
         ]);
         return NextResponse.json({ overall, perStock });
+      }
+      case 'trend': {
+        const weeks = parseInt(searchParams.get('weeks') || '12', 10);
+        const trend = await getAccuracyTrend(weeks);
+        return NextResponse.json({ trend });
       }
       default:
         return NextResponse.json({ error: 'Invalid type parameter' }, { status: 400 });

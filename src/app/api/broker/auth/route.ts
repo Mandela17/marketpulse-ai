@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
+import { saveUpstoxToken } from '@/lib/upstoxTokenStore';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,6 +47,13 @@ export async function POST(request: Request) {
           details: data,
         }, { status: response.status });
       }
+
+      // Persist token to Supabase for server-side cron jobs
+      await saveUpstoxToken(
+        data.access_token,
+        data.user_id || 'default',
+        data.expires_at
+      ).catch(err => console.error('[TokenStore] Failed to persist token:', err));
 
       return NextResponse.json({
         accessToken: data.access_token,
