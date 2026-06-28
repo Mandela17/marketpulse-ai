@@ -36,7 +36,19 @@ export interface AccuracyMetrics {
 export async function savePrediction(prediction: Omit<PredictionRecord, 'id'>): Promise<number | null> {
   try {
     const db = getServiceClient();
-    const { data, error } = await db.from('predictions').insert({
+    const today = new Date().toISOString().split('T')[0];
+
+    // Dedup: Check if we already have a prediction for this symbol today
+    const { data: existing } = await db
+      .from('predictions')
+      .select('id')
+      .eq('symbol', prediction.symbol)
+      .gte('predicted_at', `${today}T00:00:00Z`)
+      .lte('predicted_at', `${today}T23:59:59Z`)
+      .is('resolved_at', null)
+      .limit(1);
+
+    const row = {
       symbol: prediction.symbol,
       predicted_direction: prediction.predictedDirection,
       probability: prediction.probability,
@@ -46,7 +58,24 @@ export async function savePrediction(prediction: Omit<PredictionRecord, 'id'>): 
       contradicting_signals: prediction.contradictingSignals,
       model_version: prediction.modelVersion,
       predicted_at: prediction.predictedAt,
-    }).select('id').single();
+    };
+
+    if (existing && existing.length > 0) {
+      // Update existing prediction for today
+      const { error } = await db.from('predictions')
+        .update(row)
+        .eq('id', existing[0].id);
+
+      if (error) {
+        console.error('[Predictions] Update FAILED for', prediction.symbol, '—', error.code, error.message);
+        return null;
+      }
+      console.log('[Predictions] Updated prediction for', prediction.symbol, '— id:', existing[0].id);
+      return existing[0].id;
+    }
+
+    // Insert new prediction
+    const { data, error } = await db.from('predictions').insert(row).select('id').single();
 
     if (error) {
       console.error('[Predictions] Save FAILED for', prediction.symbol, '— Supabase error:', error.code, error.message, error.details);

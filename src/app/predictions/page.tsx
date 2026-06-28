@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
+import BacktestCard from '@/components/BacktestCard';
 
 export default function PredictionsDashboard() {
   const [activePredictions, setActivePredictions] = useState<any[]>([]);
@@ -152,6 +153,35 @@ export default function PredictionsDashboard() {
           ) : (
             <p className="text-xs mt-4" style={{ color: 'var(--text-muted)' }}>No resolved predictions</p>
           )}
+        </div>
+      </div>
+
+      {/* Backtest Results */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <BacktestCard />
+        
+        {/* Generate Button */}
+        <div className="rounded-xl p-5" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+          <h3 className="text-sm font-bold mb-3" style={{ color: 'var(--text-primary)' }}>⚡ Quick Actions</h3>
+          <div className="space-y-3">
+            <button
+              onClick={handleSeed}
+              disabled={seeding}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-bold text-sm transition-all cursor-pointer"
+              style={{
+                background: seeding ? 'rgba(255,255,255,0.05)' : 'linear-gradient(135deg, #3b82f6, #8b5cf6)',
+                color: 'white', opacity: seeding ? 0.7 : 1,
+              }}>
+              {seeding ? (
+                <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Generating...</>
+              ) : (
+                <>🚀 Generate All Predictions</>
+              )}
+            </button>
+            <p className="text-[10px] text-center" style={{ color: 'var(--text-muted)' }}>
+              Generates predictions for top {KEY_STOCKS_COUNT} Nifty stocks. Runs automatically at 8:30 AM IST daily.
+            </p>
+          </div>
         </div>
       </div>
 

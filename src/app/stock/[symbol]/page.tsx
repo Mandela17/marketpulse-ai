@@ -480,39 +480,7 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         {/* Left Column */}
         <div className="xl:col-span-2 space-y-6">
-          {/* Chart Header with Lookback Tabs */}
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 rounded-xl border bg-slate-900" style={{ borderColor: 'var(--border-color)' }}>
-            <div>
-              <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
-                📈 Interactive Stock Analytics
-              </h3>
-              <p className="text-[10px] text-slate-500 font-medium">Chart indicators & ML model train dynamically on selection</p>
-            </div>
-            
-            {/* Lookback Selection tabs */}
-            <div className="flex gap-1.5 p-1 bg-slate-950 rounded-lg border border-slate-800 self-start sm:self-auto">
-              {[
-                { label: '3M', days: 90 },
-                { label: '6M', days: 180 },
-                { label: '1Y', days: 365 },
-                { label: '2Y', days: 730 },
-                { label: '5Y', days: 1825 },
-                { label: '10Y', days: 3650 },
-              ].map(opt => (
-                <button
-                  key={opt.label}
-                  onClick={() => setLookbackDays(opt.days)}
-                  className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer ${
-                    lookbackDays === opt.days
-                      ? 'bg-blue-600 text-white shadow-md'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          </div>
+          {/* Interactive Chart with built-in timeframe selector */}
 
           {/* Interactive TradingView Candlestick & Sentiment Charts */}
           {loadingChart || loadingHistory ? (
@@ -529,6 +497,11 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
                 priceData={chartData}
                 sentimentHistory={sentimentHistory}
                 symbol={decodedSymbol}
+                predictions={aiPrediction ? [{
+                  date: new Date().toISOString().split('T')[0],
+                  direction: aiPrediction.direction as 'up' | 'down',
+                  confidence: aiPrediction.confidence || 50,
+                }] : undefined}
               />
             </div>
           ) : (

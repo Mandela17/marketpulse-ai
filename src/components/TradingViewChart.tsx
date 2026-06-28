@@ -1,7 +1,18 @@
 'use client';
 
-import React, { useEffect, useRef, useCallback } from 'react';
-import { createChart, ColorType, IChartApi, CandlestickSeries, HistogramSeries, AreaSeries, createSeriesMarkers } from 'lightweight-charts';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import {
+  createChart,
+  ColorType,
+  CrosshairMode,
+  IChartApi,
+  CandlestickSeries,
+  HistogramSeries,
+  LineSeries,
+  AreaSeries,
+  createSeriesMarkers,
+} from 'lightweight-charts';
+import type { Time, CandlestickData, HistogramData, LineData, AreaData, SeriesMarker } from 'lightweight-charts';
 
 interface ChartPricePoint {
   date: string;
@@ -12,255 +23,343 @@ interface ChartPricePoint {
   volume: number;
 }
 
-interface ChartSentimentPoint {
+interface PredictionMarker {
   date: string;
-  sentiment: number;
+  direction: 'up' | 'down';
+  confidence: number;
 }
 
 interface TradingViewChartProps {
   priceData: ChartPricePoint[];
-  sentimentHistory: ChartSentimentPoint[];
+  sentimentHistory?: { date: string; sentiment: number }[];
   symbol: string;
+  predictions?: PredictionMarker[];
 }
 
-export default function TradingViewChart({ priceData, sentimentHistory, symbol }: TradingViewChartProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const priceChartRef = useRef<HTMLDivElement>(null);
-  const sentimentChartRef = useRef<HTMLDivElement>(null);
-  
-  const priceChartApi = useRef<IChartApi | null>(null);
-  const sentimentChartApi = useRef<IChartApi | null>(null);
+// ─── EMA Computation ────────────────────────────────
+function computeEMA(prices: number[], period: number): number[] {
+  if (prices.length < period) return [];
+  const k = 2 / (period + 1);
+  const emaValues: number[] = [];
+  let sum = 0;
+  for (let i = 0; i < period; i++) sum += prices[i];
+  let ema = sum / period;
+  emaValues.push(ema);
+  for (let i = period; i < prices.length; i++) {
+    ema = prices[i] * k + ema * (1 - k);
+    emaValues.push(ema);
+  }
+  return emaValues;
+}
 
-  // Store series references for incremental data updates
-  const candleSeriesRef = useRef<any>(null);
-  const volumeSeriesRef = useRef<any>(null);
-  const sentimentSeriesRef = useRef<any>(null);
+// ─── RSI Computation ────────────────────────────────
+function computeRSI(prices: number[], period: number = 14): number[] {
+  if (prices.length < period + 1) return [];
+  const rsiValues: number[] = [];
+  let gains = 0, losses = 0;
 
-  // ── CHART CREATION (runs once on mount) ──
+  for (let i = 1; i <= period; i++) {
+    const diff = prices[i] - prices[i - 1];
+    if (diff >= 0) gains += diff;
+    else losses += Math.abs(diff);
+  }
+
+  let avgGain = gains / period;
+  let avgLoss = losses / period;
+  const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+  rsiValues.push(100 - 100 / (1 + rs));
+
+  for (let i = period + 1; i < prices.length; i++) {
+    const diff = prices[i] - prices[i - 1];
+    avgGain = (avgGain * (period - 1) + (diff > 0 ? diff : 0)) / period;
+    avgLoss = (avgLoss * (period - 1) + (diff < 0 ? Math.abs(diff) : 0)) / period;
+    const rs2 = avgLoss === 0 ? 100 : avgGain / avgLoss;
+    rsiValues.push(100 - 100 / (1 + rs2));
+  }
+  return rsiValues;
+}
+
+export default function TradingViewChart({ priceData, sentimentHistory, symbol, predictions }: TradingViewChartProps) {
+  const priceContainerRef = useRef<HTMLDivElement>(null);
+  const rsiContainerRef = useRef<HTMLDivElement>(null);
+  const priceChartRef = useRef<IChartApi | null>(null);
+  const rsiChartRef = useRef<IChartApi | null>(null);
+  const [timeframe, setTimeframe] = useState<'1M' | '3M' | '6M' | '1Y'>('3M');
+  const [loading, setLoading] = useState(false);
+  const [data, setData] = useState<ChartPricePoint[]>(priceData);
+
+  // Fetch data for different timeframe
+  const fetchTimeframe = useCallback(async (tf: string) => {
+    const days = tf === '1M' ? 30 : tf === '3M' ? 90 : tf === '6M' ? 180 : 365;
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/stock/ohlcv?symbol=${symbol}&days=${days}`);
+      const json = await res.json();
+      if (json.data?.length) setData(json.data);
+    } catch (err) {
+      console.warn('[Chart] Timeframe fetch failed:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [symbol]);
+
+  // Update data when props change
+  useEffect(() => { if (priceData.length) setData(priceData); }, [priceData]);
+  useEffect(() => { fetchTimeframe(timeframe); }, [timeframe, fetchTimeframe]);
+
+  // ─── Build Charts ─────────────────────────────────
   useEffect(() => {
-    if (!priceChartRef.current || !sentimentChartRef.current) return;
+    if (!priceContainerRef.current || !rsiContainerRef.current || data.length === 0) return;
 
-    const chartWidth = priceChartRef.current.clientWidth || 600;
+    // Cleanup
+    if (priceChartRef.current) { try { priceChartRef.current.remove(); } catch {} priceChartRef.current = null; }
+    if (rsiChartRef.current) { try { rsiChartRef.current.remove(); } catch {} rsiChartRef.current = null; }
 
-    // ─── 1. Price Candlestick Chart ───
-    const priceChart = createChart(priceChartRef.current, {
+    const chartWidth = priceContainerRef.current.clientWidth;
+
+    const chartOptions = {
       width: chartWidth,
-      height: 260,
       layout: {
-        background: { type: ColorType.Solid, color: '#0f172a' },
-        textColor: '#94a3b8',
+        background: { type: ColorType.Solid as const, color: 'transparent' },
+        textColor: 'rgba(255,255,255,0.45)',
+        fontSize: 11,
       },
       grid: {
-        vertLines: { color: 'rgba(51, 65, 85, 0.2)' },
-        horzLines: { color: 'rgba(51, 65, 85, 0.2)' },
+        vertLines: { color: 'rgba(255,255,255,0.03)' },
+        horzLines: { color: 'rgba(255,255,255,0.03)' },
+      },
+      crosshair: {
+        mode: CrosshairMode.Normal,
+        vertLine: { color: 'rgba(255,255,255,0.12)', width: 1 as const, style: 3 as const },
+        horzLine: { color: 'rgba(255,255,255,0.12)', width: 1 as const, style: 3 as const },
       },
       timeScale: {
-        borderColor: 'rgba(51, 65, 85, 0.4)',
-        visible: false,
+        borderColor: 'rgba(255,255,255,0.06)',
+        timeVisible: false,
       },
       rightPriceScale: {
-        borderColor: 'rgba(51, 65, 85, 0.4)',
+        borderColor: 'rgba(255,255,255,0.06)',
       },
-    });
+    };
 
+    // ── Price Chart ──────────────────────────────────
+    const priceChart = createChart(priceContainerRef.current, {
+      ...chartOptions,
+      height: 320,
+      rightPriceScale: { ...chartOptions.rightPriceScale, scaleMargins: { top: 0.05, bottom: 0.2 } },
+      timeScale: { ...chartOptions.timeScale, visible: false },
+    });
+    priceChartRef.current = priceChart;
+
+    // Candlesticks
     const candleSeries = priceChart.addSeries(CandlestickSeries, {
-      upColor: '#10b981',
-      downColor: '#ef4444',
-      borderUpColor: '#10b981',
-      borderDownColor: '#ef4444',
-      wickUpColor: '#10b981',
-      wickDownColor: '#ef4444',
+      upColor: '#00d68f',
+      downColor: '#ff4d6a',
+      borderUpColor: '#00d68f',
+      borderDownColor: '#ff4d6a',
+      wickUpColor: 'rgba(0,214,143,0.6)',
+      wickDownColor: 'rgba(255,77,106,0.6)',
     });
+    candleSeries.setData(data.map(d => ({
+      time: d.date as Time,
+      open: d.open, high: d.high, low: d.low, close: d.close,
+    })));
 
-    const volumeSeries = priceChart.addSeries(HistogramSeries, {
-      color: '#3b82f6',
+    // Volume
+    const volSeries = priceChart.addSeries(HistogramSeries, {
       priceFormat: { type: 'volume' },
-      priceScaleId: '',
+      priceScaleId: 'vol',
     });
+    priceChart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+    volSeries.setData(data.map(d => ({
+      time: d.date as Time,
+      value: d.volume,
+      color: d.close >= d.open ? 'rgba(0,214,143,0.15)' : 'rgba(255,77,106,0.15)',
+    })));
 
-    volumeSeries.priceScale().applyOptions({
-      scaleMargins: { top: 0.7, bottom: 0 },
-    });
-
-    // ─── 2. Sentiment Area Chart ───
-    const sentimentChart = createChart(sentimentChartRef.current, {
-      width: chartWidth,
-      height: 120,
-      layout: {
-        background: { type: ColorType.Solid, color: '#0f172a' },
-        textColor: '#94a3b8',
-      },
-      grid: {
-        vertLines: { color: 'rgba(51, 65, 85, 0.2)' },
-        horzLines: { color: 'rgba(51, 65, 85, 0.2)' },
-      },
-      timeScale: {
-        borderColor: 'rgba(51, 65, 85, 0.4)',
-        visible: true,
-      },
-      rightPriceScale: {
-        borderColor: 'rgba(51, 65, 85, 0.4)',
-        visible: true,
-      },
-    });
-
-    const sentimentSeries = sentimentChart.addSeries(AreaSeries, {
-      topColor: 'rgba(139, 92, 246, 0.4)',
-      bottomColor: 'rgba(139, 92, 246, 0.05)',
-      lineColor: '#8b5cf6',
-      lineWidth: 2,
-      autoscaleInfoProvider: () => ({
-        priceRange: { minValue: 0, maxValue: 100 },
-      }),
-    });
-
-    // ─── 3. Synchronise Zoom/Scroll Timescales ───
-    let isReflecting = false;
-    
-    const syncTimeScale = (fromChart: IChartApi, toChart: IChartApi) => {
-      const fromTimeScale = fromChart.timeScale();
-      const toTimeScale = toChart.timeScale();
-      
-      fromTimeScale.subscribeVisibleLogicalRangeChange(range => {
-        if (isReflecting || !range) return;
-        isReflecting = true;
-        toTimeScale.setVisibleLogicalRange(range);
-        isReflecting = false;
+    // EMA 20
+    const closes = data.map(d => d.close);
+    const ema20Vals = computeEMA(closes, 20);
+    if (ema20Vals.length > 0) {
+      const ema20Series = priceChart.addSeries(LineSeries, {
+        color: '#3b82f6', lineWidth: 1,
+        priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
       });
-    };
+      ema20Series.setData(ema20Vals.map((v, i) => ({
+        time: data[data.length - ema20Vals.length + i].date as Time, value: v,
+      })));
+    }
 
-    syncTimeScale(priceChart, sentimentChart);
-    syncTimeScale(sentimentChart, priceChart);
+    // EMA 50
+    const ema50Vals = computeEMA(closes, 50);
+    if (ema50Vals.length > 0) {
+      const ema50Series = priceChart.addSeries(LineSeries, {
+        color: '#f59e0b', lineWidth: 1,
+        priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+      });
+      ema50Series.setData(ema50Vals.map((v, i) => ({
+        time: data[data.length - ema50Vals.length + i].date as Time, value: v,
+      })));
+    }
 
-    // ─── 4. Handle Window Resizing ───
-    const handleResize = () => {
-      if (!containerRef.current) return;
-      const width = containerRef.current.clientWidth;
-      priceChart.resize(width, 260);
-      sentimentChart.resize(width, 120);
-    };
+    // Prediction markers
+    if (predictions?.length) {
+      const dateSet = new Set(data.map(d => d.date));
+      const validPreds = predictions.filter(p => dateSet.has(p.date));
+      if (validPreds.length) {
+        createSeriesMarkers(candleSeries, validPreds.map(p => ({
+          time: p.date as Time,
+          position: p.direction === 'up' ? 'belowBar' as const : 'aboveBar' as const,
+          color: p.direction === 'up' ? '#00d68f' : '#ff4d6a',
+          shape: p.direction === 'up' ? 'arrowUp' as const : 'arrowDown' as const,
+          text: `${p.direction === 'up' ? '▲' : '▼'} ${p.confidence}%`,
+          size: 1,
+        })));
+      }
+    }
 
-    window.addEventListener('resize', handleResize);
+    priceChart.timeScale().fitContent();
 
-    // Store refs for data updates and cleanup
-    priceChartApi.current = priceChart;
-    sentimentChartApi.current = sentimentChart;
-    candleSeriesRef.current = candleSeries;
-    volumeSeriesRef.current = volumeSeries;
-    sentimentSeriesRef.current = sentimentSeries;
+    // ── RSI Chart ────────────────────────────────────
+    const rsiChart = createChart(rsiContainerRef.current, {
+      ...chartOptions,
+      height: 100,
+      rightPriceScale: {
+        ...chartOptions.rightPriceScale,
+        scaleMargins: { top: 0.1, bottom: 0.1 },
+      },
+    });
+    rsiChartRef.current = rsiChart;
+
+    const rsiVals = computeRSI(closes);
+    if (rsiVals.length > 0) {
+      const rsiSeries = rsiChart.addSeries(LineSeries, {
+        color: '#8b5cf6', lineWidth: 2,
+        priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: true,
+      });
+      rsiSeries.setData(rsiVals.map((v, i) => ({
+        time: data[data.length - rsiVals.length + i].date as Time,
+        value: parseFloat(v.toFixed(1)),
+      })));
+
+      // Overbought/Oversold lines
+      const ob = rsiChart.addSeries(LineSeries, {
+        color: 'rgba(255,77,106,0.3)', lineWidth: 1,
+        lineStyle: 2, priceLineVisible: false, lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      });
+      ob.setData(data.slice(-rsiVals.length).map(d => ({
+        time: d.date as Time, value: 70,
+      })));
+
+      const os = rsiChart.addSeries(LineSeries, {
+        color: 'rgba(0,214,143,0.3)', lineWidth: 1,
+        lineStyle: 2, priceLineVisible: false, lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      });
+      os.setData(data.slice(-rsiVals.length).map(d => ({
+        time: d.date as Time, value: 30,
+      })));
+    }
+
+    rsiChart.timeScale().fitContent();
+
+    // Sync timescales
+    let isSyncing = false;
+    priceChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+      if (isSyncing || !range) return;
+      isSyncing = true;
+      rsiChart.timeScale().setVisibleLogicalRange(range);
+      isSyncing = false;
+    });
+    rsiChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+      if (isSyncing || !range) return;
+      isSyncing = true;
+      priceChart.timeScale().setVisibleLogicalRange(range);
+      isSyncing = false;
+    });
+
+    // Resize observer
+    const ro = new ResizeObserver(entries => {
+      for (const e of entries) {
+        const w = e.contentRect.width;
+        priceChart.applyOptions({ width: w });
+        rsiChart.applyOptions({ width: w });
+      }
+    });
+    ro.observe(priceContainerRef.current);
 
     return () => {
-      window.removeEventListener('resize', handleResize);
-      if (priceChartApi.current) {
-        try { priceChartApi.current.remove(); } catch (err) {
-          console.warn('[TradingViewChart] Price chart cleanup failed:', err);
-        }
-        priceChartApi.current = null;
-      }
-      if (sentimentChartApi.current) {
-        try { sentimentChartApi.current.remove(); } catch (err) {
-          console.warn('[TradingViewChart] Sentiment chart cleanup failed:', err);
-        }
-        sentimentChartApi.current = null;
-      }
-      candleSeriesRef.current = null;
-      volumeSeriesRef.current = null;
-      sentimentSeriesRef.current = null;
+      ro.disconnect();
+      try { priceChart.remove(); } catch {}
+      try { rsiChart.remove(); } catch {}
+      priceChartRef.current = null;
+      rsiChartRef.current = null;
     };
-  }, []); // Mount only — chart infrastructure created once
-
-  // ── DATA UPDATES (runs when priceData or sentimentHistory changes) ──
-  // Instead of destroying and recreating charts, we call setData() on existing series.
-  useEffect(() => {
-    if (!candleSeriesRef.current || !volumeSeriesRef.current || !sentimentSeriesRef.current) return;
-    if (priceData.length === 0) return;
-
-    // Update candlestick data
-    const formattedPriceData = priceData.map(d => ({
-      time: d.date,
-      open: d.open,
-      high: d.high,
-      low: d.low,
-      close: d.close,
-    }));
-    candleSeriesRef.current.setData(formattedPriceData);
-
-    // Update volume data
-    const formattedVolumeData = priceData.map(d => ({
-      time: d.date,
-      value: d.volume,
-      color: d.close >= d.open ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)',
-    }));
-    volumeSeriesRef.current.setData(formattedVolumeData);
-
-    // Update sentiment data
-    const sentimentMap = new Map<string, number>();
-    for (const item of sentimentHistory) {
-      sentimentMap.set(item.date, item.sentiment);
-    }
-
-    const formattedSentimentData = priceData.map(d => ({
-      time: d.date,
-      value: sentimentMap.get(d.date) ?? 50,
-    }));
-    sentimentSeriesRef.current.setData(formattedSentimentData);
-
-    // Update sentiment markers on candlestick chart
-    const markers: any[] = [];
-    for (const candle of priceData) {
-      const score = sentimentMap.get(candle.date);
-      if (score !== undefined) {
-        if (score >= 70) {
-          markers.push({
-            time: candle.date,
-            position: 'belowBar',
-            color: '#10b981',
-            shape: 'arrowUp',
-            text: 'BULL',
-            size: 1,
-          });
-        } else if (score <= 30) {
-          markers.push({
-            time: candle.date,
-            position: 'aboveBar',
-            color: '#ef4444',
-            shape: 'arrowDown',
-            text: 'BEAR',
-            size: 1,
-          });
-        }
-      }
-    }
-    if (markers.length > 0) {
-      createSeriesMarkers(candleSeriesRef.current, markers);
-    }
-
-    // Auto-fit the time scale to show all data
-    if (priceChartApi.current) {
-      priceChartApi.current.timeScale().fitContent();
-    }
-    if (sentimentChartApi.current) {
-      sentimentChartApi.current.timeScale().fitContent();
-    }
-  }, [priceData, sentimentHistory]);
+  }, [data, predictions]);
 
   return (
-    <div ref={containerRef} className="w-full rounded-xl overflow-hidden p-4 border" 
-         style={{ background: '#0f172a', borderColor: 'var(--border-color)' }}>
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-          <span>🕯️ Interactive Candlesticks ({symbol})</span>
-        </h3>
-        <span className="text-[10px] text-slate-500 font-medium">Scroll / drag to zoom & pan</span>
+    <div className="rounded-xl overflow-hidden"
+      style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 pt-4 pb-2">
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>
+            📈 Price Chart
+          </h3>
+          <div className="flex items-center gap-3 ml-2">
+            <span className="flex items-center gap-1 text-[10px]" style={{ color: '#3b82f6' }}>
+              <span className="inline-block w-3 h-0.5 rounded" style={{ background: '#3b82f6' }} /> EMA20
+            </span>
+            <span className="flex items-center gap-1 text-[10px]" style={{ color: '#f59e0b' }}>
+              <span className="inline-block w-3 h-0.5 rounded" style={{ background: '#f59e0b' }} /> EMA50
+            </span>
+            <span className="flex items-center gap-1 text-[10px]" style={{ color: '#8b5cf6' }}>
+              <span className="inline-block w-3 h-0.5 rounded" style={{ background: '#8b5cf6' }} /> RSI
+            </span>
+          </div>
+        </div>
+
+        {/* Timeframe Selector */}
+        <div className="flex gap-1">
+          {(['1M', '3M', '6M', '1Y'] as const).map(tf => (
+            <button key={tf} onClick={() => setTimeframe(tf)}
+              className="text-[10px] font-bold px-2.5 py-1 rounded transition-all cursor-pointer"
+              style={{
+                background: timeframe === tf ? 'rgba(59,130,246,0.2)' : 'transparent',
+                color: timeframe === tf ? '#60a5fa' : 'var(--text-muted)',
+                border: timeframe === tf ? '1px solid rgba(59,130,246,0.3)' : '1px solid transparent',
+              }}>
+              {tf}
+            </button>
+          ))}
+        </div>
       </div>
-      <div ref={priceChartRef} className="w-full relative" />
-      
-      <div className="flex items-center justify-between mt-4 mb-2">
-        <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
-          <span>🧠 AI Sentiment Trend (0-100)</span>
-        </h3>
+
+      {/* Charts */}
+      <div className="relative">
+        {loading && (
+          <div className="absolute inset-0 flex items-center justify-center z-10"
+            style={{ background: 'rgba(0,0,0,0.5)' }}>
+            <div className="w-6 h-6 border-2 rounded-full animate-spin"
+              style={{ borderColor: 'var(--border-color)', borderTopColor: '#3b82f6' }} />
+          </div>
+        )}
+        <div ref={priceContainerRef} />
+        <div className="px-4 py-1">
+          <p className="text-[9px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+            RSI (14)
+          </p>
+        </div>
+        <div ref={rsiContainerRef} />
       </div>
-      <div ref={sentimentChartRef} className="w-full relative" />
+
+      {/* Footer */}
+      <div className="flex items-center justify-between px-4 py-2 text-[10px]"
+        style={{ borderTop: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
+        <span>{data.length} candles • Yahoo Finance</span>
+        <span>Scroll / drag to zoom & pan</span>
+      </div>
     </div>
   );
 }
