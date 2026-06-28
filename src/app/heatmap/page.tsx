@@ -91,11 +91,13 @@ export default function HeatmapPage() {
           fetch(`/api/stock?symbol=${symbol}`)
             .then(r => r.json())
             .then(data => {
-              if (data && data.price > 0) {
+              // API returns { quote: { price, changePercent, ... }, technicals }
+              const q = data?.quote || data;
+              if (q && q.price > 0) {
                 results.set(symbol, {
                   symbol,
-                  price: data.price,
-                  changePercent: data.changePercent || 0,
+                  price: q.price,
+                  changePercent: q.changePercent || 0,
                 });
               }
             })

@@ -61,16 +61,19 @@ export default function WatchlistPage() {
               fetch(`/api/predict?symbol=${symbol}`).then(r => r.json()).catch(() => null),
             ]);
 
-            if (stockRes && stockRes.price > 0) {
-              results.set(symbol, {
-                price: stockRes.price,
-                change: stockRes.change || 0,
-                changePercent: stockRes.changePercent || 0,
-                prediction: predRes?.prediction ? {
-                  direction: predRes.prediction.direction,
-                  probability: predRes.prediction.probability,
-                } : null,
-              });
+            if (stockRes) {
+              const q = stockRes.quote || stockRes;
+              if (q.price > 0) {
+                results.set(symbol, {
+                  price: q.price,
+                  change: q.change || 0,
+                  changePercent: q.changePercent || 0,
+                  prediction: predRes?.prediction ? {
+                    direction: predRes.prediction.direction,
+                    probability: predRes.prediction.probability,
+                  } : null,
+                });
+              }
             }
           } catch {}
         });

@@ -41,11 +41,12 @@ export default function ScreenerPage() {
               fetch(`/api/stock?symbol=${symbol}`).then(r => r.json()).catch(() => null),
               fetch(`/api/predict?symbol=${symbol}`).then(r => r.json()).catch(() => null),
             ]);
-            if (stockRes?.price > 0) {
+            const q = stockRes?.quote || stockRes;
+            if (q?.price > 0) {
               results.push({
                 symbol,
-                price: stockRes.price,
-                changePercent: stockRes.changePercent || 0,
+                price: q.price,
+                changePercent: q.changePercent || 0,
                 prediction: predRes?.prediction ? {
                   direction: predRes.prediction.direction,
                   probability: predRes.prediction.probability,
