@@ -24,6 +24,7 @@ export default function Dashboard() {
   const [isLive, setIsLive] = useState(false);
   const [brokerConnected, setBrokerConnected] = useState(false);
   const [dataSource, setDataSource] = useState<'yahoo' | 'upstox'>('yahoo');
+  const [aiAccuracy, setAiAccuracy] = useState<{ overallAccuracy: number; totalResolved: number } | null>(null);
 
   useEffect(() => {
     // Check broker connection status
@@ -33,10 +34,15 @@ export default function Dashboard() {
 
     async function fetchData() {
       try {
-        const [newsRes, marketRes] = await Promise.all([
+        const [newsRes, marketRes, accuracyRes] = await Promise.all([
           fetch('/api/news').then(r => r.json()).catch(() => null),
           fetch('/api/market').then(r => r.json()).catch(() => null),
+          fetch('/api/predictions?type=accuracy').then(r => r.json()).catch(() => null),
         ]);
+
+        if (accuracyRes?.overall?.totalResolved > 0) {
+          setAiAccuracy(accuracyRes.overall);
+        }
 
         if (newsRes && newsRes.articles) {
           setNews(newsRes.articles);
@@ -264,6 +270,40 @@ export default function Dashboard() {
           </p>
         </div>
       </div>
+
+      {/* ─── AI Accuracy Trust Banner ─── */}
+      {aiAccuracy && aiAccuracy.totalResolved >= 10 && (
+        <div className="mb-6 p-4 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3 animate-fade-in-up"
+          style={{ background: 'linear-gradient(135deg, rgba(0,214,143,0.08), rgba(59,130,246,0.08))', border: '1px solid rgba(0,214,143,0.2)' }}>
+          <div className="flex items-center gap-4">
+            <div className="text-3xl font-black" style={{ color: '#00d68f' }}>
+              {aiAccuracy.overallAccuracy}%
+            </div>
+            <div>
+              <p className="text-sm font-bold text-white">AI Prediction Accuracy</p>
+              <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                Based on {aiAccuracy.totalResolved} resolved predictions — updated daily
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="flex gap-2">
+              {['RELIANCE', 'TCS', 'HDFCBANK', 'INFY'].map(s => (
+                <a key={s} href={`/stock/${s}`}
+                  className="text-[10px] px-2 py-1 rounded font-bold hover:brightness-125 transition-all"
+                  style={{ background: 'rgba(59,130,246,0.15)', color: '#60a5fa' }}>
+                  {s}
+                </a>
+              ))}
+            </div>
+            <a href="/predictions"
+              className="text-[11px] font-bold px-3 py-1.5 rounded-xl transition-all hover:brightness-125"
+              style={{ background: 'rgba(0,214,143,0.15)', color: '#00d68f', border: '1px solid rgba(0,214,143,0.3)' }}>
+              View Predictions →
+            </a>
+          </div>
+        </div>
+      )}
 
       {/* ─── Main Content Grid ─── */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
