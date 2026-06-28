@@ -41,6 +41,7 @@ export default function ComparePage() {
   const [showDropA, setShowDropA] = useState(false);
   const [showDropB, setShowDropB] = useState(false);
   const [autoCompare, setAutoCompare] = useState(false);
+  const [hasCompared, setHasCompared] = useState(false);
 
   const fetchStock = async (symbol: string): Promise<StockData | null> => {
     try {
@@ -87,10 +88,12 @@ export default function ComparePage() {
   const handleCompare = async () => {
     if (!symbolA || !symbolB) return;
     setLoading(true);
+    setHasCompared(false);
     const [a, b] = await Promise.all([fetchStock(symbolA), fetchStock(symbolB)]);
     setStockA(a);
     setStockB(b);
     setLoading(false);
+    setHasCompared(true);
   };
 
   // Auto-compare when both symbols are set via popular picks
@@ -197,7 +200,7 @@ export default function ComparePage() {
             type="text"
             placeholder="Search stock..."
             value={searchA}
-            onChange={e => { setSearchA(e.target.value); setSymbolA(''); setShowDropA(true); }}
+            onChange={e => { setSearchA(e.target.value); setSymbolA(''); setShowDropA(true); setHasCompared(false); setStockA(null); }}
             onFocus={() => searchA && !symbolA && setShowDropA(true)}
             className="w-full px-3 py-2.5 rounded-xl text-sm bg-transparent outline-none text-white"
             style={{ border: '1px solid var(--border-color)', background: 'var(--bg-card)' }}
@@ -225,7 +228,7 @@ export default function ComparePage() {
             type="text"
             placeholder="Search stock..."
             value={searchB}
-            onChange={e => { setSearchB(e.target.value); setSymbolB(''); setShowDropB(true); }}
+            onChange={e => { setSearchB(e.target.value); setSymbolB(''); setShowDropB(true); setHasCompared(false); setStockB(null); }}
             onFocus={() => searchB && !symbolB && setShowDropB(true)}
             className="w-full px-3 py-2.5 rounded-xl text-sm bg-transparent outline-none text-white"
             style={{ border: '1px solid var(--border-color)', background: 'var(--bg-card)' }}
@@ -259,11 +262,11 @@ export default function ComparePage() {
         {loading ? '⏳ Comparing...' : '⚖️ Compare Stocks'}
       </button>
 
-      {/* Error States */}
-      {!loading && stockA === null && symbolA && stockB !== undefined && (
+      {/* Error States — only show after a comparison attempt */}
+      {hasCompared && !loading && stockA === null && symbolA && (
         <p className="text-xs mb-4" style={{ color: '#ff4d6a' }}>⚠️ Could not fetch data for {symbolA}</p>
       )}
-      {!loading && stockB === null && symbolB && stockA !== undefined && (
+      {hasCompared && !loading && stockB === null && symbolB && (
         <p className="text-xs mb-4" style={{ color: '#ff4d6a' }}>⚠️ Could not fetch data for {symbolB}</p>
       )}
 
@@ -306,7 +309,7 @@ export default function ComparePage() {
       )}
 
       {/* Quick Compare Pairs */}
-      {!stockA && !stockB && (
+      {!stockA && !stockB && !hasCompared && (
         <div className="mt-8 text-center">
           <p className="text-xs font-bold mb-3" style={{ color: 'var(--text-muted)' }}>Popular Comparisons</p>
           <div className="flex flex-wrap justify-center gap-2">
