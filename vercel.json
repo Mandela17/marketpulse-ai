@@ -1,8 +1,8 @@
 {
   "crons": [
     {
-      "path": "/api/cron/collect",
-      "schedule": "0 3 * * *"
+      "path": "/api/cron/daily-predictions?secret=${CRON_SECRET}",
+      "schedule": "0 11 * * 1-5"
     }
   ]
 }
