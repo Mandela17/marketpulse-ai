@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-import { LayoutDashboard, Newspaper, TrendingUp, Star, Plug, ChevronRight, LogOut, X, Grid3x3, Search, Briefcase, Scale } from 'lucide-react';
+import { LayoutDashboard, Newspaper, TrendingUp, Star, Plug, ChevronRight, LogOut, X, Grid3x3, Search, Briefcase, Scale, Shield } from 'lucide-react';
 
 const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -17,6 +17,10 @@ const navItems = [
   { href: '/sectors', label: 'Sectors', icon: TrendingUp },
   { href: '/watchlist', label: 'Watchlist', icon: Star },
   { href: '/broker', label: 'Broker API', icon: Plug },
+];
+
+const adminItems = [
+  { href: '/admin', label: 'Admin Panel', icon: Shield },
 ];
 
 const hotSectors = [
@@ -60,7 +64,7 @@ function isMarketOpen(): boolean {
 export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, signOut, loading } = useAuth();
+  const { user, signOut, loading, isAdmin } = useAuth();
   const [mounted, setMounted] = useState(false);
   const [marketOpen, setMarketOpen] = useState(false);
 
@@ -261,6 +265,55 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
             );
           })}
         </nav>
+
+        {/* Admin Navigation - only visible to admins */}
+        {isAdmin && (
+          <nav style={{ padding: '0 12px', marginTop: '12px', flexShrink: 0 }}>
+            <p style={{
+              padding: '0 12px',
+              marginBottom: '8px',
+              fontSize: '9px',
+              fontWeight: 600,
+              textTransform: 'uppercase',
+              letterSpacing: '0.15em',
+              color: '#a855f7',
+            }}>
+              🛡️ Admin
+            </p>
+            {adminItems.map((item) => {
+              const isActive = pathname === item.href;
+              return (
+                <Link key={item.href} href={item.href}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      padding: '9px 14px',
+                      borderRadius: '12px',
+                      fontSize: '12px',
+                      fontWeight: isActive ? 600 : 500,
+                      cursor: 'pointer',
+                      position: 'relative',
+                      transition: 'all 0.2s ease',
+                      color: isActive ? '#a855f7' : 'var(--text-secondary)',
+                      background: isActive ? 'rgba(168, 85, 247, 0.08)' : 'transparent',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isActive) e.currentTarget.style.background = 'rgba(168, 85, 247, 0.05)';
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isActive) e.currentTarget.style.background = 'transparent';
+                    }}
+                  >
+                    <item.icon size={17} style={{ flexShrink: 0 }} />
+                    <span>{item.label}</span>
+                  </div>
+                </Link>
+              );
+            })}
+          </nav>
+        )}
 
         {/* Hot Sectors */}
         <div style={{ padding: '0 12px', marginTop: '16px', flex: 1, overflowY: 'auto' }} className="no-scrollbar">

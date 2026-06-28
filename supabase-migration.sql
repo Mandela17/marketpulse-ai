@@ -150,3 +150,29 @@ ALTER TABLE broker_tokens ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Public read broker_tokens" ON broker_tokens FOR SELECT USING (true);
 CREATE POLICY "Service write broker_tokens" ON broker_tokens FOR INSERT WITH CHECK (true);
 CREATE POLICY "Service update broker_tokens" ON broker_tokens FOR UPDATE USING (true);
+
+-- ─── 5. User Roles & Access Control ─────────────────────────────────
+
+DROP TABLE IF EXISTS user_roles CASCADE;
+
+CREATE TABLE user_roles (
+  id          SERIAL PRIMARY KEY,
+  user_id     UUID NOT NULL UNIQUE,
+  email       TEXT NOT NULL,
+  role        TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('super_admin', 'admin', 'user')),
+  status      TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'revoked')),
+  approved_by TEXT,
+  approved_at TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_roles_user_id ON user_roles (user_id);
+CREATE INDEX IF NOT EXISTS idx_user_roles_status ON user_roles (status);
+CREATE INDEX IF NOT EXISTS idx_user_roles_email ON user_roles (email);
+
+ALTER TABLE user_roles ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Service read user_roles" ON user_roles FOR SELECT USING (true);
+CREATE POLICY "Service insert user_roles" ON user_roles FOR INSERT WITH CHECK (true);
+CREATE POLICY "Service update user_roles" ON user_roles FOR UPDATE USING (true);
+

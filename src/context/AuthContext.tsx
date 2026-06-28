@@ -4,16 +4,23 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import type { User, Session } from '@supabase/supabase-js';
 
+export type UserRole = 'super_admin' | 'admin' | 'user';
+export type UserStatus = 'pending' | 'approved' | 'revoked' | 'loading';
+
 interface AuthContextType {
   user: User | null;
   session: Session | null;
   loading: boolean;
+  userRole: UserRole;
+  userStatus: UserStatus;
+  isAdmin: boolean;
   watchlist: string[];
   signIn: (email: string, password: string) => Promise<{ error: any }>;
   signUp: (email: string, password: string) => Promise<{ error: any }>;
   signOut: () => Promise<{ error: any }>;
   toggleWatchlist: (symbol: string) => Promise<void>;
   setWatchlist: (list: string[]) => void;
+  refreshUserStatus: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -28,6 +35,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [watchlist, setWatchlistState] = useState<string[]>([]);
+  const [userRole, setUserRole] = useState<UserRole>('user');
+  const [userStatus, setUserStatus] = useState<UserStatus>('loading');
 
   // Load initial watchlist from localStorage safely
   const getLocalWatchlist = (): string[] => {
@@ -62,13 +71,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  // Check user approval status from server
+  const checkUserStatus = async (accessToken: string) => {
+    try {
+      const res = await fetch('/api/auth/status', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setUserRole(data.role || 'user');
+        setUserStatus(data.status || 'pending');
+      } else {
+        setUserStatus('pending');
+      }
+    } catch {
+      setUserStatus('pending');
+    }
+  };
+
+  // Public: refresh user status (called after admin approves)
+  const refreshUserStatus = async () => {
+    if (session?.access_token) {
+      await checkUserStatus(session.access_token);
+    }
+  };
+
   // Main listener for auth state change
   useEffect(() => {
     let isMounted = true;
 
-    // 1. Set up the auth state change listener FIRST
-    //    This is critical for hash-based auth callbacks (email confirmation)
-    //    where Supabase redirects to /#access_token=...
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, currentSession) => {
       if (!isMounted) return;
       setSession(currentSession);
@@ -76,25 +107,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(currentUser);
       setLoading(false);
 
+      if (currentUser && currentSession?.access_token) {
+        await checkUserStatus(currentSession.access_token);
+      } else {
+        setUserStatus('loading');
+        setUserRole('user');
+      }
+
       // After email confirmation, clean up the URL hash
       if (typeof window !== 'undefined' && window.location.hash.includes('access_token')) {
-        // Replace the URL to remove the token hash without triggering navigation
         window.history.replaceState(null, '', window.location.pathname);
       }
     });
 
-    // 2. Then get initial session — this also triggers hash fragment parsing
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!isMounted) return;
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);
+
+      if (session?.access_token) {
+        checkUserStatus(session.access_token);
+      }
     }).catch(() => {
       if (!isMounted) return;
       setLoading(false);
     });
 
-    // 3. Safety timeout: never let the loading screen hang more than 8 seconds
     const timeout = setTimeout(() => {
       if (isMounted) {
         setLoading(false);
@@ -113,53 +152,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const local = getLocalWatchlist();
 
     if (user) {
-      // User logged in: sync local and cloud watchlists
       const cloud = user.user_metadata?.watchlist as string[] | undefined;
       if (cloud && Array.isArray(cloud)) {
-        // Merge lists to preserve both locally added and cloud-saved stocks
         const merged = Array.from(new Set([...local, ...cloud]));
         setWatchlist(merged);
-        
-        // If there were new local items, sync the merged list back to cloud
         if (merged.length > cloud.length) {
           syncWatchlistToCloud(merged);
         }
       } else {
-        // First time cloud sync: upload existing local watchlist to user metadata
         setWatchlist(local);
         syncWatchlistToCloud(local);
       }
     } else {
-      // User is logged out: load local watchlist only
       setWatchlist(local);
     }
   }, [user]);
 
-  // Sign In Method
+  // Sign In
   const signIn = async (email: string, password: string) => {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     return { error };
   };
 
-  // Sign Up Method
+  // Sign Up
   const signUp = async (email: string, password: string) => {
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-    });
+    const { data, error } = await supabase.auth.signUp({ email, password });
     return { error };
   };
 
-  // Sign Out Method
+  // Sign Out
   const signOut = async () => {
+    setUserStatus('loading');
+    setUserRole('user');
     const { error } = await supabase.auth.signOut();
     return { error };
   };
 
-  // Toggle watchlist item (updates local and cloud dynamically)
+  // Toggle watchlist
   const toggleWatchlist = async (symbol: string) => {
     const cleanSymbol = symbol.toUpperCase();
     let updatedList: string[];
@@ -177,18 +206,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const isAdmin = userRole === 'super_admin' || userRole === 'admin';
+
   return (
     <AuthContext.Provider
       value={{
         user,
         session,
         loading,
+        userRole,
+        userStatus,
+        isAdmin,
         watchlist,
         signIn,
         signUp,
         signOut,
         toggleWatchlist,
         setWatchlist,
+        refreshUserStatus,
       }}
     >
       {children}
