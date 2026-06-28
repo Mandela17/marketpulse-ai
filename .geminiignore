@@ -1,0 +1,39 @@
+# Exclude heavy binary / build directories from Agent Context
+/node_modules
+/.next
+/out
+/build
+/.git
+/.vercel
+/dist
+/tmp
+/temp
+/coverage
+
+# Exclude generated lock files and assets
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+*.png
+*.jpg
+*.jpeg
+*.svg
+*.gif
+*.ico
+*.webp
+*.mp4
+*.pdf
+
+# Exclude metadata and cache files
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+next-env.d.ts
+eslint.config.mjs
+postcss.config.js
+tailwind.config.ts
+.DS_Store
+
+# Exclude private environment keys and database migrations
+.env
+.env.*
+supabase-migration.sql
