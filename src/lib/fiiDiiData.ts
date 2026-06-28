@@ -18,13 +18,20 @@ export interface FIIDIIFlow {
 
 async function fetchFromNSE(): Promise<FIIDIIFlow | null> {
   try {
-    // NSE's FII/DII activity endpoint
-    const res = await fetch('https://www.nseindia.com/api/fiidiiActivity', {
+    // NSE requires cookies from its base page first
+    const baseHeaders = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    };
+    const baseRes = await fetch('https://www.nseindia.com', { headers: baseHeaders });
+    const cookies = baseRes.headers.get('set-cookie');
+
+    // Fetch the FII/DII data with the cookies
+    const res = await fetch('https://www.nseindia.com/api/fiidiiTradeReact', {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        ...baseHeaders,
+        'Cookie': cookies || '',
         'Accept': 'application/json',
-        'Referer': 'https://www.nseindia.com/reports-indices',
-        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://www.nseindia.com/',
       },
       next: { revalidate: 1800 }, // cache 30 min
     });
