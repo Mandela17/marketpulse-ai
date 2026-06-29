@@ -5,7 +5,6 @@ import { getSentimentColor, getSentimentLabel, SectorData, NewsArticle } from '@
 import SectorCard from '@/components/SectorCard';
 import SentimentGauge from '@/components/SentimentGauge';
 import NewsCard from '@/components/NewsCard';
-import { DEMO_SECTORS, DEMO_NEWS, DEMO_MARKET_OVERVIEW, DEMO_GEOPOLITICAL_EVENTS } from '@/lib/mockData';
 import { getBrokerConfig } from '@/lib/brokerApi';
 import { Calendar } from 'lucide-react';
 import FIIDIIWidget from '@/components/FIIDIIWidget';
@@ -13,6 +12,7 @@ import MarketRegimeWidget from '@/components/MarketRegimeWidget';
 import TopMoversWidget from '@/components/TopMoversWidget';
 import VIXGaugeWidget from '@/components/VIXGaugeWidget';
 import GlobalMarketsWidget from '@/components/GlobalMarketsWidget';
+import { loadDashboardCache, saveDashboardCache, timeAgo } from '@/lib/dashboardCache';
 
 interface MarketData {
   nifty50: { value: number; change: number; changePercent: number };
@@ -20,16 +20,56 @@ interface MarketData {
   marketStatus: string;
 }
 
+// ─── Skeleton Components ───
+function SkeletonCard() {
+  return (
+    <div className="glass-card-static rounded-2xl p-5 animate-pulse">
+      <div className="flex items-center gap-3 mb-3">
+        <div className="w-8 h-8 rounded-lg" style={{ background: 'var(--border-color)' }} />
+        <div className="h-4 w-24 rounded" style={{ background: 'var(--border-color)' }} />
+      </div>
+      <div className="h-8 w-16 rounded mb-2" style={{ background: 'var(--border-color)' }} />
+      <div className="h-3 w-full rounded" style={{ background: 'var(--border-color)' }} />
+      <div className="h-3 w-2/3 rounded mt-1.5" style={{ background: 'var(--border-color)' }} />
+    </div>
+  );
+}
+
+function SkeletonMarketStrip() {
+  return (
+    <div className="glass-card-static rounded-2xl p-5 animate-pulse">
+      <div className="h-3 w-16 rounded mb-2" style={{ background: 'var(--border-color)' }} />
+      <div className="h-7 w-28 rounded mb-1" style={{ background: 'var(--border-color)' }} />
+      <div className="h-4 w-32 rounded" style={{ background: 'var(--border-color)' }} />
+    </div>
+  );
+}
+
+function SkeletonNewsCard() {
+  return (
+    <div className="p-4 animate-pulse" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+      <div className="h-4 w-3/4 rounded mb-2" style={{ background: 'var(--border-color)' }} />
+      <div className="h-3 w-full rounded mb-1" style={{ background: 'var(--border-color)' }} />
+      <div className="h-3 w-1/2 rounded" style={{ background: 'var(--border-color)' }} />
+    </div>
+  );
+}
+
 export default function Dashboard() {
-  const [sectors, setSectors] = useState<SectorData[]>(DEMO_SECTORS);
-  const [news, setNews] = useState<NewsArticle[]>(DEMO_NEWS);
-  const [marketData, setMarketData] = useState<MarketData | null>(null);
+  // ─── Hydrate from localStorage cache (real data from last session) ───
+  const cached = typeof window !== 'undefined' ? loadDashboardCache() : null;
+
+  const [sectors, setSectors] = useState<SectorData[]>(cached?.sectors ?? []);
+  const [news, setNews] = useState<NewsArticle[]>(cached?.news ?? []);
+  const [marketData, setMarketData] = useState<MarketData | null>(cached?.marketData ?? null);
   const [loading, setLoading] = useState(true);
-  const [lastUpdated, setLastUpdated] = useState<string>('');
+  const [lastUpdated, setLastUpdated] = useState<string>(cached?.lastUpdated ?? '');
   const [isLive, setIsLive] = useState(false);
+  const [isCachedView, setIsCachedView] = useState(!!cached);
+  const [cacheAge, setCacheAge] = useState<string>(cached ? timeAgo(cached.timestamp) : '');
   const [brokerConnected, setBrokerConnected] = useState(false);
   const [dataSource, setDataSource] = useState<'yahoo' | 'upstox'>('yahoo');
-  const [aiAccuracy, setAiAccuracy] = useState<{ overallAccuracy: number; totalResolved: number } | null>(null);
+  const [aiAccuracy, setAiAccuracy] = useState<{ overallAccuracy: number; totalResolved: number } | null>(cached?.aiAccuracy ?? null);
 
   useEffect(() => {
     // Check broker connection status
@@ -49,9 +89,16 @@ export default function Dashboard() {
           setAiAccuracy(accuracyRes.overall);
         }
 
+        let freshSectors = sectors;
+        let freshNews = news;
+        let freshLastUpdated = lastUpdated;
+
         if (newsRes && newsRes.articles) {
-          setNews(newsRes.articles);
+          freshNews = newsRes.articles;
+          setNews(freshNews);
           setIsLive(true);
+          setIsCachedView(false);
+          setCacheAge('');
 
           if (newsRes.sectorSentiments) {
             const sectorArray: SectorData[] = Object.values(newsRes.sectorSentiments);
@@ -61,14 +108,18 @@ export default function Dashboard() {
               const bIdx = priorityOrder.indexOf(b.id);
               return (aIdx === -1 ? 999 : aIdx) - (bIdx === -1 ? 999 : bIdx);
             });
-            setSectors(sectorArray);
+            freshSectors = sectorArray;
+            setSectors(freshSectors);
           }
 
-          setLastUpdated(newsRes.lastUpdated || new Date().toISOString());
+          freshLastUpdated = newsRes.lastUpdated || new Date().toISOString();
+          setLastUpdated(freshLastUpdated);
         }
 
+        let freshMarketData = marketData;
         if (marketRes && !marketRes.error) {
-          setMarketData(marketRes);
+          freshMarketData = marketRes;
+          setMarketData(freshMarketData);
         }
 
         // If Upstox is connected, try to enrich NIFTY 50 with Upstox real-time data
@@ -95,6 +146,14 @@ export default function Dashboard() {
             console.warn('[Dashboard] Upstox NIFTY quote failed:', upstoxErr);
           }
         }
+        // ─── Persist to localStorage for instant next load ───
+        saveDashboardCache({
+          sectors: freshSectors,
+          news: freshNews,
+          marketData: freshMarketData,
+          lastUpdated: freshLastUpdated,
+          aiAccuracy: accuracyRes?.overall?.totalResolved > 0 ? accuracyRes.overall : aiAccuracy,
+        });
       } catch (error) {
         console.error('Failed to fetch live data:', error);
       } finally {
@@ -123,15 +182,14 @@ export default function Dashboard() {
     return () => { if (interval) clearInterval(interval); };
   }, []);
 
-  const overview = DEMO_MARKET_OVERVIEW;
-  const geoEvents = DEMO_GEOPOLITICAL_EVENTS;
-  const nifty = marketData?.nifty50 || overview.nifty50;
-  const sensex = marketData?.sensex || overview.sensex;
-  const mktStatus = marketData?.marketStatus || overview.marketStatus;
+  const nifty = marketData?.nifty50 || { value: 0, change: 0, changePercent: 0 };
+  const sensex = marketData?.sensex || { value: 0, change: 0, changePercent: 0 };
+  const mktStatus = marketData?.marketStatus || 'closed';
+  const hasData = sectors.length > 0 || news.length > 0 || marketData !== null;
 
   const overallSentiment = sectors.length > 0
     ? Math.round(sectors.reduce((sum, s) => sum + s.sentiment, 0) / sectors.length)
-    : overview.overallSentiment;
+    : 50;
 
   const today = new Date().toLocaleDateString('en-IN', {
     weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
@@ -148,11 +206,17 @@ export default function Dashboard() {
             </h1>
             <p className="text-sm mt-1.5 flex items-center gap-2 flex-wrap" style={{ color: 'var(--text-secondary)' }}>
               AI-powered sentiment analysis for Indian markets
-              {isLive && (
+              {isLive && !isCachedView && (
                 <span className="flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-full font-bold"
                   style={{ background: 'var(--accent-green-dim)', color: 'var(--accent-green)' }}>
                   <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: 'var(--accent-green)' }} />
                   LIVE DATA
+                </span>
+              )}
+              {isCachedView && cacheAge && (
+                <span className="flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-full font-bold"
+                  style={{ background: 'rgba(59,130,246,0.12)', color: '#60a5fa', border: '1px solid rgba(59,130,246,0.2)' }}>
+                  📦 Cached · {cacheAge}
                 </span>
               )}
               {brokerConnected && (
@@ -165,7 +229,7 @@ export default function Dashboard() {
               {loading && (
                 <span className="flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-full font-bold"
                   style={{ background: 'var(--accent-yellow-dim)', color: 'var(--accent-yellow)' }}>
-                  ⏳ Loading...
+                  ⏳ Refreshing...
                 </span>
               )}
             </p>
@@ -211,7 +275,9 @@ export default function Dashboard() {
             <span className="text-xs">{mktStatus === 'open' ? '🟢' : '🔴'}</span>
           </div>
           <p className="text-xl font-bold text-white">
-            {nifty.value > 0 ? nifty.value.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '—'}
+            {nifty.value > 0 ? nifty.value.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : (
+              <span className="inline-block h-6 w-24 rounded animate-pulse" style={{ background: 'var(--border-color)' }} />
+            )}
           </p>
           {nifty.value > 0 && (
             <p className="text-sm font-medium" style={{
@@ -231,7 +297,9 @@ export default function Dashboard() {
             <span className="text-xs">{mktStatus === 'open' ? '🟢' : '🔴'}</span>
           </div>
           <p className="text-xl font-bold text-white">
-            {sensex.value > 0 ? sensex.value.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '—'}
+            {sensex.value > 0 ? sensex.value.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : (
+              <span className="inline-block h-6 w-24 rounded animate-pulse" style={{ background: 'var(--border-color)' }} />
+            )}
           </p>
           {sensex.value > 0 && (
             <p className="text-sm font-medium" style={{
@@ -336,12 +404,15 @@ export default function Dashboard() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mb-6">
-            {sectors.map((sector, i) => (
+            {sectors.length > 0 ? sectors.map((sector, i) => (
               <SectorCard key={sector.id} sector={sector} index={i} />
-            ))}
+            )) : (
+              <>{Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)}</>
+            )}
           </div>
 
           {/* Sector Rankings Table */}
+          {sectors.length > 0 && (
           <div className="mb-6 animate-fade-in-up delay-300">
             <h2 className="text-lg font-bold mb-4 text-white">
               🔥 Sector Sentiment Rankings
@@ -389,51 +460,7 @@ export default function Dashboard() {
               </div>
             </div>
           </div>
-
-          {/* Geopolitical Alerts */}
-          <div className="animate-fade-in-up delay-400">
-            <h2 className="text-lg font-bold mb-4 text-white">
-              🌍 Global Events Impacting India
-            </h2>
-            <div className="space-y-3">
-              {geoEvents.map((event) => {
-                const severityConfig = {
-                  hot: { color: 'var(--accent-red)', bg: 'var(--accent-red-dim)', label: '🔴 HOT' },
-                  watch: { color: 'var(--accent-yellow)', bg: 'var(--accent-yellow-dim)', label: '🟡 WATCH' },
-                  calm: { color: 'var(--accent-green)', bg: 'var(--accent-green-dim)', label: '🟢 CALM' },
-                };
-                const cfg = severityConfig[event.severity];
-
-                return (
-                  <div key={event.id} className="glass-card-static rounded-2xl p-4 sm:p-5">
-                    <div className="flex items-start justify-between mb-2 gap-2 flex-wrap">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] px-2.5 py-1 rounded-full font-bold"
-                          style={{ background: cfg.bg, color: cfg.color }}>
-                          {cfg.label}
-                        </span>
-                        <span className="text-xs font-medium" style={{ color: 'var(--accent-blue)' }}>
-                          {event.region}
-                        </span>
-                      </div>
-                    </div>
-                    <h3 className="text-sm font-semibold mb-1 text-white">{event.title}</h3>
-                    <p className="text-xs mb-2.5 leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-                      {event.description}
-                    </p>
-                    <div className="flex gap-1.5 flex-wrap">
-                      {event.impactedSectors.map((s) => (
-                        <span key={s} className="text-[10px] px-2 py-0.5 rounded-md capitalize"
-                          style={{ background: 'var(--accent-purple-dim)', color: 'var(--accent-purple)' }}>
-                          {s}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          )}
         </div>
 
         {/* Right Column — Widgets + News Feed */}
@@ -468,14 +495,18 @@ export default function Dashboard() {
             </div>
 
             <div className="space-y-0 max-h-[calc(100vh-200px)] overflow-y-auto pr-1 no-scrollbar">
-              {news.slice(0, 15).map((article) => (
+              {news.length > 0 ? news.slice(0, 15).map((article) => (
                 <NewsCard key={article.id} article={article} />
-              ))}
-              {news.length === 0 && loading && (
-                <div className="text-center py-12">
-                  <div className="w-8 h-8 border-2 rounded-full animate-spin mx-auto mb-3"
-                    style={{ borderColor: 'var(--border-color)', borderTopColor: 'var(--accent-blue)' }} />
-                  <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Fetching live news & analyzing sentiment...</p>
+              )) : (
+                <div>
+                  {loading ? (
+                    <>{Array.from({ length: 5 }).map((_, i) => <SkeletonNewsCard key={i} />)}</>
+                  ) : (
+                    <div className="text-center py-12">
+                      <p className="text-sm" style={{ color: 'var(--text-muted)' }}>No news data available yet.</p>
+                      <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Refresh the page to fetch live news.</p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
