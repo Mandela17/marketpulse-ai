@@ -15,22 +15,23 @@ let isRevalidating = false; // Prevent concurrent background refreshes
 const FRESH_DURATION = 10 * 60 * 1000;     // 10 minutes — data considered "fresh"
 const MAX_STALE_DURATION = 30 * 60 * 1000; // 30 minutes — serve stale up to this limit
 
-// Save analyzed articles to Supabase
+// Save analyzed articles to Supabase in a single batch
 async function saveArticlesToDB(articles: any[]) {
+  if (!articles || articles.length === 0) return;
   const db = getServiceClient();
   
-  for (const article of articles) {
-    try {
-      // Check if article already exists by URL
-      const { data: existing } = await db
-        .from('articles')
-        .select('id')
-        .eq('url', article.url)
-        .limit(1);
+  try {
+    const urls = articles.map(a => a.url);
+    // Fetch existing articles by URL in one batch query
+    const { data: existing } = await db
+      .from('articles')
+      .select('url')
+      .in('url', urls);
 
-      if (existing && existing.length > 0) continue; // Skip duplicates
-
-      await db.from('articles').insert({
+    const existingUrls = new Set((existing || []).map(e => e.url));
+    const toInsert = articles
+      .filter(a => !existingUrls.has(a.url))
+      .map(article => ({
         title: article.title,
         source: article.source,
         url: article.url,
@@ -45,37 +46,42 @@ async function saveArticlesToDB(articles: any[]) {
         related_sectors: article.relatedSectors || [],
         related_stocks: article.relatedStocks || [],
         aspects: article.aspects || [],
-      });
-    } catch (err) {
-      // Silently skip errors — don't block the API response
-      console.warn('[DB] Article save skipped:', (err as Error).message);
+      }));
+
+    if (toInsert.length > 0) {
+      const { error } = await db.from('articles').insert(toInsert);
+      if (error) console.warn('[DB] Batch articles insert error:', error.message);
     }
+  } catch (err) {
+    console.warn('[DB] Article batch save skipped:', (err as Error).message);
   }
 }
 
-// Save daily sector sentiment snapshots
+// Save daily sector sentiment snapshots in a single upsert
 async function saveSectorSnapshots(sectorSentiments: Record<string, any>) {
   const db = getServiceClient();
   const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+  const toUpsert = Object.entries(sectorSentiments).map(([sectorId, data]) => ({
+    sector_id: sectorId,
+    date: today,
+    score: data.sentiment ?? 50,
+    article_count: data.articleCount ?? 0,
+    key_driver: data.keyDriver || '',
+  }));
 
-  for (const [sectorId, data] of Object.entries(sectorSentiments)) {
-    try {
-      await db.from('sector_sentiment_history').upsert({
-        sector_id: sectorId,
-        date: today,
-        score: data.sentiment ?? 50,
-        article_count: data.articleCount ?? 0,
-        key_driver: data.keyDriver || '',
-      }, {
-        onConflict: 'sector_id,date',
-      });
-    } catch (err) {
-      console.warn('[DB] Sector snapshot skipped:', (err as Error).message);
-    }
+  if (toUpsert.length === 0) return;
+
+  try {
+    const { error } = await db.from('sector_sentiment_history').upsert(toUpsert, {
+      onConflict: 'sector_id,date',
+    });
+    if (error) console.warn('[DB] Sector snapshot upsert error:', error.message);
+  } catch (err) {
+    console.warn('[DB] Sector snapshot skipped:', (err as Error).message);
   }
 }
 
-// Save per-stock sentiment snapshots
+// Save per-stock sentiment snapshots in a single upsert
 async function saveStockSnapshots(articles: any[]) {
   const db = getServiceClient();
   const today = new Date().toISOString().split('T')[0];
@@ -95,22 +101,26 @@ async function saveStockSnapshots(articles: any[]) {
     }
   }
 
-  for (const [symbol, data] of Object.entries(stockScores)) {
+  const toUpsert = Object.entries(stockScores).map(([symbol, data]) => {
     const avgSentiment = data.weight > 0 ? data.total / data.weight : 0;
     const score = Math.round(Math.max(0, Math.min(100, (avgSentiment + 1) * 50)));
+    return {
+      symbol,
+      date: today,
+      sentiment: score,
+      article_count: data.count,
+    };
+  });
 
-    try {
-      await db.from('stock_sentiment_history').upsert({
-        symbol,
-        date: today,
-        sentiment: score,
-        article_count: data.count,
-      }, {
-        onConflict: 'symbol,date',
-      });
-    } catch (err) {
-      console.warn('[DB] Stock snapshot skipped:', (err as Error).message);
-    }
+  if (toUpsert.length === 0) return;
+
+  try {
+    const { error } = await db.from('stock_sentiment_history').upsert(toUpsert, {
+      onConflict: 'symbol,date',
+    });
+    if (error) console.warn('[DB] Stock snapshot upsert error:', error.message);
+  } catch (err) {
+    console.warn('[DB] Stock snapshot skipped:', (err as Error).message);
   }
 }
 
