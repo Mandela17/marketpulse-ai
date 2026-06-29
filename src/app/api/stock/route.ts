@@ -3,28 +3,42 @@ export const dynamic = 'force-dynamic';
 import { fetchStockPrice } from '@/lib/stockData';
 import { computeRealTechnicals } from '@/lib/technicalAnalysis';
 import { getInstrumentKey } from '@/lib/upstoxInstruments';
+import { getUpstoxToken } from '@/lib/upstoxTokenStore';
+import { quoteCache, QUOTE_TTL, techCache, TECH_TTL } from '@/lib/cache';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const symbol = searchParams.get('symbol');
-  const upstoxToken = request.headers.get('X-Upstox-Token') || '';
+  // Client can pass a token, but we also auto-check server-side stored token
+  const clientToken = request.headers.get('X-Upstox-Token') || '';
 
   if (!symbol) {
     return NextResponse.json({ error: 'Symbol parameter required' }, { status: 400 });
   }
   
   try {
-    // Try Upstox first if token provided (more accurate, real-time)
+    // ─── Resolve Upstox token: client-provided OR server-side stored ───
+    let upstoxToken = clientToken;
+    let tokenSource = 'client';
+    
+    if (!upstoxToken || upstoxToken === 'sandbox' || upstoxToken === 'mock') {
+      // Try server-side stored token (from Supabase)
+      const storedToken = await getUpstoxToken();
+      if (storedToken) {
+        upstoxToken = storedToken.accessToken;
+        tokenSource = 'server';
+      }
+    }
+
+    // ─── Try Upstox for real-time quote ───
     let upstoxQuote: any = null;
-    if (upstoxToken) {
-      if (upstoxToken === 'sandbox' || upstoxToken === 'mock') {
-        const yahooQuote = await fetchStockPrice(symbol);
-        if (yahooQuote) {
-          upstoxQuote = {
-            ...yahooQuote,
-            source: 'upstox',
-          };
-        }
+    
+    if (upstoxToken && upstoxToken !== 'sandbox' && upstoxToken !== 'mock') {
+      // Check cache first
+      const cacheKey = `upstox:${symbol}`;
+      const cached = quoteCache.get<any>(cacheKey);
+      if (cached) {
+        upstoxQuote = cached;
       } else {
         try {
           const instrumentKey = getInstrumentKey(symbol);
@@ -52,6 +66,8 @@ export async function GET(request: Request) {
                   currency: 'INR',
                   source: 'upstox',
                 };
+                // Cache Upstox quote for 2 minutes (more real-time than Yahoo)
+                quoteCache.set(cacheKey, upstoxQuote, 2 * 60 * 1000);
               }
             }
           }
@@ -61,7 +77,7 @@ export async function GET(request: Request) {
       }
     }
 
-    // Fetch Yahoo Finance quote + technicals in parallel (always compute technicals from OHLCV)
+    // ─── Fetch Yahoo Finance quote (fallback) + technicals in parallel ───
     const [yahooQuote, technicals] = await Promise.all([
       upstoxQuote ? Promise.resolve(null) : fetchStockPrice(symbol),
       computeRealTechnicals(symbol),
@@ -76,7 +92,9 @@ export async function GET(request: Request) {
     return NextResponse.json({
       quote,
       technicals: technicals || null,
-      dataSource: upstoxQuote ? 'Upstox Real-Time' : 'Yahoo Finance OHLCV',
+      dataSource: upstoxQuote
+        ? `Upstox Real-Time (${tokenSource})`
+        : 'Yahoo Finance OHLCV',
     });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });

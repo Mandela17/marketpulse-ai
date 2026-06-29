@@ -1,6 +1,9 @@
 // Real stock data fetcher using Yahoo Finance
 // Fetches live prices for NSE/BSE listed stocks
 
+import { toYahooTicker } from './symbolMap';
+import { quoteCache, QUOTE_TTL, cachedFetch } from './cache';
+
 export interface StockPrice {
   symbol: string;
   name: string;
@@ -20,12 +23,13 @@ export interface IndexData {
   changePercent: number;
 }
 
-// Fetch stock price from Yahoo Finance using the v6 quote endpoint
-async function yahooFetch(symbol: string): Promise<any> {
+// Fetch stock price from Yahoo Finance using the v8 chart endpoint
+async function yahooFetch(yahooTicker: string): Promise<any> {
+  const encodedTicker = encodeURIComponent(yahooTicker);
   // Try multiple endpoints since Yahoo changes them
   const endpoints = [
-    `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=1d`,
-    `https://query2.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=1d`,
+    `https://query1.finance.yahoo.com/v8/finance/chart/${encodedTicker}?interval=1d&range=1d`,
+    `https://query2.finance.yahoo.com/v8/finance/chart/${encodedTicker}?interval=1d&range=1d`,
   ];
 
   for (const url of endpoints) {
@@ -47,9 +51,13 @@ async function yahooFetch(symbol: string): Promise<any> {
   return null;
 }
 
-// Fetch stock price from Yahoo Finance
+// Fetch stock price from Yahoo Finance (with caching)
 export async function fetchStockPrice(symbol: string): Promise<StockPrice | null> {
-  const nseSym = symbol.includes('.') || symbol.startsWith('^') ? symbol : `${symbol}.NS`;
+  const cacheKey = `quote:${symbol}`;
+  const cached = quoteCache.get<StockPrice>(cacheKey);
+  if (cached) return cached;
+
+  const nseSym = toYahooTicker(symbol);
 
   try {
     const data = await yahooFetch(nseSym);
@@ -61,7 +69,7 @@ export async function fetchStockPrice(symbol: string): Promise<StockPrice | null
     const change = price - prevClose;
     const changePercent = prevClose > 0 ? (change / prevClose) * 100 : 0;
 
-    return {
+    const result: StockPrice = {
       symbol: symbol,
       name: meta.shortName || meta.longName || symbol,
       price,
@@ -73,6 +81,10 @@ export async function fetchStockPrice(symbol: string): Promise<StockPrice | null
       volume: meta.regularMarketVolume || 0,
       currency: meta.currency || 'INR',
     };
+
+    // Cache successful result
+    quoteCache.set(cacheKey, result, QUOTE_TTL);
+    return result;
   } catch (error) {
     console.warn(`Failed to fetch price for ${symbol}:`, error);
     return null;

@@ -2,6 +2,9 @@
 // Computes RSI, MACD, EMA, Bollinger Bands from actual historical OHLCV data
 // Data source: Yahoo Finance v8/finance/chart API
 
+import { toYahooTicker } from './symbolMap';
+
+
 export interface OHLCV {
   date: string;
   open: number;
@@ -68,7 +71,7 @@ export async function fetchHistoricalOHLCV(symbol: string, days: number = 60): P
     return cached.data;
   }
 
-  const nseSym = symbol.includes('.') || symbol.startsWith('^') ? symbol : `${symbol}.NS`;
+  const nseSym = toYahooTicker(symbol);
 
   // Map days to Yahoo API range values dynamically
   let range = '6mo';
@@ -82,9 +85,10 @@ export async function fetchHistoricalOHLCV(symbol: string, days: number = 60): P
   else if (days <= 3650) range = '10y';
   else range = 'max';
 
+  const encodedSym = encodeURIComponent(nseSym);
   const endpoints = [
-    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(nseSym)}?interval=1d&range=${range}`,
-    `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(nseSym)}?interval=1d&range=${range}`,
+    `https://query1.finance.yahoo.com/v8/finance/chart/${encodedSym}?interval=1d&range=${range}`,
+    `https://query2.finance.yahoo.com/v8/finance/chart/${encodedSym}?interval=1d&range=${range}`,
   ];
 
   for (const url of endpoints) {
