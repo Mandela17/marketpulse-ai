@@ -7,6 +7,8 @@ import { generatePrediction } from '@/lib/mlEngine';
 import { computeRealTechnicals } from '@/lib/technicalAnalysis';
 import { fetchDeliveryData, fetchRealPCR, fetchIndiaVIX, isFnOStock } from '@/lib/nseData';
 import { computeRiskReward } from '@/lib/riskEngine';
+import { createClient } from '@supabase/supabase-js';
+import { getUserRole } from '@/lib/userRoles';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60; // 60 second timeout on Vercel
@@ -20,12 +22,56 @@ const KEY_STOCKS = [
 ];
 
 export async function GET(request: Request) {
-  // Auth: only allow in dev or with the cron secret
+  // Auth: allow in dev, with cron secret, or for logged-in admin/super_admin
   const { searchParams } = new URL(request.url);
   const secret = searchParams.get('secret');
   const cronSecret = process.env.CRON_SECRET;
 
-  if (process.env.NODE_ENV !== 'development' && cronSecret && secret !== cronSecret) {
+  const isDev = process.env.NODE_ENV === 'development';
+  const hasCronSecret = cronSecret && secret === cronSecret;
+
+  // Check for logged-in admin via Supabase auth header or cookie
+  let isAdmin = false;
+  if (!isDev && !hasCronSecret) {
+    try {
+      const authHeader = request.headers.get('authorization');
+      const cookieHeader = request.headers.get('cookie') || '';
+
+      // Extract access token from Authorization header or sb-access-token cookie
+      let accessToken = '';
+      if (authHeader?.startsWith('Bearer ')) {
+        accessToken = authHeader.slice(7);
+      } else {
+        // Try to get token from Supabase cookie
+        const match = cookieHeader.match(/sb-[^-]+-auth-token=([^;]+)/);
+        if (match) {
+          try {
+            const parsed = JSON.parse(decodeURIComponent(match[1]));
+            accessToken = parsed?.[0]?.access_token || parsed?.access_token || '';
+          } catch {
+            accessToken = '';
+          }
+        }
+      }
+
+      if (accessToken) {
+        const supabase = createClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+        );
+        const { data: { user } } = await supabase.auth.getUser(accessToken);
+
+        if (user) {
+          const role = await getUserRole(user.id);
+          isAdmin = role?.role === 'super_admin' || role?.role === 'admin';
+        }
+      }
+    } catch (err) {
+      console.warn('[Seed] Auth check failed:', err);
+    }
+  }
+
+  if (!isDev && !hasCronSecret && !isAdmin) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

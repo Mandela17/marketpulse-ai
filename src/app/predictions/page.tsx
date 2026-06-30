@@ -40,7 +40,21 @@ export default function PredictionsDashboard() {
     setSeeding(true);
     setSeedResult(null);
     try {
-      const res = await fetch('/api/seed-predictions');
+      // Get Supabase access token from localStorage for admin auth
+      const headers: Record<string, string> = {};
+      try {
+        const storageKeys = Object.keys(localStorage);
+        const sbKey = storageKeys.find(k => k.startsWith('sb-') && k.endsWith('-auth-token'));
+        if (sbKey) {
+          const parsed = JSON.parse(localStorage.getItem(sbKey) || '{}');
+          const accessToken = parsed?.access_token || parsed?.[0]?.access_token;
+          if (accessToken) {
+            headers['Authorization'] = `Bearer ${accessToken}`;
+          }
+        }
+      } catch {}
+
+      const res = await fetch('/api/seed-predictions', { headers });
       const data = await res.json();
       setSeedResult(data);
       // Re-fetch data after seeding
