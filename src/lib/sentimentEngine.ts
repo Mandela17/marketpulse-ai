@@ -127,7 +127,7 @@ Return ONLY a valid JSON array, no markdown and no explanation. Example:
 [{"sentiment": 0.7, "label": "positive", "category": "financial", "impactLevel": "high", "summary": "Strong FII inflows of ₹2,500 crore coupled with positive US inflation data drives Nifty sentiment higher.", "aspects": [{"entity": "Nifty", "aspect": "Macro/Global", "sentiment": 0.8}]}]`;
 
   const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
+    model: 'gemini-2.0-flash-lite',
     contents: prompt,
   });
 
