@@ -173,16 +173,15 @@ export async function GET(request: Request) {
             narrativeCache: narrative,
           };
           
-          await db
-            .from('predictions')
-            .update({ features_json: updatedFeatures })
-            .eq('id', dbRecord.id)
-            .then(() => {
-              console.log(`[Predict API] Cached narrative report in DB for ${symbol}`);
-            })
-            .catch(err => {
-              console.warn(`[Predict API] Failed to cache narrative report in DB:`, err.message);
-            });
+          try {
+            await db
+              .from('predictions')
+              .update({ features_json: updatedFeatures })
+              .eq('id', dbRecord.id);
+            console.log(`[Predict API] Cached narrative report in DB for ${symbol}`);
+          } catch (err: any) {
+            console.warn(`[Predict API] Failed to cache narrative report in DB:`, err.message);
+          }
         }
       }
     }
