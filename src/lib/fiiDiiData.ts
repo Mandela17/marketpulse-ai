@@ -221,12 +221,19 @@ export function computeFIIDIIFeatures(flows: FIIDIIFlow[]): {
   fiiTrend: 'buying' | 'selling' | 'neutral';
   diiNetToday: number;
   diiNet5DAvg: number;
+  diiTrend: 'buying' | 'selling' | 'neutral';
   fiiDiiDivergence: number; // positive = FII buying while DII selling (strong signal)
+  // ─── New: Phase 2 velocity derivatives ───
+  fiiVelocity: number;         // 5-day flow acceleration (₹Cr/day change rate)
+  flowMomentumDivergence: number; // FII vel × DII vel — negative = diverging (bullish)
+  cumFlow10d: number;          // Cumulative 10-day FII net (institutional conviction)
 } {
   if (flows.length === 0) {
     return {
       fiiNetToday: 0, fiiNet5DAvg: 0, fiiTrend: 'neutral',
-      diiNetToday: 0, diiNet5DAvg: 0, fiiDiiDivergence: 0,
+      diiNetToday: 0, diiNet5DAvg: 0, diiTrend: 'neutral',
+      fiiDiiDivergence: 0,
+      fiiVelocity: 0, flowMomentumDivergence: 0, cumFlow10d: 0,
     };
   }
 
@@ -235,15 +242,42 @@ export function computeFIIDIIFeatures(flows: FIIDIIFlow[]): {
   const fiiNet5DAvg = last5.reduce((s, f) => s + f.fiiNet, 0) / last5.length;
   const diiNet5DAvg = last5.reduce((s, f) => s + f.diiNet, 0) / last5.length;
 
-  // FII trend: 3 of last 5 days net positive = buying
-  const positiveDays = last5.filter(f => f.fiiNet > 0).length;
+  // FII trend: 4 of last 5 days net positive = buying
+  const fiiPositiveDays = last5.filter(f => f.fiiNet > 0).length;
   const fiiTrend: 'buying' | 'selling' | 'neutral' =
-    positiveDays >= 4 ? 'buying' :
-    positiveDays <= 1 ? 'selling' : 'neutral';
+    fiiPositiveDays >= 4 ? 'buying' :
+    fiiPositiveDays <= 1 ? 'selling' : 'neutral';
+
+  // DII trend
+  const diiPositiveDays = last5.filter(f => f.diiNet > 0).length;
+  const diiTrend: 'buying' | 'selling' | 'neutral' =
+    diiPositiveDays >= 4 ? 'buying' :
+    diiPositiveDays <= 1 ? 'selling' : 'neutral';
 
   // Divergence: FII and DII going opposite directions is a strong signal
-  // Positive divergence = FII buying + DII selling (FII usually wins)
   const fiiDiiDivergence = today.fiiNet - today.diiNet;
+
+  // ─── Velocity: how fast is institutional money accelerating? ───
+  // Compare recent 5-day average to previous 5-day average
+  const prev5 = flows.slice(5, Math.min(10, flows.length));
+  const fiiNet5DAvgPrev = prev5.length > 0
+    ? prev5.reduce((s, f) => s + f.fiiNet, 0) / prev5.length
+    : fiiNet5DAvg;
+  const diiNet5DAvgPrev = prev5.length > 0
+    ? prev5.reduce((s, f) => s + f.diiNet, 0) / prev5.length
+    : diiNet5DAvg;
+
+  // Velocity = change in 5-day average (positive = accelerating buying)
+  const fiiVelocity = fiiNet5DAvg - fiiNet5DAvgPrev;
+  const diiVelocity = diiNet5DAvg - diiNet5DAvgPrev;
+
+  // Flow Momentum Divergence: FII vel × DII vel
+  // Negative = they're going opposite directions (strong directional signal)
+  const flowMomentumDivergence = fiiVelocity * diiVelocity;
+
+  // Cumulative 10-day FII net — institutional conviction
+  const last10 = flows.slice(0, Math.min(10, flows.length));
+  const cumFlow10d = last10.reduce((s, f) => s + f.fiiNet, 0);
 
   return {
     fiiNetToday: today.fiiNet,
@@ -251,6 +285,11 @@ export function computeFIIDIIFeatures(flows: FIIDIIFlow[]): {
     fiiTrend,
     diiNetToday: today.diiNet,
     diiNet5DAvg: parseFloat(diiNet5DAvg.toFixed(2)),
+    diiTrend,
     fiiDiiDivergence: parseFloat(fiiDiiDivergence.toFixed(2)),
+    fiiVelocity: parseFloat(fiiVelocity.toFixed(2)),
+    flowMomentumDivergence: parseFloat(flowMomentumDivergence.toFixed(2)),
+    cumFlow10d: parseFloat(cumFlow10d.toFixed(2)),
   };
 }
+

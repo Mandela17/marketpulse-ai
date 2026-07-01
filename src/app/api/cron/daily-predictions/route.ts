@@ -13,6 +13,7 @@ import { computeRealTechnicals } from '@/lib/technicalAnalysis';
 import { resolveUnresolvedPredictions } from '@/lib/predictionHistory';
 import { fetchStockPrice } from '@/lib/stockData';
 import { fetchDeliveryData, fetchRealPCR, fetchIndiaVIX, isFnOStock } from '@/lib/nseData';
+import { runAdaptiveLearningCycle } from '@/lib/adaptiveLearning';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120; // 2 minute timeout
@@ -72,6 +73,17 @@ export async function GET(request: Request) {
   // Resolve predictions
   const resolution = await resolveUnresolvedPredictions(closingPrices);
   log.push(`[Cron] Resolved ${resolution.resolved} predictions (${resolution.correct} correct)`);
+
+  // ─── Step 1.5: Run adaptive learning to tune ensemble weights ───────
+  log.push('[Cron] Step 1.5: Running adaptive learning cycle...');
+  try {
+    const adaptive = await runAdaptiveLearningCycle();
+    log.push(`[Cron] Adaptive learning: GBDT 7d acc=${adaptive.gbdtAccuracy7d}%, ` +
+      `Heuristic 7d acc=${adaptive.heuristicAccuracy7d}%, ` +
+      `New weights: GBDT=${adaptive.newWeights.gbdt}, Heuristic=${adaptive.newWeights.heuristic}`);
+  } catch (err: any) {
+    log.push(`[Cron] Adaptive learning failed: ${err.message}`);
+  }
 
   // ─── Step 2: Generate new predictions ───────────────────────────────
   log.push('[Cron] Step 2: Generating new predictions...');

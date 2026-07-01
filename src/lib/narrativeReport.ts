@@ -94,14 +94,13 @@ VALIDATION ACCURACY: ${prediction.metrics.validationAccuracy}%
 TRAINING SAMPLES: ${prediction.metrics.totalSamples}
 
 SUB-MODEL VOTES:
-- Logistic Regression: ${prediction.subModelVotes.logisticRegression.direction} (${prediction.subModelVotes.logisticRegression.probability}%)
-- AdaBoost Stump Ensemble: ${prediction.subModelVotes.stumpEnsemble.direction} (${prediction.subModelVotes.stumpEnsemble.probability}%)
+- GBDT (Gradient Boosted Trees): ${prediction.subModelVotes.gbdt.direction} (${prediction.subModelVotes.gbdt.probability}%)
 - Rule-Based Heuristic: ${prediction.subModelVotes.heuristic.direction} (${prediction.subModelVotes.heuristic.probability}%)
 
 SUPPORTING SIGNALS: ${prediction.supportingSignals.join('; ')}
 CONTRADICTING SIGNALS: ${prediction.contradictingSignals.join('; ')}
 
-${riskReward ? `RISK/REWARD: Target ₹${riskReward.targetPrice}, Stop-Loss ₹${riskReward.stopLoss}, R:R ${riskReward.riskRewardRatio}x` : ''}
+${riskReward ? `RISK/REWARD: Entry ₹${riskReward.entry}, Target1 ₹${riskReward.target1}, Target2 ₹${riskReward.target2}, Stop-Loss ₹${riskReward.stopLoss}, R:R ${riskReward.riskRewardRatio}x, Kelly ${riskReward.positionSizePct}%` : ''}
 ${regime ? `MARKET REGIME: ${regime.label} (${regime.confidence}% confidence)` : ''}
 ${context.indiaVix ? `INDIA VIX: ${context.indiaVix}` : ''}
 ${context.fiiNet ? `FII NET: ₹${context.fiiNet}Cr` : ''}
@@ -133,9 +132,9 @@ function generateFallbackReport(
 
   // Summary
   const summary = `${symbol} shows a ${dir} setup with ${prediction.confidence}% model confidence. ${
-    prediction.metrics.modelVersion.includes('ensemble')
-      ? `The ensemble model (${prediction.metrics.totalSamples} training samples) favors ${dirUp ? 'upside' : 'downside'} with ${
-          prediction.subModelVotes.logisticRegression.direction === prediction.subModelVotes.stumpEnsemble.direction
+    prediction.metrics.modelVersion.includes('gbdt')
+      ? `The GBDT+Heuristic ensemble (${prediction.metrics.totalSamples} training samples) favors ${dirUp ? 'upside' : 'downside'} with ${
+          prediction.subModelVotes.gbdt.direction === prediction.subModelVotes.heuristic.direction
             ? 'consensus across sub-models'
             : 'some model disagreement'
         }.`
@@ -156,29 +155,30 @@ function generateFallbackReport(
   );
 
   // P2: Model consensus
-  const lr = prediction.subModelVotes.logisticRegression;
-  const ada = prediction.subModelVotes.stumpEnsemble;
+  const gbdt = prediction.subModelVotes.gbdt;
   const heur = prediction.subModelVotes.heuristic;
-  const allAgree = lr.direction === ada.direction && ada.direction === heur.direction;
+  const allAgree = gbdt.direction === heur.direction;
   paras.push(
-    `The ensemble model combines three independent sub-models: ` +
-    `Logistic Regression votes ${lr.direction} (${lr.probability}%), ` +
-    `AdaBoost Stump Ensemble votes ${ada.direction} (${ada.probability}%), ` +
+    `The ensemble model combines two independent sub-models: ` +
+    `GBDT (Gradient Boosted Decision Trees) votes ${gbdt.direction} (${gbdt.probability}%) ` +
     `and the Rule-Based Heuristic votes ${heur.direction} (${heur.probability}%). ` +
     (allAgree
-      ? 'All three models agree, which historically improves prediction reliability.'
-      : 'Models show some disagreement, which typically reduces confidence in the prediction.')
+      ? 'Both models agree, which historically improves prediction reliability.'
+      : 'Models show disagreement, which typically reduces confidence in the prediction.')
   );
 
   // P3: Risk/reward
   if (riskReward) {
     paras.push(
-      `From a risk-reward perspective, the target is ₹${riskReward.targetPrice?.toLocaleString('en-IN')} ` +
-      `(${riskReward.targetPct}) with a stop-loss at ₹${riskReward.stopLoss?.toLocaleString('en-IN')} ` +
+      `From a risk-reward perspective, conservative target is ₹${riskReward.target1?.toLocaleString('en-IN')} ` +
+      `(${riskReward.target1Pct}) and aggressive target is ₹${riskReward.target2?.toLocaleString('en-IN')} ` +
+      `(${riskReward.target2Pct}) with a stop-loss at ₹${riskReward.stopLoss?.toLocaleString('en-IN')} ` +
       `(${riskReward.stopLossPct}), yielding a ${riskReward.riskRewardRatio}x risk-reward ratio. ` +
+      `Kelly Criterion suggests ${riskReward.positionSizePct}% position size. ` +
       `${riskReward.riskLevel === 'low' ? 'The risk profile is favorable.' :
-        riskReward.riskLevel === 'medium' ? 'The risk profile is moderate.' :
-        'The risk profile is elevated — size positions accordingly.'}`
+        riskReward.riskLevel === 'moderate' ? 'The risk profile is moderate.' :
+        'The risk profile is elevated — size positions accordingly.'}` +
+      `${riskReward.vixAdjusted ? ' (Stop-loss widened due to elevated VIX.)' : ''}`
     );
   }
 
@@ -201,10 +201,10 @@ function generateFallbackReport(
   const keyTakeaways: string[] = [];
   keyTakeaways.push(`Model predicts ${dir} direction for ${symbol} with ${prediction.confidence}% confidence`);
   if (riskReward) {
-    keyTakeaways.push(`Target: ₹${riskReward.targetPrice?.toLocaleString('en-IN')} | Stop-loss: ₹${riskReward.stopLoss?.toLocaleString('en-IN')} (${riskReward.riskRewardRatio}x R:R)`);
+    keyTakeaways.push(`Target 1: ₹${riskReward.target1?.toLocaleString('en-IN')} | Target 2: ₹${riskReward.target2?.toLocaleString('en-IN')} | Stop-loss: ₹${riskReward.stopLoss?.toLocaleString('en-IN')} (${riskReward.riskRewardRatio}x R:R)`);
   }
   if (allAgree) {
-    keyTakeaways.push('All three sub-models agree — stronger conviction signal');
+    keyTakeaways.push('Both sub-models (GBDT + Heuristic) agree — stronger conviction signal');
   }
   if (prediction.contradictingSignals.length > 0) {
     keyTakeaways.push(`Watch for: ${prediction.contradictingSignals[0]}`);

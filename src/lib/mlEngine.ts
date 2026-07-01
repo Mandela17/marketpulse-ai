@@ -1,10 +1,13 @@
-// Production ML Prediction Engine — Server-Side
-// Ensemble model combining Logistic Regression, Decision Stump Ensemble, and Rule-Based Heuristics
-// Trains on historical Supabase data (30-90 days), not client-side from scratch.
+// Production ML Prediction Engine v3 — Server-Side
+// Ensemble: Gradient Boosted Decision Tree (GBDT) + Rule-Based Heuristic
+// Features: 21-dimensional feature vector with alternative data (OBI, Volume Profile, Flow Velocity)
+// Adaptive: Ensemble weights auto-tuned from rolling accuracy via adaptiveLearning.ts
 
 import { getHistoricalFeatures } from './nseData';
 import { getRecentFIIDIIFlows, computeFIIDIIFeatures } from './fiiDiiData';
 import { savePrediction, getConfidenceLevel } from './predictionHistory';
+import { trainGBDT, predictGBDT, GBDTModel } from './gbdt';
+import { getEnsembleWeights } from './adaptiveLearning';
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -17,8 +20,7 @@ export interface MLPrediction {
   contradictingSignals: string[];
   featureImportance: Record<string, number>;
   subModelVotes: {
-    logisticRegression: { direction: 'up' | 'down'; probability: number };
-    stumpEnsemble: { direction: 'up' | 'down'; probability: number };
+    gbdt: { direction: 'up' | 'down'; probability: number };
     heuristic: { direction: 'up' | 'down'; probability: number };
   };
   metrics: {
@@ -26,6 +28,8 @@ export interface MLPrediction {
     validationAccuracy: number;
     totalSamples: number;
     modelVersion: string;
+    bestIteration: number;
+    ensembleWeights: { gbdt: number; heuristic: number };
   };
 }
 
@@ -44,6 +48,12 @@ interface FeatureVector {
   diiNet: number;
   bollingerUpper: number;
   bollingerLower: number;
+  // Phase 2 alternative data
+  obi: number;               // Order Book Imbalance [-1, 1]
+  pocPosition: number;       // Price vs Point of Control (% distance)
+  fiiVelocity: number;       // FII 5-day flow acceleration
+  flowDivergence: number;    // FII vel × DII vel (negative = diverging)
+  cumFlow10d: number;        // Cumulative 10-day FII net
   // Scaled feature array for models
   features: number[];
 }
@@ -58,7 +68,10 @@ function sigmoid(z: number): number {
 
 // ─── Feature Extraction ─────────────────────────────────────────────
 
-function extractFeatures(row: any, prevRow: any): FeatureVector {
+function extractFeatures(row: any, prevRow: any, altData?: {
+  obi?: number; pocPosition?: number; fiiVelocity?: number;
+  flowDivergence?: number; cumFlow10d?: number;
+}): FeatureVector {
   const close = row.close || 0;
   const prevClose = prevRow?.close || close;
   const rsi = row.rsi || 50;
@@ -76,8 +89,13 @@ function extractFeatures(row: any, prevRow: any): FeatureVector {
   const diiNet = row.dii_net || 0;
   const bollingerUpper = row.bollinger_upper || close * 1.02;
   const bollingerLower = row.bollinger_lower || close * 0.98;
+  const obi = altData?.obi || 0;
+  const pocPosition = altData?.pocPosition || 0;
+  const fiiVelocity = altData?.fiiVelocity || 0;
+  const flowDivergence = altData?.flowDivergence || 0;
+  const cumFlow10d = altData?.cumFlow10d || 0;
 
-  // Feature engineering
+  // Feature engineering — 20 engineered features (no intercept needed for GBDT)
   const f_rsi = (rsi - 50) / 50;                                            // RSI deviation from neutral
   const f_macd = close > 0 ? macdHist / close : 0;                          // MACD relative to price
   const f_emaDev = ema20 > 0 ? (close - ema20) / ema20 : 0;                 // EMA deviation
@@ -95,12 +113,20 @@ function extractFeatures(row: any, prevRow: any): FeatureVector {
   const f_bbPosition = bollingerUpper !== bollingerLower
     ? (close - bollingerLower) / (bollingerUpper - bollingerLower) - 0.5     // BB position (-0.5 to 0.5)
     : 0;
+  // Phase 2 new features
+  const f_obi = obi;                                                         // Order Book Imbalance [-1, 1]
+  const f_pocPosition = pocPosition / 100;                                   // POC distance normalized
+  const f_fiiVelocity = fiiVelocity / 2000;                                 // FII acceleration normalized
+  const f_flowDivergence = flowDivergence > 0                                // Flow divergence sign
+    ? Math.min(1, Math.log(1 + flowDivergence / 100000)) 
+    : -Math.min(1, Math.log(1 + Math.abs(flowDivergence) / 100000));
+  const f_cumFlow10d = cumFlow10d / 20000;                                   // 10-day cum flow normalized
 
   return {
     rsi, macdHist, ema20, close, volumeRatio, sentimentScore,
     pcr, deliveryPct, indiaVix, fiiNet, diiNet, bollingerUpper, bollingerLower,
+    obi, pocPosition, fiiVelocity, flowDivergence, cumFlow10d,
     features: [
-      1,              // intercept
       f_rsi,
       f_macd,
       f_emaDev,
@@ -116,140 +142,16 @@ function extractFeatures(row: any, prevRow: any): FeatureVector {
       f_dii,
       f_priceMom,
       f_bbPosition,
+      f_obi,
+      f_pocPosition,
+      f_fiiVelocity,
+      f_flowDivergence,
+      f_cumFlow10d,
     ],
   };
 }
 
-// ─── Model 1: Logistic Regression with L2 Regularization ────────────
-
-function trainLogisticRegression(
-  X: number[][],
-  Y: number[],
-  alpha: number = 0.1,
-  lambda: number = 0.05,
-  epochs: number = 500
-): number[] {
-  const m = X.length;
-  const n = X[0].length;
-  const theta = new Array(n).fill(0);
-
-  for (let epoch = 0; epoch < epochs; epoch++) {
-    const gradients = new Array(n).fill(0);
-
-    for (let i = 0; i < m; i++) {
-      let z = 0;
-      for (let j = 0; j < n; j++) z += theta[j] * X[i][j];
-      const pred = sigmoid(z);
-      const error = pred - Y[i];
-      for (let j = 0; j < n; j++) gradients[j] += error * X[i][j];
-    }
-
-    // Update with L2 regularization (skip intercept)
-    theta[0] -= (alpha / m) * gradients[0];
-    for (let j = 1; j < n; j++) {
-      theta[j] -= (alpha / m) * (gradients[j] + lambda * theta[j]);
-    }
-  }
-
-  return theta;
-}
-
-function predictLogReg(theta: number[], features: number[]): number {
-  let z = 0;
-  for (let j = 0; j < theta.length && j < features.length; j++) {
-    z += theta[j] * features[j];
-  }
-  return sigmoid(z);
-}
-
-// ─── Model 2: Decision Stump Ensemble (AdaBoost-style) ──────────────
-
-interface DecisionStump {
-  featureIndex: number;
-  threshold: number;
-  polarity: 1 | -1;  // 1 = feature > threshold → predict 1
-  weight: number;     // alpha weight in ensemble
-}
-
-function trainStumpEnsemble(
-  X: number[][],
-  Y: number[],
-  numStumps: number = 10
-): DecisionStump[] {
-  const m = X.length;
-  const n = X[0].length;
-  const stumps: DecisionStump[] = [];
-  const sampleWeights = new Array(m).fill(1 / m);
-
-  for (let t = 0; t < numStumps; t++) {
-    let bestStump: DecisionStump | null = null;
-    let bestWeightedError = Infinity;
-
-    // Try each feature and several thresholds
-    for (let j = 1; j < n; j++) { // skip intercept
-      const values = X.map(x => x[j]).sort((a, b) => a - b);
-      // Try 5 quantile thresholds
-      for (let q = 1; q <= 4; q++) {
-        const threshold = values[Math.floor(m * q / 5)];
-
-        for (const polarity of [1, -1] as const) {
-          let weightedError = 0;
-
-          for (let i = 0; i < m; i++) {
-            const predicted = (polarity * X[i][j] > polarity * threshold) ? 1 : 0;
-            if (predicted !== Y[i]) {
-              weightedError += sampleWeights[i];
-            }
-          }
-
-          if (weightedError < bestWeightedError) {
-            bestWeightedError = weightedError;
-            bestStump = { featureIndex: j, threshold, polarity, weight: 0 };
-          }
-        }
-      }
-    }
-
-    if (!bestStump || bestWeightedError >= 0.5) break;
-
-    // Compute stump weight (alpha)
-    const epsilon = Math.max(1e-10, bestWeightedError);
-    const alpha = 0.5 * Math.log((1 - epsilon) / epsilon);
-    bestStump.weight = alpha;
-    stumps.push(bestStump);
-
-    // Update sample weights
-    let weightSum = 0;
-    for (let i = 0; i < m; i++) {
-      const predicted = (bestStump.polarity * X[i][bestStump.featureIndex] > bestStump.polarity * bestStump.threshold) ? 1 : 0;
-      const correct = predicted === Y[i];
-      sampleWeights[i] *= correct ? Math.exp(-alpha) : Math.exp(alpha);
-      weightSum += sampleWeights[i];
-    }
-    // Normalize
-    for (let i = 0; i < m; i++) sampleWeights[i] /= weightSum;
-  }
-
-  return stumps;
-}
-
-function predictStumps(stumps: DecisionStump[], features: number[]): number {
-  if (stumps.length === 0) return 0.5;
-
-  let score = 0;
-  let totalWeight = 0;
-
-  for (const stump of stumps) {
-    const predicted = (stump.polarity * features[stump.featureIndex] > stump.polarity * stump.threshold) ? 1 : -1;
-    score += stump.weight * predicted;
-    totalWeight += stump.weight;
-  }
-
-  // Convert to probability
-  return sigmoid(totalWeight > 0 ? score / totalWeight * 3 : 0); // scale factor for reasonable probabilities
-}
-
-// ─── Model 3: Rule-Based Heuristic ──────────────────────────────────
+// ─── Rule-Based Heuristic (Model 2) ────────────────────────────────
 
 function predictHeuristic(fv: FeatureVector): { probability: number; signals: string[] } {
   let score = 0;
@@ -305,62 +207,37 @@ function predictHeuristic(fv: FeatureVector): { probability: number; signals: st
     score += 1; signals.push(`High delivery ${fv.deliveryPct.toFixed(0)}% — genuine buying`);
   }
 
-  // Convert score to probability (score typically -8 to +8)
-  const probability = sigmoid(score * 0.4); // Scale to reasonable range
+  // ─── Phase 2: New alternative data signals ───
+
+  // Order Book Imbalance
+  if (fv.obi > 0.3) { score += 1.5; signals.push(`Strong buy-side order book imbalance (${(fv.obi * 100).toFixed(0)}%)`); }
+  else if (fv.obi < -0.3) { score -= 1.5; signals.push(`Strong sell-side order book imbalance (${(fv.obi * 100).toFixed(0)}%)`); }
+  else if (fv.obi > 0.1) { score += 0.5; }
+  else if (fv.obi < -0.1) { score -= 0.5; }
+
+  // FII Velocity
+  if (fv.fiiVelocity > 500) { score += 1.5; signals.push(`FII buying accelerating (+₹${fv.fiiVelocity.toFixed(0)}Cr/day)`); }
+  else if (fv.fiiVelocity < -500) { score -= 1.5; signals.push(`FII selling accelerating (-₹${Math.abs(fv.fiiVelocity).toFixed(0)}Cr/day)`); }
+
+  // Cumulative 10d flow
+  if (fv.cumFlow10d > 5000) { score += 1; signals.push(`Strong 10-day FII inflow ₹${(fv.cumFlow10d / 1000).toFixed(1)}KCr`); }
+  else if (fv.cumFlow10d < -5000) { score -= 1; signals.push(`Heavy 10-day FII outflow ₹${(Math.abs(fv.cumFlow10d) / 1000).toFixed(1)}KCr`); }
+
+  // Convert score to probability (score typically -10 to +10)
+  const probability = sigmoid(score * 0.35);
 
   return { probability, signals };
-}
-
-// ─── Z-Score Standardization ─────────────────────────────────────────
-
-function standardize(X: number[][]): { X_scaled: number[][]; means: number[]; stdDevs: number[] } {
-  const n = X[0].length;
-  const m = X.length;
-  const means = new Array(n).fill(0);
-  const stdDevs = new Array(n).fill(1);
-
-  // Compute means (skip intercept at index 0)
-  for (let j = 1; j < n; j++) {
-    let sum = 0;
-    for (let i = 0; i < m; i++) sum += X[i][j];
-    means[j] = sum / m;
-  }
-
-  // Compute std devs
-  for (let j = 1; j < n; j++) {
-    let varSum = 0;
-    for (let i = 0; i < m; i++) varSum += Math.pow(X[i][j] - means[j], 2);
-    stdDevs[j] = Math.sqrt(varSum / m);
-    if (stdDevs[j] === 0) stdDevs[j] = 1; // avoid division by zero
-  }
-
-  // Scale
-  const X_scaled = X.map(row => {
-    const scaled = [...row];
-    for (let j = 1; j < n; j++) {
-      scaled[j] = (scaled[j] - means[j]) / stdDevs[j];
-    }
-    return scaled;
-  });
-
-  return { X_scaled, means, stdDevs };
-}
-
-function scaleFeatures(features: number[], means: number[], stdDevs: number[]): number[] {
-  const scaled = [...features];
-  for (let j = 1; j < features.length && j < means.length; j++) {
-    scaled[j] = (scaled[j] - means[j]) / stdDevs[j];
-  }
-  return scaled;
 }
 
 // ─── Feature Names ──────────────────────────────────────────────────
 
 const FEATURE_NAMES = [
-  'intercept', 'RSI', 'MACD', 'EMA Deviation', 'EMA 20/50',
+  'RSI', 'MACD', 'EMA Deviation', 'EMA 20/50',
   'Volume', 'Sentiment', 'Sentiment Momentum', 'PCR',
   'Delivery%', 'Delivery Momentum', 'VIX', 'FII Flow', 'DII Flow',
   'Price Momentum', 'Bollinger Position',
+  'Order Book Imbalance', 'Volume Profile (POC)', 'FII Velocity',
+  'Flow Divergence', 'Cumulative 10d Flow',
 ];
 
 // ─── Main Prediction Function ───────────────────────────────────────
@@ -371,6 +248,10 @@ export async function generatePrediction(
     rsi?: number; macdHist?: number; ema20?: number; ema50?: number;
     close?: number; volumeRatio?: number; sentimentScore?: number;
     pcr?: number; deliveryPct?: number; bollingerUpper?: number; bollingerLower?: number;
+  },
+  altData?: {
+    obi?: number; pocPosition?: number; fiiVelocity?: number;
+    flowDivergence?: number; cumFlow10d?: number;
   }
 ): Promise<MLPrediction | null> {
   try {
@@ -379,13 +260,23 @@ export async function generatePrediction(
     const fiiFlows = await getRecentFIIDIIFlows(30);
     const fiiFeatures = computeFIIDIIFeatures(fiiFlows);
 
+    // Get ensemble weights (adaptive — updated daily)
+    const ensembleWeights = await getEnsembleWeights();
+
     // Get India VIX from most recent daily_features entry that has it
     const latestVix = history.find(h => h.india_vix != null)?.india_vix || 14;
 
-    // 2. Build feature matrix from history
-    // If we have insufficient historical data, fall back to current features only
+    // 2. Merge alt data with FII features
+    const mergedAltData = {
+      obi: altData?.obi || 0,
+      pocPosition: altData?.pocPosition || 0,
+      fiiVelocity: altData?.fiiVelocity ?? fiiFeatures.fiiVelocity,
+      flowDivergence: altData?.flowDivergence ?? fiiFeatures.flowMomentumDivergence,
+      cumFlow10d: altData?.cumFlow10d ?? fiiFeatures.cumFlow10d,
+    };
+
+    // 3. If insufficient historical data, use heuristic only
     if (history.length < 10) {
-      // Not enough history — use heuristic only
       if (!currentFeatures?.close) return null;
 
       const fv: FeatureVector = {
@@ -402,6 +293,11 @@ export async function generatePrediction(
         diiNet: fiiFeatures.diiNetToday,
         bollingerUpper: currentFeatures.bollingerUpper || currentFeatures.close * 1.02,
         bollingerLower: currentFeatures.bollingerLower || currentFeatures.close * 0.98,
+        obi: mergedAltData.obi,
+        pocPosition: mergedAltData.pocPosition,
+        fiiVelocity: mergedAltData.fiiVelocity,
+        flowDivergence: mergedAltData.flowDivergence,
+        cumFlow10d: mergedAltData.cumFlow10d,
         features: [],
       };
 
@@ -409,26 +305,18 @@ export async function generatePrediction(
       const direction: 'up' | 'down' = heurResult.probability >= 0.5 ? 'up' : 'down';
       const confidence = Math.round((direction === 'up' ? heurResult.probability : 1 - heurResult.probability) * 100);
 
-      const supportingSignals = heurResult.signals.filter(s =>
-        (direction === 'up' && !s.toLowerCase().includes('bearish') && !s.toLowerCase().includes('selling') && !s.toLowerCase().includes('overbought')) ||
-        (direction === 'down' && !s.toLowerCase().includes('bullish') && !s.toLowerCase().includes('buying') && !s.toLowerCase().includes('oversold'))
-      ).slice(0, 5);
+      const supportingSignals = classifySignals(heurResult.signals, direction, 'supporting').slice(0, 5);
+      const contradictingSignals = classifySignals(heurResult.signals, direction, 'contradicting').slice(0, 3);
 
-      const contradictingSignals = heurResult.signals.filter(s =>
-        (direction === 'up' && (s.toLowerCase().includes('bearish') || s.toLowerCase().includes('selling') || s.toLowerCase().includes('overbought'))) ||
-        (direction === 'down' && (s.toLowerCase().includes('bullish') || s.toLowerCase().includes('buying') || s.toLowerCase().includes('oversold')))
-      ).slice(0, 3);
-
-      // Save heuristic prediction to DB so dashboard can show it
       await savePrediction({
         symbol,
         predictedDirection: direction,
         probability: confidence,
         confidenceLevel: getConfidenceLevel(confidence),
-        featuresJson: { heuristicSignals: heurResult.signals },
+        featuresJson: { heuristicSignals: heurResult.signals, subModels: { heuristic: { direction, probability: confidence } } },
         supportingSignals,
         contradictingSignals,
-        modelVersion: 'v2-heuristic-only',
+        modelVersion: 'v3-heuristic-only',
         predictedAt: new Date().toISOString(),
       });
 
@@ -441,20 +329,21 @@ export async function generatePrediction(
         contradictingSignals,
         featureImportance: {},
         subModelVotes: {
-          logisticRegression: { direction, probability: confidence },
-          stumpEnsemble: { direction, probability: confidence },
-          heuristic: { direction: direction, probability: confidence },
+          gbdt: { direction, probability: confidence },
+          heuristic: { direction, probability: confidence },
         },
         metrics: {
           trainingAccuracy: 0,
           validationAccuracy: 0,
           totalSamples: history.length,
-          modelVersion: 'v2-heuristic-only',
+          modelVersion: 'v3-heuristic-only',
+          bestIteration: 0,
+          ensembleWeights,
         },
       };
     }
 
-    // 3. Build training data from historical features
+    // 4. Build training data from historical features
     const X: number[][] = [];
     const Y: number[] = [];
     const featureVectors: FeatureVector[] = [];
@@ -482,43 +371,25 @@ export async function generatePrediction(
     const m = X.length;
     if (m < 8) return null;
 
-    // 4. Chronological train/validation split (70/30)
+    // 5. Chronological train/validation split (70/30)
     const trainSize = Math.floor(m * 0.7);
     const X_train = X.slice(0, trainSize);
     const Y_train = Y.slice(0, trainSize);
     const X_val = X.slice(trainSize);
     const Y_val = Y.slice(trainSize);
 
-    // 5. Standardize features
-    const { X_scaled: X_trainScaled, means, stdDevs } = standardize(X_train);
-    const X_valScaled = X_val.map(row => scaleFeatures(row, means, stdDevs));
+    // 6. Train GBDT
+    const gbdtModel = trainGBDT(X_train, Y_train, X_val, Y_val, {
+      numTrees: m < 30 ? 20 : 50,  // Fewer trees for small datasets
+      maxDepth: m < 30 ? 3 : 4,
+      learningRate: 0.1,
+      subsampleRatio: 0.8,
+      minSamplesLeaf: Math.max(2, Math.floor(trainSize * 0.05)),
+      l2Regularization: 1.0,
+      earlyStoppingRounds: 5,
+    });
 
-    // 6. Train Sub-Model 1: Logistic Regression
-    const theta = trainLogisticRegression(X_trainScaled, Y_train, 0.1, 0.05, 500);
-
-    // 7. Train Sub-Model 2: Decision Stump Ensemble
-    const stumps = trainStumpEnsemble(X_trainScaled, Y_train, 12);
-
-    // 8. Evaluate both on validation set
-    let lrCorrect = 0, stumpCorrect = 0;
-    for (let i = 0; i < X_valScaled.length; i++) {
-      const lrPred = predictLogReg(theta, X_valScaled[i]) >= 0.5 ? 1 : 0;
-      const stumpPred = predictStumps(stumps, X_valScaled[i]) >= 0.5 ? 1 : 0;
-      if (lrPred === Y_val[i]) lrCorrect++;
-      if (stumpPred === Y_val[i]) stumpCorrect++;
-    }
-
-    const lrAccuracy = X_valScaled.length > 0 ? (lrCorrect / X_valScaled.length) * 100 : 50;
-    const stumpAccuracy = X_valScaled.length > 0 ? (stumpCorrect / X_valScaled.length) * 100 : 50;
-
-    // Training accuracy
-    let lrTrainCorrect = 0;
-    for (let i = 0; i < X_trainScaled.length; i++) {
-      if ((predictLogReg(theta, X_trainScaled[i]) >= 0.5 ? 1 : 0) === Y_train[i]) lrTrainCorrect++;
-    }
-    const trainingAccuracy = X_trainScaled.length > 0 ? (lrTrainCorrect / X_trainScaled.length) * 100 : 50;
-
-    // 9. Predict today → tomorrow
+    // 7. Predict today → tomorrow
     const latestRow = history[history.length - 1];
     const prevLatestRow = history[history.length - 2];
 
@@ -534,61 +405,44 @@ export async function generatePrediction(
       if (currentFeatures.deliveryPct != null) latestRow.delivery_pct = currentFeatures.deliveryPct;
     }
 
-    // Inject latest FII/DII
     latestRow.fii_net = fiiFeatures.fiiNetToday || latestRow.fii_net || 0;
     latestRow.dii_net = fiiFeatures.diiNetToday || latestRow.dii_net || 0;
     latestRow.india_vix = latestVix;
 
-    const todayFV = extractFeatures(latestRow, prevLatestRow);
-    const todayScaled = scaleFeatures(todayFV.features, means, stdDevs);
+    const todayFV = extractFeatures(latestRow, prevLatestRow, mergedAltData);
 
     // Sub-model predictions
-    const lrProb = predictLogReg(theta, todayScaled);
-    const stumpProb = predictStumps(stumps, todayScaled);
+    const gbdtProb = predictGBDT(gbdtModel, todayFV.features);
     const heurResult = predictHeuristic(todayFV);
 
-    // 10. Ensemble: Weighted vote
-    // Weight models by their validation accuracy
-    const lrWeight = Math.max(0.1, (lrAccuracy - 45) / 20);    // Higher weight for better accuracy
-    const stumpWeight = Math.max(0.1, (stumpAccuracy - 45) / 20);
-    const heurWeight = 0.3;                                       // Constant weight for heuristic
-
-    const totalWeight = lrWeight + stumpWeight + heurWeight;
-    const ensembleProb = (lrProb * lrWeight + stumpProb * stumpWeight + heurResult.probability * heurWeight) / totalWeight;
+    // 8. Ensemble: Adaptive weighted vote
+    const gbdtWeight = ensembleWeights.gbdt;
+    const heurWeight = ensembleWeights.heuristic;
+    const totalWeight = gbdtWeight + heurWeight;
+    const ensembleProb = (gbdtProb * gbdtWeight + heurResult.probability * heurWeight) / totalWeight;
 
     const direction: 'up' | 'down' = ensembleProb >= 0.5 ? 'up' : 'down';
     const rawConfidence = Math.round((direction === 'up' ? ensembleProb : 1 - ensembleProb) * 100);
 
-    // Confidence discount for low data quality
+    // Confidence discounts
     let confidenceDiscount = 0;
-    if (m < 20) confidenceDiscount += 10;     // Very little training data
-    if (latestVix > 22) confidenceDiscount += 5; // High uncertainty
-    if (Math.abs(lrAccuracy - stumpAccuracy) > 15) confidenceDiscount += 5; // Models disagree
+    if (m < 20) confidenceDiscount += 10;
+    if (latestVix > 22) confidenceDiscount += 5;
+    // Discount if GBDT and heuristic disagree
+    const gbdtDir = gbdtProb >= 0.5 ? 'up' : 'down';
+    const heurDir = heurResult.probability >= 0.5 ? 'up' : 'down';
+    if (gbdtDir !== heurDir) confidenceDiscount += 8;
 
     const confidence = Math.max(50, Math.min(95, rawConfidence - confidenceDiscount));
 
-    // 11. Generate human-readable signals
-    const supportingSignals = heurResult.signals.filter(s => {
-      const isPositive = s.toLowerCase().includes('bullish') || s.toLowerCase().includes('buying') ||
-        s.toLowerCase().includes('oversold') || s.toLowerCase().includes('uptrend') ||
-        s.toLowerCase().includes('genuine') || s.toLowerCase().includes('bounce') ||
-        s.toLowerCase().includes('calm') || s.toLowerCase().includes('positive');
-      return direction === 'up' ? isPositive : !isPositive;
-    }).slice(0, 5);
+    // 9. Generate human-readable signals
+    const supportingSignals = classifySignals(heurResult.signals, direction, 'supporting').slice(0, 5);
+    const contradictingSignals = classifySignals(heurResult.signals, direction, 'contradicting').slice(0, 3);
 
-    const contradictingSignals = heurResult.signals.filter(s => {
-      const isPositive = s.toLowerCase().includes('bullish') || s.toLowerCase().includes('buying') ||
-        s.toLowerCase().includes('oversold') || s.toLowerCase().includes('uptrend') ||
-        s.toLowerCase().includes('genuine') || s.toLowerCase().includes('bounce');
-      return direction === 'up' ? !isPositive : isPositive;
-    }).slice(0, 3);
-
-    // 12. Feature importance from LR coefficients
-    const absWeights = theta.slice(1).map(w => Math.abs(w));
-    const sumWeights = absWeights.reduce((s, w) => s + w, 0) || 1;
+    // 10. Feature importance from GBDT
     const featureImportance: Record<string, number> = {};
-    for (let j = 0; j < absWeights.length && j + 1 < FEATURE_NAMES.length; j++) {
-      featureImportance[FEATURE_NAMES[j + 1]] = Math.round((absWeights[j] / sumWeights) * 100);
+    for (let j = 0; j < gbdtModel.featureImportance.length && j < FEATURE_NAMES.length; j++) {
+      featureImportance[FEATURE_NAMES[j]] = gbdtModel.featureImportance[j];
     }
 
     const prediction: MLPrediction = {
@@ -600,28 +454,26 @@ export async function generatePrediction(
       contradictingSignals,
       featureImportance,
       subModelVotes: {
-        logisticRegression: {
-          direction: lrProb >= 0.5 ? 'up' : 'down',
-          probability: Math.round((lrProb >= 0.5 ? lrProb : 1 - lrProb) * 100),
-        },
-        stumpEnsemble: {
-          direction: stumpProb >= 0.5 ? 'up' : 'down',
-          probability: Math.round((stumpProb >= 0.5 ? stumpProb : 1 - stumpProb) * 100),
+        gbdt: {
+          direction: gbdtDir,
+          probability: Math.round((gbdtProb >= 0.5 ? gbdtProb : 1 - gbdtProb) * 100),
         },
         heuristic: {
-          direction: heurResult.probability >= 0.5 ? 'up' : 'down',
+          direction: heurDir,
           probability: Math.round((heurResult.probability >= 0.5 ? heurResult.probability : 1 - heurResult.probability) * 100),
         },
       },
       metrics: {
-        trainingAccuracy: parseFloat(trainingAccuracy.toFixed(1)),
-        validationAccuracy: parseFloat(Math.max(lrAccuracy, stumpAccuracy).toFixed(1)),
+        trainingAccuracy: gbdtModel.trainingMetrics.trainingAccuracy,
+        validationAccuracy: gbdtModel.trainingMetrics.validationAccuracy,
         totalSamples: m,
-        modelVersion: 'v2-ensemble',
+        modelVersion: 'v3-gbdt-adaptive',
+        bestIteration: gbdtModel.trainingMetrics.bestIteration,
+        ensembleWeights,
       },
     };
 
-    // 13. Save prediction to Supabase for tracking
+    // 11. Save prediction to Supabase
     await savePrediction({
       symbol,
       predictedDirection: direction,
@@ -630,7 +482,9 @@ export async function generatePrediction(
       featuresJson: {
         ...featureImportance,
         subModels: prediction.subModelVotes,
-        lrAccuracy, stumpAccuracy,
+        gbdtTrainAcc: gbdtModel.trainingMetrics.trainingAccuracy,
+        gbdtValAcc: gbdtModel.trainingMetrics.validationAccuracy,
+        ensembleWeights,
       },
       supportingSignals,
       contradictingSignals,
@@ -643,4 +497,27 @@ export async function generatePrediction(
     console.error(`[MLEngine] Prediction failed for ${symbol}:`, error);
     return null;
   }
+}
+
+// ─── Signal Classification Helper ───────────────────────────────────
+
+function classifySignals(
+  signals: string[],
+  direction: 'up' | 'down',
+  type: 'supporting' | 'contradicting'
+): string[] {
+  const bullishKeywords = ['bullish', 'buying', 'oversold', 'uptrend', 'genuine', 'bounce', 'calm', 'positive', 'inflow', 'buy-side', 'accelerating'];
+  const bearishKeywords = ['bearish', 'selling', 'overbought', 'downtrend', 'overextended', 'uncertainty', 'outflow', 'sell-side', 'fear'];
+
+  return signals.filter(s => {
+    const lower = s.toLowerCase();
+    const isBullish = bullishKeywords.some(k => lower.includes(k));
+    const isBearish = bearishKeywords.some(k => lower.includes(k));
+
+    if (type === 'supporting') {
+      return direction === 'up' ? isBullish : isBearish;
+    } else {
+      return direction === 'up' ? isBearish : isBullish;
+    }
+  });
 }

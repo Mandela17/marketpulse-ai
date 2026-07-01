@@ -1,44 +1,77 @@
-// API Route: Server-side stock prediction
-// Uses the ensemble ML engine to generate predictions with supporting signals.
-// Now integrates event calendar, market regime, and narrative reports.
+// API Route: Server-side stock prediction v3
+// Uses GBDT ensemble ML engine with alternative data features.
+// Integrates: Order Book Imbalance, Volume Profile, adaptive weights,
+// Kelly Criterion risk management, event calendar, and narrative reports.
 
 import { NextResponse } from 'next/server';
 import { generatePrediction } from '@/lib/mlEngine';
-import { computeRealTechnicals } from '@/lib/technicalAnalysis';
+import { computeRealTechnicals, fetchHistoricalOHLCV } from '@/lib/technicalAnalysis';
 import { fetchDeliveryData, fetchRealPCR, fetchIndiaVIX, isFnOStock } from '@/lib/nseData';
 import { getAccuracyMetrics } from '@/lib/predictionHistory';
 import { computeRiskReward } from '@/lib/riskEngine';
 import { getUpcomingEvents, getEventVolatilityAdjustment } from '@/lib/eventCalendar';
 import { detectMarketRegime } from '@/lib/marketRegime';
 import { generateNarrativeReport } from '@/lib/narrativeReport';
+import { fetchOrderBookImbalance } from '@/lib/orderBookImbalance';
+import { computeVolumeProfile } from '@/lib/volumeProfile';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const symbol = searchParams.get('symbol');
-  const includeReport = searchParams.get('report') !== 'false'; // Default: include narrative
+  const includeReport = searchParams.get('report') !== 'false';
 
   if (!symbol) {
     return NextResponse.json({ error: 'Symbol parameter required' }, { status: 400 });
   }
 
   try {
-    // 1. Fetch real technicals, supplementary data, regime, and events in parallel
-    const [technicals, deliveryData, pcrData, vixData, accuracyMetrics, regime] = await Promise.all([
+    // 1. Fetch all data sources in parallel
+    const [technicals, deliveryData, pcrData, vixData, accuracyMetrics, regime, obiData, ohlcvData] = await Promise.all([
       computeRealTechnicals(symbol),
       fetchDeliveryData(symbol).catch(() => null),
       isFnOStock(symbol) ? fetchRealPCR(symbol).catch(() => null) : Promise.resolve(null),
       fetchIndiaVIX().catch(() => null),
       getAccuracyMetrics(symbol).catch(() => []),
       detectMarketRegime().catch(() => null),
+      fetchOrderBookImbalance(symbol).catch(() => null),
+      fetchHistoricalOHLCV(symbol, 60).catch(() => []),
     ]);
 
     if (!technicals) {
       return NextResponse.json({ error: 'Insufficient market data for prediction' }, { status: 404 });
     }
 
-    // 2. Build current features for the ML engine
+    // 2. Compute Volume Profile from OHLCV data
+    const volumeProfile = ohlcvData.length > 0
+      ? computeVolumeProfile(ohlcvData, technicals.currentPrice)
+      : null;
+
+    // 3. Compute ATR (14-period Average True Range)
+    let atr = Math.abs(technicals.dayHigh - technicals.dayLow); // Simple 1-day range fallback
+    if (ohlcvData.length >= 14) {
+      const trueRanges: number[] = [];
+      for (let i = 1; i < ohlcvData.length; i++) {
+        const tr = Math.max(
+          ohlcvData[i].high - ohlcvData[i].low,
+          Math.abs(ohlcvData[i].high - ohlcvData[i - 1].close),
+          Math.abs(ohlcvData[i].low - ohlcvData[i - 1].close)
+        );
+        trueRanges.push(tr);
+      }
+      // Use last 14 true ranges
+      const recent14 = trueRanges.slice(-14);
+      atr = recent14.reduce((s, tr) => s + tr, 0) / recent14.length;
+    }
+
+    // 4. Build alternative data features
+    const altData = {
+      obi: obiData?.bidAskImbalance || 0,
+      pocPosition: volumeProfile?.pocDistancePct || 0,
+    };
+
+    // 5. Build current features for the ML engine
     const currentFeatures = {
       rsi: technicals.rsi,
       macdHist: technicals.histogram,
@@ -52,8 +85,8 @@ export async function GET(request: Request) {
       bollingerLower: technicals.bollingerLower,
     };
 
-    // 3. Generate prediction
-    const prediction = await generatePrediction(symbol, currentFeatures);
+    // 6. Generate prediction (GBDT + Heuristic ensemble)
+    const prediction = await generatePrediction(symbol, currentFeatures, altData);
 
     if (!prediction) {
       return NextResponse.json({
@@ -62,40 +95,41 @@ export async function GET(request: Request) {
       }, { status: 422 });
     }
 
-    // 4. Compute risk/reward
-    const riskReward = computeRiskReward(
+    // 7. Compute advanced risk/reward (Kelly + VIX-aware)
+    const riskReward = await computeRiskReward(
       technicals.currentPrice,
       prediction.direction,
       prediction.confidence,
       {
         bollingerUpper: technicals.bollingerUpper,
         bollingerLower: technicals.bollingerLower,
-        atr: Math.abs(technicals.dayHigh - technicals.dayLow),
+        atr,
         ema20: technicals.ema20,
-      }
+        indiaVix: vixData?.value,
+      },
+      symbol
     );
 
-    // 5. Get event-aware context
+    // 8. Event-aware context
     const upcomingEvents = getUpcomingEvents(7).filter(e =>
       e.relatedStocks.includes(symbol) || e.relatedStocks.length === 0
     );
     const eventAdjustment = getEventVolatilityAdjustment(symbol);
 
-    // 6. Apply regime and event adjustments to confidence
+    // 9. Apply regime and event adjustments to confidence
     let adjustedConfidence = prediction.confidence;
     if (regime?.adjustments) {
       adjustedConfidence = Math.round(adjustedConfidence * regime.adjustments.confidenceMultiplier);
     }
     if (eventAdjustment.factor > 1.2) {
-      // Reduce confidence near high-impact events (uncertainty)
       adjustedConfidence = Math.round(adjustedConfidence * 0.9);
     }
     adjustedConfidence = Math.max(50, Math.min(95, adjustedConfidence));
 
-    // 7. Get historical accuracy for this stock
+    // 10. Historical accuracy for this stock
     const stockAccuracy = accuracyMetrics.find(m => m.symbol === symbol);
 
-    // 8. Generate narrative report (async, non-blocking)
+    // 11. Generate narrative report
     let narrative = null;
     if (includeReport) {
       narrative = await generateNarrativeReport(
@@ -106,17 +140,80 @@ export async function GET(request: Request) {
         upcomingEvents,
         {
           indiaVix: vixData?.value,
-          fiiNet: undefined, // Will be filled from prediction features if available
+          fiiNet: undefined,
           diiNet: undefined,
         }
       ).catch(() => null);
     }
 
+    // 12. Build response
     return NextResponse.json({
       prediction: {
-        ...prediction,
+        symbol: prediction.symbol,
+        direction: prediction.direction,
         confidence: adjustedConfidence,
-        riskReward,
+        confidenceLevel: prediction.confidenceLevel,
+        ensembleConsensus: prediction.subModelVotes.gbdt.direction === prediction.subModelVotes.heuristic.direction
+          ? 'unanimous' : 'split',
+        subModels: {
+          gbdt: {
+            ...prediction.subModelVotes.gbdt,
+            weight: prediction.metrics.ensembleWeights.gbdt,
+          },
+          heuristic: {
+            ...prediction.subModelVotes.heuristic,
+            weight: prediction.metrics.ensembleWeights.heuristic,
+          },
+        },
+        supportingSignals: prediction.supportingSignals,
+        contradictingSignals: prediction.contradictingSignals,
+      },
+      features: {
+        rsi: technicals.rsi,
+        rsiSignal: technicals.rsiSignal,
+        macdHistogram: technicals.histogram,
+        macdSignal: technicals.macdSignal,
+        ema20: technicals.ema20,
+        ema50: technicals.ema50,
+        emaTrend: technicals.emaTrend,
+        bollingerPosition: technicals.bollingerPosition,
+        volumeRatio: technicals.volumeRatio,
+        volumeSignal: technicals.volumeSignal,
+        orderBookImbalance: obiData?.bidAskImbalance ?? null,
+        depthPressure: obiData?.depthPressureScore ?? null,
+        volumeProfile: volumeProfile ? {
+          poc: volumeProfile.poc,
+          vah: volumeProfile.vah,
+          val: volumeProfile.val,
+          position: volumeProfile.positionVsPOC,
+          pocDistancePct: volumeProfile.pocDistancePct,
+        } : null,
+        featureImportance: prediction.featureImportance,
+      },
+      trade: {
+        entry: riskReward.entry,
+        target1: riskReward.target1,
+        target1Pct: riskReward.target1Pct,
+        target2: riskReward.target2,
+        target2Pct: riskReward.target2Pct,
+        stopLoss: riskReward.stopLoss,
+        stopLossPct: riskReward.stopLossPct,
+        invalidation: riskReward.invalidation,
+        invalidationPct: riskReward.invalidationPct,
+        riskRewardRatio: riskReward.riskRewardRatio,
+        kellyPct: riskReward.positionSizePct,
+        positionSizeHint: riskReward.positionSizeHint,
+        riskLevel: riskReward.riskLevel,
+        vixAdjusted: riskReward.vixAdjusted,
+      },
+      metrics: {
+        modelVersion: prediction.metrics.modelVersion,
+        trainingAccuracy: prediction.metrics.trainingAccuracy,
+        validationAccuracy: prediction.metrics.validationAccuracy,
+        totalSamples: prediction.metrics.totalSamples,
+        bestIteration: prediction.metrics.bestIteration,
+        ensembleWeights: prediction.metrics.ensembleWeights,
+        historicalAccuracy: stockAccuracy || null,
       },
       regime: regime ? {
         regime: regime.regime,
@@ -132,15 +229,19 @@ export async function GET(request: Request) {
         volatilityAdjustment: eventAdjustment,
       },
       narrative,
-      historicalAccuracy: stockAccuracy || null,
       marketContext: {
         indiaVix: vixData,
-        deliveryData: deliveryData,
-        pcrData: pcrData,
+        deliveryData,
+        pcrData,
+        currentPrice: technicals.currentPrice,
+        dayHigh: technicals.dayHigh,
+        dayLow: technicals.dayLow,
+        atr: parseFloat(atr.toFixed(2)),
       },
       dataQuality: {
         hasHistoricalData: prediction.metrics.totalSamples > 20,
-        hasFiiDii: prediction.featureImportance['FII Flow'] != null,
+        hasOBI: obiData != null,
+        hasVolumeProfile: volumeProfile != null,
         hasDeliveryData: deliveryData != null,
         hasPcrData: pcrData != null,
         hasVixData: vixData != null,

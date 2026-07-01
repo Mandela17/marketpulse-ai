@@ -680,91 +680,60 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
                       </div>
                     </div>
 
-                    {/* Risk/Reward */}
-                    {aiPrediction.prediction.riskReward && (
-                      <div className="grid grid-cols-3 gap-2">
-                        <div className="p-3 rounded-lg text-center" style={{ background: 'rgba(0,214,143,0.08)' }}>
-                          <p className="text-[10px] uppercase font-semibold" style={{ color: 'var(--text-muted)' }}>Target</p>
-                          <p className="text-sm font-bold" style={{ color: 'var(--accent-green)' }}>
-                            ₹{aiPrediction.prediction.riskReward.targetPrice?.toLocaleString('en-IN')}
-                          </p>
-                          <p className="text-[10px]" style={{ color: 'var(--accent-green)' }}>
-                            {aiPrediction.prediction.riskReward.targetPct}
-                          </p>
-                        </div>
-                        <div className="p-3 rounded-lg text-center" style={{ background: 'rgba(255,77,106,0.08)' }}>
-                          <p className="text-[10px] uppercase font-semibold" style={{ color: 'var(--text-muted)' }}>Stop-Loss</p>
-                          <p className="text-sm font-bold" style={{ color: 'var(--accent-red)' }}>
-                            ₹{aiPrediction.prediction.riskReward.stopLoss?.toLocaleString('en-IN')}
-                          </p>
-                          <p className="text-[10px]" style={{ color: 'var(--accent-red)' }}>
-                            {aiPrediction.prediction.riskReward.stopLossPct}
-                          </p>
-                        </div>
-                        <div className="p-3 rounded-lg text-center" style={{ background: 'rgba(139,92,246,0.08)' }}>
-                          <p className="text-[10px] uppercase font-semibold" style={{ color: 'var(--text-muted)' }}>R:R Ratio</p>
-                          <p className="text-sm font-bold" style={{ color: 'var(--accent-purple)' }}>
-                            {aiPrediction.prediction.riskReward.riskRewardRatio}x
-                          </p>
-                          <p className="text-[10px] capitalize" style={{ color: 'var(--text-muted)' }}>
-                            {aiPrediction.prediction.riskReward.riskLevel} risk
-                          </p>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Supporting / Contradicting Signals */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      {aiPrediction.prediction.supportingSignals?.length > 0 && (
-                        <div className="p-3 rounded-lg" style={{ background: 'rgba(0,214,143,0.05)', border: '1px solid rgba(0,214,143,0.15)' }}>
-                          <p className="text-[10px] uppercase font-bold mb-2" style={{ color: 'var(--accent-green)' }}>✅ Supporting Signals</p>
-                          <div className="space-y-1">
-                            {aiPrediction.prediction.supportingSignals.map((s: string, i: number) => (
-                              <p key={i} className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>• {s}</p>
-                            ))}
+                    {/* Risk/Reward — Two-Target System with Kelly Sizing */}
+                    {aiPrediction.trade && (
+                      <div className="space-y-2">
+                        <div className="grid grid-cols-4 gap-2">
+                          <div className="p-3 rounded-lg text-center" style={{ background: 'rgba(0,214,143,0.08)' }}>
+                            <p className="text-[10px] uppercase font-semibold" style={{ color: 'var(--text-muted)' }}>Target 1</p>
+                            <p className="text-sm font-bold" style={{ color: 'var(--accent-green)' }}>
+                              ₹{aiPrediction.trade.target1?.toLocaleString('en-IN')}
+                            </p>
+                            <p className="text-[10px]" style={{ color: 'var(--accent-green)' }}>
+                              {aiPrediction.trade.target1Pct}
+                            </p>
+                          </div>
+                          <div className="p-3 rounded-lg text-center" style={{ background: 'rgba(0,214,143,0.12)' }}>
+                            <p className="text-[10px] uppercase font-semibold" style={{ color: 'var(--text-muted)' }}>Target 2</p>
+                            <p className="text-sm font-bold" style={{ color: 'var(--accent-green)' }}>
+                              ₹{aiPrediction.trade.target2?.toLocaleString('en-IN')}
+                            </p>
+                            <p className="text-[10px]" style={{ color: 'var(--accent-green)' }}>
+                              {aiPrediction.trade.target2Pct}
+                            </p>
+                          </div>
+                          <div className="p-3 rounded-lg text-center" style={{ background: 'rgba(255,77,106,0.08)' }}>
+                            <p className="text-[10px] uppercase font-semibold" style={{ color: 'var(--text-muted)' }}>Stop-Loss</p>
+                            <p className="text-sm font-bold" style={{ color: 'var(--accent-red)' }}>
+                              ₹{aiPrediction.trade.stopLoss?.toLocaleString('en-IN')}
+                            </p>
+                            <p className="text-[10px]" style={{ color: 'var(--accent-red)' }}>
+                              {aiPrediction.trade.stopLossPct}
+                            </p>
+                          </div>
+                          <div className="p-3 rounded-lg text-center" style={{ background: 'rgba(139,92,246,0.08)' }}>
+                            <p className="text-[10px] uppercase font-semibold" style={{ color: 'var(--text-muted)' }}>R:R Ratio</p>
+                            <p className="text-sm font-bold" style={{ color: 'var(--accent-purple)' }}>
+                              {aiPrediction.trade.riskRewardRatio}x
+                            </p>
+                            <p className="text-[10px] capitalize" style={{ color: 'var(--text-muted)' }}>
+                              {aiPrediction.trade.riskLevel} risk
+                            </p>
                           </div>
                         </div>
-                      )}
-                      {aiPrediction.prediction.contradictingSignals?.length > 0 && (
-                        <div className="p-3 rounded-lg" style={{ background: 'rgba(255,77,106,0.05)', border: '1px solid rgba(255,77,106,0.15)' }}>
-                          <p className="text-[10px] uppercase font-bold mb-2" style={{ color: 'var(--accent-red)' }}>⚠️ Contradicting Signals</p>
-                          <div className="space-y-1">
-                            {aiPrediction.prediction.contradictingSignals.map((s: string, i: number) => (
-                              <p key={i} className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>• {s}</p>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Sub-Model Votes */}
-                    {aiPrediction.prediction.subModelVotes && (
-                      <div className="p-3 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)' }}>
-                        <p className="text-[10px] uppercase font-semibold mb-2" style={{ color: 'var(--text-muted)' }}>Ensemble Sub-Model Votes</p>
-                        <div className="grid grid-cols-3 gap-2">
-                          {[
-                            { name: 'LogReg', data: aiPrediction.prediction.subModelVotes.logisticRegression },
-                            { name: 'AdaBoost', data: aiPrediction.prediction.subModelVotes.stumpEnsemble },
-                            { name: 'Heuristic', data: aiPrediction.prediction.subModelVotes.heuristic },
-                          ].map(m => (
-                            <div key={m.name} className="text-center p-2 rounded" style={{ background: 'rgba(255,255,255,0.03)' }}>
-                              <p className="text-[10px] font-bold" style={{ color: 'var(--text-muted)' }}>{m.name}</p>
-                              <p className="text-xs font-bold" style={{
-                                color: m.data.direction === 'up' ? 'var(--accent-green)' : 'var(--accent-red)'
-                              }}>
-                                {m.data.direction === 'up' ? '▲' : '▼'} {m.data.probability}%
-                              </p>
-                            </div>
-                          ))}
+                        {/* Position Sizing + VIX badge */}
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-[10px] px-3 py-1.5 rounded-lg" style={{ background: 'rgba(255,255,255,0.03)', color: 'var(--text-muted)' }}>
+                            💼 Kelly: {aiPrediction.trade.kellyPct}% position — {aiPrediction.trade.positionSizeHint}
+                          </p>
+                          {aiPrediction.trade.vixAdjusted && (
+                            <span className="text-[9px] px-2 py-1 rounded-full font-medium"
+                              style={{ background: 'rgba(251,191,36,0.1)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.3)' }}>
+                              ⚡ VIX-adjusted stops
+                            </span>
+                          )}
                         </div>
                       </div>
-                    )}
-
-                    {/* Position Sizing Hint */}
-                    {aiPrediction.prediction.riskReward?.positionSizeHint && (
-                      <p className="text-[10px] text-center px-3 py-1.5 rounded-lg" style={{ background: 'rgba(255,255,255,0.03)', color: 'var(--text-muted)' }}>
-                        💼 Suggested position: {aiPrediction.prediction.riskReward.positionSizeHint}
-                      </p>
                     )}
 
                     {/* Disclaimer */}
