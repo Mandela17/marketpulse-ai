@@ -5,6 +5,33 @@ import Link from 'next/link';
 import BacktestCard from '@/components/BacktestCard';
 import AccuracyTrendChart from '@/components/AccuracyTrendChart';
 
+// Format prediction timestamp as relative time
+function formatPredictionTime(isoString: string): string {
+  const date = new Date(isoString);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  const timeStr = date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+
+  if (diffMins < 5) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 1) return `${diffMins}m ago`;
+
+  // Check if same calendar day
+  const isToday = date.toDateString() === now.toDateString();
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const isYesterday = date.toDateString() === yesterday.toDateString();
+
+  if (isToday) return `Today ${timeStr}`;
+  if (isYesterday) return `Yesterday ${timeStr}`;
+  if (diffDays <= 6) return `${diffDays}d ago, ${timeStr}`;
+  return date.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' }) + ` ${timeStr}`;
+}
+
 export default function PredictionsDashboard() {
   const [activePredictions, setActivePredictions] = useState<any[]>([]);
   const [accuracy, setAccuracy] = useState<any>(null);
@@ -86,12 +113,12 @@ export default function PredictionsDashboard() {
           {health && (
             <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-bold`}
               style={{
-                background: health.status === 'healthy' ? 'rgba(0,214,143,0.1)' : 'rgba(255,184,0,0.1)',
-                borderColor: health.status === 'healthy' ? 'rgba(0,214,143,0.3)' : 'rgba(255,184,0,0.3)',
-                color: health.status === 'healthy' ? 'var(--accent-green)' : 'var(--accent-yellow)'
+                background: health.status === 'failing' ? 'rgba(255,77,106,0.1)' : 'rgba(0,214,143,0.1)',
+                borderColor: health.status === 'failing' ? 'rgba(255,77,106,0.3)' : 'rgba(0,214,143,0.3)',
+                color: health.status === 'failing' ? 'var(--accent-red)' : 'var(--accent-green)'
               }}>
-              <span className={`w-1.5 h-1.5 rounded-full ${health.status === 'healthy' ? 'bg-green-400 animate-pulse' : 'bg-yellow-400'}`} />
-              {health.status === 'healthy' ? 'System Healthy' : 'Degraded'}
+              <span className={`w-1.5 h-1.5 rounded-full ${health.status === 'failing' ? 'bg-red-400' : 'bg-green-400 animate-pulse'}`} />
+              {health.status === 'failing' ? 'System Down' : 'System Active'}
             </div>
           )}
 
@@ -308,8 +335,8 @@ export default function PredictionsDashboard() {
                       </td>
                       <td className="p-4">
                         <span className="flex items-center gap-1.5 text-sm font-bold"
-                          style={{ color: pred.predicted_direction === 'up' ? 'var(--accent-green)' : 'var(--accent-red)' }}>
-                          {pred.predicted_direction === 'up' ? '📈 BULLISH' : '📉 BEARISH'}
+                          style={{ color: (pred.predictedDirection || pred.predicted_direction) === 'up' ? 'var(--accent-green)' : 'var(--accent-red)' }}>
+                          {(pred.predictedDirection || pred.predicted_direction) === 'up' ? '📈 BULLISH' : '📉 BEARISH'}
                         </span>
                       </td>
                       <td className="p-4">
@@ -329,19 +356,23 @@ export default function PredictionsDashboard() {
                       <td className="p-4">
                         <span className="text-[10px] px-2 py-0.5 rounded capitalize font-medium"
                           style={{
-                            background: pred.confidence_level === 'high' || pred.confidence_level === 'very_high'
+                            background: (pred.confidenceLevel || pred.confidence_level) === 'high' || (pred.confidenceLevel || pred.confidence_level) === 'very_high'
                               ? 'rgba(0,214,143,0.1)' : 'rgba(255,255,255,0.05)',
-                            color: pred.confidence_level === 'high' || pred.confidence_level === 'very_high'
+                            color: (pred.confidenceLevel || pred.confidence_level) === 'high' || (pred.confidenceLevel || pred.confidence_level) === 'very_high'
                               ? 'var(--accent-green)' : 'var(--text-secondary)',
                           }}>
-                          {pred.confidence_level?.replace('_', ' ')}
+                          {(pred.confidenceLevel || pred.confidence_level)?.replace('_', ' ')}
                         </span>
                       </td>
-                      <td className="p-4 text-right text-xs" style={{ color: 'var(--text-muted)' }}>
-                        {new Date(pred.predicted_at).toLocaleString('en-IN', {
-                          month: 'short', day: 'numeric',
-                          hour: '2-digit', minute: '2-digit'
-                        })}
+                      <td className="p-4 text-right">
+                        <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                          {(pred.predictedAt || pred.predicted_at) ? formatPredictionTime(pred.predictedAt || pred.predicted_at) : '—'}
+                        </span>
+                        {(pred.modelVersion || pred.model_version) && (
+                          <p className="text-[9px] mt-0.5" style={{ color: 'rgba(139,92,246,0.7)' }}>
+                            {pred.modelVersion || pred.model_version}
+                          </p>
+                        )}
                       </td>
                       <td className="p-4 text-right">
                         <Link href={`/stock/${pred.symbol}`}

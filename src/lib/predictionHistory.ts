@@ -175,15 +175,20 @@ export async function getPredictions(
 }
 
 // ─── Get today's active (unresolved) predictions ────────────────────
+// Returns only the LATEST prediction per symbol (deduplicates stale entries)
+// Excludes predictions older than 7 days
 
 export async function getActivePredictions(): Promise<PredictionRecord[]> {
   try {
     const db = getServiceClient();
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
     const { data, error } = await db
       .from('predictions')
       .select('*')
       .is('resolved_at', null)
-      .order('probability', { ascending: false });
+      .gte('predicted_at', sevenDaysAgo)
+      .order('predicted_at', { ascending: false });
 
     if (error) {
       console.error('[Predictions] getActivePredictions error:', error.code, error.message);
@@ -192,9 +197,21 @@ export async function getActivePredictions(): Promise<PredictionRecord[]> {
 
     if (!data) return [];
 
-    console.log('[Predictions] getActivePredictions returned', data.length, 'rows');
+    // Deduplicate: keep only the LATEST prediction per symbol
+    const latestBySymbol = new Map<string, any>();
+    for (const row of data) {
+      if (!latestBySymbol.has(row.symbol)) {
+        latestBySymbol.set(row.symbol, row);
+      }
+    }
 
-    return data.map((row: any) => ({
+    const deduped = Array.from(latestBySymbol.values());
+    console.log(`[Predictions] getActivePredictions: ${data.length} raw → ${deduped.length} deduped`);
+
+    // Sort by confidence descending
+    deduped.sort((a, b) => (b.probability || 0) - (a.probability || 0));
+
+    return deduped.map((row: any) => ({
       id: row.id,
       symbol: row.symbol,
       predictedDirection: row.predicted_direction,

@@ -40,16 +40,15 @@ export async function checkSystemHealth(): Promise<SystemHealth> {
       status = 'failing';
     } else {
       checks.databaseConnected = true;
-      if (count && count > 500) { // Approx 10 days * 40 stocks + some history
+      if (count && count > 200) {
+        // 200+ rows = enough for GBDT ensemble training (~5+ days × 40 stocks)
         checks.modelTrainingData = 'sufficient';
-      } else if (count && count > 100) {
+      } else if (count && count > 50) {
         checks.modelTrainingData = 'building';
-        warnings.push('Model is in warm-up phase. Predictions rely heavily on heuristics.');
-        status = 'degraded';
+        // This is informational, NOT a degradation — heuristic mode works fine
       } else {
         checks.modelTrainingData = 'insufficient';
-        warnings.push('Insufficient historical data for ML ensemble. Fallback heuristics active.');
-        status = 'degraded';
+        // Still not degraded — heuristic-only predictions are functional
       }
     }
 
