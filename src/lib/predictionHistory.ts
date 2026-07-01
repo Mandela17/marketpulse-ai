@@ -61,9 +61,26 @@ export async function savePrediction(prediction: Omit<PredictionRecord, 'id'>): 
     };
 
     if (existing && existing.length > 0) {
+      // Fetch the existing features_json to merge and preserve cached items (like narrativeCache)
+      const { data: currentRecord } = await db
+        .from('predictions')
+        .select('features_json')
+        .eq('id', existing[0].id)
+        .maybeSingle();
+
+      const mergedFeatures = {
+        ...(currentRecord?.features_json || {}),
+        ...prediction.featuresJson,
+      };
+
+      const updatedRow = {
+        ...row,
+        features_json: mergedFeatures,
+      };
+
       // Update existing prediction for today
       const { error } = await db.from('predictions')
-        .update(row)
+        .update(updatedRow)
         .eq('id', existing[0].id);
 
       if (error) {

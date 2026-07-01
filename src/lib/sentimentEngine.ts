@@ -65,8 +65,16 @@ export async function analyzeArticlesBatch(articles: RawArticle[]): Promise<News
         results.push(...batchResults);
         success = true;
       } catch (error: any) {
+        const errMsg = (error?.message || '').toLowerCase();
+        const isDepleted = errMsg.includes('credits are depleted') || errMsg.includes('billing') || errMsg.includes('prepay');
         const isRateLimit = error?.status === 429 || error?.message?.includes('429');
-        if (isRateLimit && attempt < 1) {
+
+        if (isDepleted) {
+          console.error('Gemini API credits depleted. Skipping retries, using keyword fallback.');
+          const fallbackResults = batch.map((article, idx) => keywordFallback(article, `batch-${i}-${idx}`));
+          results.push(...fallbackResults);
+          success = true; // Skip retries
+        } else if (isRateLimit && attempt < 1) {
           console.warn(`Gemini rate limited, waiting before retry (attempt ${attempt + 1})...`);
         } else {
           console.error('Gemini analysis failed, using keyword fallback:', error?.message || error);

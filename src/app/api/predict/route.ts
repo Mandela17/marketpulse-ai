@@ -14,6 +14,7 @@ import { detectMarketRegime } from '@/lib/marketRegime';
 import { generateNarrativeReport } from '@/lib/narrativeReport';
 import { fetchOrderBookImbalance } from '@/lib/orderBookImbalance';
 import { computeVolumeProfile } from '@/lib/volumeProfile';
+import { getServiceClient } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 
@@ -129,21 +130,61 @@ export async function GET(request: Request) {
     // 10. Historical accuracy for this stock
     const stockAccuracy = accuracyMetrics.find(m => m.symbol === symbol);
 
-    // 11. Generate narrative report
+    // 11. Generate narrative report (with database caching to prevent Gemini credit overuse)
     let narrative = null;
     if (includeReport) {
-      narrative = await generateNarrativeReport(
-        symbol,
-        { ...prediction, confidence: adjustedConfidence },
-        riskReward,
-        regime,
-        upcomingEvents,
-        {
-          indiaVix: vixData?.value,
-          fiiNet: undefined,
-          diiNet: undefined,
+      const todayDate = new Date().toISOString().split('T')[0];
+      const db = getServiceClient();
+      
+      // Check if we have an existing prediction row for today with a cached narrative
+      const { data: dbRecord } = await db
+        .from('predictions')
+        .select('id, features_json')
+        .eq('symbol', symbol)
+        .gte('predicted_at', `${todayDate}T00:00:00Z`)
+        .lte('predicted_at', `${todayDate}T23:59:59Z`)
+        .is('resolved_at', null)
+        .order('predicted_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (dbRecord?.features_json?.narrativeCache) {
+        console.log(`[Predict API] Serving cached narrative report from Supabase for ${symbol}`);
+        narrative = dbRecord.features_json.narrativeCache;
+      } else {
+        console.log(`[Predict API] No cached narrative found for ${symbol}. Generating via Gemini...`);
+        narrative = await generateNarrativeReport(
+          symbol,
+          { ...prediction, confidence: adjustedConfidence },
+          riskReward,
+          regime,
+          upcomingEvents,
+          {
+            indiaVix: vixData?.value,
+            fiiNet: undefined,
+            diiNet: undefined,
+          }
+        ).catch(() => null);
+
+        // Save the generated narrative back to the database row
+        if (narrative && dbRecord?.id) {
+          const updatedFeatures = {
+            ...(dbRecord.features_json || {}),
+            narrativeCache: narrative,
+          };
+          
+          await db
+            .from('predictions')
+            .update({ features_json: updatedFeatures })
+            .eq('id', dbRecord.id)
+            .then(() => {
+              console.log(`[Predict API] Cached narrative report in DB for ${symbol}`);
+            })
+            .catch(err => {
+              console.warn(`[Predict API] Failed to cache narrative report in DB:`, err.message);
+            });
         }
-      ).catch(() => null);
+      }
     }
 
     // 12. Build response

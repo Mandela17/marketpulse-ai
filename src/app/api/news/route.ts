@@ -124,59 +124,155 @@ async function saveStockSnapshots(articles: any[]) {
   }
 }
 
-// Core data refresh logic — extracted so it can run in the foreground or background
+// Core data refresh logic — optimized to query Supabase first and only analyze new articles
 async function refreshNewsCache(): Promise<{ articles: any[]; sectorSentiments: Record<string, any> }> {
-  // 1. Fetch raw news from RSS feeds
-  console.log('[News API] Fetching news from RSS feeds...');
-  const rawArticles = await fetchAllNews();
-  console.log(`[News API] Fetched ${rawArticles.length} articles`);
+  try {
+    // 1. Fetch raw news from RSS feeds
+    console.log('[News API] Fetching news from RSS feeds...');
+    const rawArticles = await fetchAllNews();
+    console.log(`[News API] Fetched ${rawArticles.length} raw articles`);
 
-  // 2. Analyze sentiment using Gemini
-  console.log('[News API] Analyzing sentiment with Gemini...');
-  const analyzedArticles = await analyzeArticlesBatch(rawArticles);
-  console.log(`[News API] Analyzed ${analyzedArticles.length} articles`);
+    if (rawArticles.length === 0) {
+      return { articles: [], sectorSentiments: {} };
+    }
 
-  // 3. Compute sector-level sentiments
-  const sectorSentiments = computeSectorSentiments(analyzedArticles);
+    const db = getServiceClient();
+    const urls = rawArticles.map(a => a.link);
 
-  // Build full sector data with defaults for sectors with no news
-  const fullSectorSentiments: Record<string, any> = {};
-  for (const [id, sector] of Object.entries(SECTORS)) {
-    const computed = sectorSentiments[id];
-    fullSectorSentiments[id] = {
-      id,
-      name: sector.name,
-      icon: sector.icon || '📊',
-      sentiment: computed?.score ?? 50,
-      trend: computed ? (computed.score > 55 ? 'up' : computed.score < 45 ? 'down' : 'flat') : 'flat',
-      trendStrength: computed ? (Math.abs(computed.score - 50) > 25 ? 3 : Math.abs(computed.score - 50) > 15 ? 2 : 1) : 1,
-      keyDriver: computed?.keyDriver || sector.globalExposure,
-      change24h: computed ? parseFloat(((computed.score - 50) * 0.3).toFixed(1)) : 0,
-      stocks: sector.stocks.slice(0, 5),
-      globalExposure: sector.globalExposure,
-      articleCount: computed?.articleCount || 0,
+    // 2. Query Supabase for articles already analyzed
+    const { data: existing, error: fetchErr } = await db
+      .from('articles')
+      .select('*')
+      .in('url', urls);
+
+    if (fetchErr) {
+      console.warn('[News API] DB query for existing articles failed:', fetchErr.message);
+    }
+
+    // Map existing DB rows to NewsArticle format
+    const existingMap = new Map<string, any>();
+    if (existing) {
+      for (const row of existing) {
+        existingMap.set(row.url, {
+          id: `db-${row.id}`,
+          title: row.title,
+          source: row.source,
+          url: row.url,
+          publishedAt: row.published_at,
+          summary: row.summary,
+          sentiment: row.sentiment,
+          sentimentLabel: row.label,
+          relatedSectors: row.related_sectors || [],
+          relatedStocks: row.related_stocks || [],
+          category: row.category,
+          impactLevel: row.impact_level,
+          weight: row.weight || 1.0,
+          decayedWeight: row.decayed_weight || 1.0,
+          aspects: row.aspects || [],
+        });
+      }
+    }
+
+    // Filter raw articles into new vs already analyzed
+    const toAnalyze = rawArticles.filter(a => !existingMap.has(a.link));
+    console.log(`[News API] Delta analysis: ${existingMap.size} cached in DB, ${toAnalyze.length} new to analyze`);
+
+    // 3. Analyze only the NEW articles using Gemini
+    let newlyAnalyzed: any[] = [];
+    if (toAnalyze.length > 0) {
+      console.log(`[News API] Calling Gemini for ${toAnalyze.length} new articles...`);
+      newlyAnalyzed = await analyzeArticlesBatch(toAnalyze);
+      console.log(`[News API] Gemini analyzed ${newlyAnalyzed.length} articles`);
+    }
+
+    // Merge existing and new
+    const mergedArticles: any[] = [];
+    for (const raw of rawArticles) {
+      const cached = existingMap.get(raw.link);
+      if (cached) {
+        mergedArticles.push(cached);
+      } else {
+        const newly = newlyAnalyzed.find(n => n.url === raw.link);
+        if (newly) {
+          mergedArticles.push(newly);
+        } else {
+          // Fallback if missing
+          mergedArticles.push({
+            id: `fb-${Date.now()}-${Math.random()}`,
+            title: raw.title,
+            source: raw.source,
+            url: raw.link,
+            publishedAt: raw.pubDate || new Date().toISOString(),
+            summary: raw.description?.substring(0, 200) || '',
+            sentiment: 0,
+            sentimentLabel: 'neutral',
+            relatedSectors: [],
+            relatedStocks: [],
+            category: 'global',
+            impactLevel: 'low',
+            weight: 1.0,
+            decayedWeight: 1.0,
+            aspects: [],
+          });
+        }
+      }
+    }
+
+    // 4. Compute sector-level sentiments
+    const sectorSentiments = computeSectorSentiments(mergedArticles);
+
+    // Build full sector data with defaults for sectors with no news
+    const fullSectorSentiments: Record<string, any> = {};
+    for (const [id, sector] of Object.entries(SECTORS)) {
+      const computed = sectorSentiments[id];
+      fullSectorSentiments[id] = {
+        id,
+        name: sector.name,
+        icon: sector.icon || '📊',
+        sentiment: computed?.score ?? 50,
+        trend: computed ? (computed.score > 55 ? 'up' : computed.score < 45 ? 'down' : 'flat') : 'flat',
+        trendStrength: computed ? (Math.abs(computed.score - 50) > 25 ? 3 : Math.abs(computed.score - 50) > 15 ? 2 : 1) : 1,
+        keyDriver: computed?.keyDriver || sector.globalExposure,
+        change24h: computed ? parseFloat(((computed.score - 50) * 0.3).toFixed(1)) : 0,
+        stocks: sector.stocks.slice(0, 5),
+        globalExposure: sector.globalExposure,
+        articleCount: computed?.articleCount || 0,
+      };
+    }
+
+    // Update cache in-memory
+    cachedData = {
+      articles: mergedArticles,
+      sectorSentiments: fullSectorSentiments,
+      timestamp: Date.now(),
     };
+
+    // 5. Persist NEW articles to Supabase (fire-and-forget — don't block response)
+    if (newlyAnalyzed.length > 0) {
+      Promise.all([
+        saveArticlesToDB(newlyAnalyzed),
+        saveSectorSnapshots(fullSectorSentiments),
+        saveStockSnapshots(mergedArticles), // Re-aggregate stock snapshots with new data
+      ]).then(() => {
+        console.log('[News API] ✅ New data persisted to Supabase');
+      }).catch((err) => {
+        console.error('[News API] ⚠️ Supabase persistence error:', err);
+      });
+    } else {
+      // Just update sector/stock snapshots
+      Promise.all([
+        saveSectorSnapshots(fullSectorSentiments),
+        saveStockSnapshots(mergedArticles),
+      ]).catch((err) => {
+        console.error('[News API] ⚠️ Supabase snapshot update error:', err);
+      });
+    }
+
+    return { articles: mergedArticles, sectorSentiments: fullSectorSentiments };
+  } catch (err: any) {
+    console.error('[News API] refreshNewsCache error:', err);
+    throw err;
   }
-
-  // Update cache
-  cachedData = {
-    articles: analyzedArticles,
-    sectorSentiments: fullSectorSentiments,
-    timestamp: Date.now(),
-  };
-
-  // 4. Persist to Supabase (fire-and-forget — don't block response)
-  Promise.all([
-    saveArticlesToDB(analyzedArticles),
-    saveSectorSnapshots(fullSectorSentiments),
-    saveStockSnapshots(analyzedArticles),
-  ]).then(() => {
-    console.log('[News API] ✅ Data persisted to Supabase');
-  }).catch((err) => {
-    console.error('[News API] ⚠️ Supabase persistence error:', err);
-  });
-
-  return { articles: analyzedArticles, sectorSentiments: fullSectorSentiments };
 }
 
 export async function GET() {
