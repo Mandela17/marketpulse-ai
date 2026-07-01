@@ -1,7 +1,7 @@
-// API Route: Server-side stock prediction v3
-// Uses GBDT ensemble ML engine with alternative data features.
-// Integrates: Order Book Imbalance, Volume Profile, adaptive weights,
-// Kelly Criterion risk management, event calendar, and narrative reports.
+// API Route: Server-side stock prediction v4
+// Uses GBDT ensemble ML engine with global correlations, options intelligence, and alternative data.
+// Integrates: GIFT Nifty, S&P 500, DXY, Crude, Max Pain, OI analysis, Order Book Imbalance,
+// Volume Profile, adaptive weights, Kelly Criterion risk management, event calendar, and narrative reports.
 
 import { NextResponse } from 'next/server';
 import { generatePrediction } from '@/lib/mlEngine';
@@ -14,6 +14,8 @@ import { detectMarketRegime } from '@/lib/marketRegime';
 import { generateNarrativeReport } from '@/lib/narrativeReport';
 import { fetchOrderBookImbalance } from '@/lib/orderBookImbalance';
 import { computeVolumeProfile } from '@/lib/volumeProfile';
+import { fetchGlobalCorrelations } from '@/lib/globalCorrelations';
+import { fetchOptionsIntelligence } from '@/lib/optionsIntelligence';
 import { getServiceClient } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
@@ -28,8 +30,8 @@ export async function GET(request: Request) {
   }
 
   try {
-    // 1. Fetch all data sources in parallel
-    const [technicals, deliveryData, pcrData, vixData, accuracyMetrics, regime, obiData, ohlcvData] = await Promise.all([
+    // 1. Fetch all data sources in parallel (including new global + options intelligence)
+    const [technicals, deliveryData, pcrData, vixData, accuracyMetrics, regime, obiData, ohlcvData, globalContext, optionsData] = await Promise.all([
       computeRealTechnicals(symbol),
       fetchDeliveryData(symbol).catch(() => null),
       isFnOStock(symbol) ? fetchRealPCR(symbol).catch(() => null) : Promise.resolve(null),
@@ -38,6 +40,8 @@ export async function GET(request: Request) {
       detectMarketRegime().catch(() => null),
       fetchOrderBookImbalance(symbol).catch(() => null),
       fetchHistoricalOHLCV(symbol, 60).catch(() => []),
+      fetchGlobalCorrelations().catch(() => null),
+      isFnOStock(symbol) ? fetchOptionsIntelligence(symbol).catch(() => null) : Promise.resolve(null),
     ]);
 
     if (!technicals) {
@@ -66,10 +70,17 @@ export async function GET(request: Request) {
       atr = recent14.reduce((s, tr) => s + tr, 0) / recent14.length;
     }
 
-    // 4. Build alternative data features
+    // 4. Build alternative data features (now includes global + options)
     const altData = {
       obi: obiData?.bidAskImbalance || 0,
       pocPosition: volumeProfile?.pocDistancePct || 0,
+      // Phase 3: Global correlations
+      sp500Overnight: globalContext?.features?.sp500Overnight || 0,
+      dxyChange: globalContext?.features?.dxyChange || 0,
+      crudeChange: globalContext?.features?.crudeChange || 0,
+      giftNiftyGap: globalContext?.features?.giftNiftyGap || 0,
+      // Phase 3: Options intelligence
+      maxPainDist: optionsData?.features?.maxPainDist || 0,
     };
 
     // 5. Build current features for the ML engine
@@ -278,6 +289,34 @@ export async function GET(request: Request) {
         dayLow: technicals.dayLow,
         atr: parseFloat(atr.toFixed(2)),
       },
+      globalContext: globalContext ? {
+        gapPrediction: globalContext.gapPrediction,
+        gapConfidence: globalContext.gapConfidence,
+        overallBias: globalContext.overallBias,
+        signals: globalContext.signals,
+        instruments: {
+          giftNifty: globalContext.giftNifty,
+          sp500: globalContext.sp500,
+          dxy: globalContext.dxy,
+          brentCrude: globalContext.brentCrude,
+          us10Y: globalContext.us10Y,
+        },
+      } : null,
+      optionsIntelligence: optionsData ? {
+        maxPain: optionsData.maxPain,
+        maxPainDistance: optionsData.maxPainDistance,
+        maxPainSignal: optionsData.maxPainSignal,
+        pcrByOI: optionsData.pcrByOI,
+        pcrByOIChange: optionsData.pcrByOIChange,
+        freshPcrSignal: optionsData.freshPcrSignal,
+        callWall: optionsData.callWall,
+        putWall: optionsData.putWall,
+        ivSkew: optionsData.ivSkew,
+        ivSkewSignal: optionsData.ivSkewSignal,
+        isExpiryWeek: optionsData.isExpiryWeek,
+        daysToExpiry: optionsData.daysToExpiry,
+        signals: optionsData.signals,
+      } : null,
       dataQuality: {
         hasHistoricalData: prediction.metrics.totalSamples > 20,
         hasOBI: obiData != null,
@@ -285,6 +324,8 @@ export async function GET(request: Request) {
         hasDeliveryData: deliveryData != null,
         hasPcrData: pcrData != null,
         hasVixData: vixData != null,
+        hasGlobalContext: globalContext != null,
+        hasOptionsIntelligence: optionsData != null,
         dataPoints: prediction.metrics.totalSamples,
         modelVersion: prediction.metrics.modelVersion,
       },

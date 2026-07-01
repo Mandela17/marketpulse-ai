@@ -14,10 +14,11 @@ import { SECTORS } from '@/lib/sectorData';
 import { getServiceClient } from '@/lib/supabase';
 import type { NewsArticle } from '@/lib/types';
 import { fetchFIIDIIFlows, saveFIIDIIFlows } from '@/lib/fiiDiiData';
-import { fetchIndiaVIX, saveDailyFeatures } from '@/lib/nseData';
+import { fetchIndiaVIX, saveDailyFeatures, getHistoricalFeatures } from '@/lib/nseData';
 import { fetchHistoricalOHLCV, computeRealTechnicals } from '@/lib/technicalAnalysis';
 import { fetchNifty50 } from '@/lib/stockData';
 import { resolveUnresolvedPredictions } from '@/lib/predictionHistory';
+import { trainAndSaveModel } from '@/lib/mlEngine';
 
 // Authenticate cron requests (Vercel sends this header automatically)
 function isAuthorized(request: Request): boolean {
@@ -331,7 +332,58 @@ export async function GET(request: Request) {
       persistSectorSentiments(fullSectorSentiments),
       persistStockSentiments(analyzedArticles),
     ]);
-    
+
+    // Step 9: Backfill historical data for stocks with insufficient history
+    console.log('[Cron] 📚 Checking for historical data backfill needs...');
+    let backfilled = 0;
+    for (const symbol of KEY_STOCKS) {
+      try {
+        const existing = await getHistoricalFeatures(symbol, 500);
+        if (existing.length < 200) {
+          // Fetch 2 years of OHLCV and save daily features
+          const ohlcv = await fetchHistoricalOHLCV(symbol, 500);
+          if (ohlcv.length > existing.length + 10) {
+            for (const candle of ohlcv) {
+              await saveDailyFeatures({
+                symbol,
+                date: candle.date,
+                close: candle.close,
+                open: candle.open,
+                high: candle.high,
+                low: candle.low,
+                volume: candle.volume,
+              });
+            }
+            backfilled++;
+            console.log(`[Cron] 📚 Backfilled ${ohlcv.length} days for ${symbol} (had ${existing.length})`);
+          }
+        }
+      } catch {}
+    }
+    if (backfilled > 0) {
+      console.log(`[Cron] 📚 Backfilled historical data for ${backfilled} stocks`);
+    }
+
+    // Step 10: Train and freeze GBDT models for all key stocks
+    console.log('[Cron] 🤖 Training frozen GBDT models...');
+    let modelsTrained = 0;
+    let modelsSkipped = 0;
+    for (const symbol of KEY_STOCKS) {
+      try {
+        const result = await trainAndSaveModel(symbol);
+        if (result.success) {
+          modelsTrained++;
+          console.log(`[Cron] 🤖 Trained model for ${symbol}: ${result.samples} samples, ${result.valAccuracy?.toFixed(1)}% val acc`);
+        } else {
+          modelsSkipped++;
+        }
+      } catch (err) {
+        modelsSkipped++;
+        console.warn(`[Cron] 🤖 Model training failed for ${symbol}:`, (err as Error).message);
+      }
+    }
+    console.log(`[Cron] 🤖 Models trained: ${modelsTrained}, skipped: ${modelsSkipped}`);
+
     const duration = ((Date.now() - startTime) / 1000).toFixed(1);
     
     const result = {
@@ -345,6 +397,9 @@ export async function GET(request: Request) {
         sectorsSaved,
         stocksSaved,
         featuresSaved,
+        backfilled,
+        modelsTrained,
+        modelsSkipped,
         fiiDii: fiiDiiData ? { fiiNet: fiiDiiData.fiiNet, diiNet: fiiDiiData.diiNet } : null,
         indiaVix: vixData?.value ?? null,
         predictionsResolved: resolution.resolved,
@@ -352,7 +407,7 @@ export async function GET(request: Request) {
       },
     };
     
-    console.log(`[Cron] ✅ Complete in ${duration}s — ${articlesSaved} articles, ${featuresSaved} features, ${resolution.resolved} predictions resolved`);
+    console.log(`[Cron] ✅ Complete in ${duration}s — ${articlesSaved} articles, ${featuresSaved} features, ${modelsTrained} models trained, ${resolution.resolved} predictions resolved`);
     
     return NextResponse.json(result);
   } catch (error: any) {

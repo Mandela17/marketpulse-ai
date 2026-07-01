@@ -1,6 +1,7 @@
-// Production ML Prediction Engine v3 — Server-Side
+// Production ML Prediction Engine v4 — Server-Side
 // Ensemble: Gradient Boosted Decision Tree (GBDT) + Rule-Based Heuristic
-// Features: 21-dimensional feature vector with alternative data (OBI, Volume Profile, Flow Velocity)
+// Features: 25-dimensional feature vector with global correlations, options intelligence, and alternative data
+// Supports frozen model mode: train nightly via cron, serve predictions from saved weights.
 // Adaptive: Ensemble weights auto-tuned from rolling accuracy via adaptiveLearning.ts
 
 import { getHistoricalFeatures } from './nseData';
@@ -8,6 +9,7 @@ import { getRecentFIIDIIFlows, computeFIIDIIFeatures } from './fiiDiiData';
 import { savePrediction, getConfidenceLevel } from './predictionHistory';
 import { trainGBDT, predictGBDT, GBDTModel } from './gbdt';
 import { getEnsembleWeights } from './adaptiveLearning';
+import { getServiceClient } from './supabase';
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -54,6 +56,12 @@ interface FeatureVector {
   fiiVelocity: number;       // FII 5-day flow acceleration
   flowDivergence: number;    // FII vel × DII vel (negative = diverging)
   cumFlow10d: number;        // Cumulative 10-day FII net
+  // Phase 3: Global correlations + Options intelligence
+  sp500Overnight: number;    // S&P 500 overnight return (normalized)
+  dxyChange: number;         // Dollar Index change (inverted, normalized)
+  crudeChange: number;       // Brent Crude change (inverted, normalized)
+  giftNiftyGap: number;      // GIFT Nifty implied gap % (normalized)
+  maxPainDist: number;       // Distance from Max Pain (normalized)
   // Scaled feature array for models
   features: number[];
 }
@@ -71,6 +79,8 @@ function sigmoid(z: number): number {
 function extractFeatures(row: any, prevRow: any, altData?: {
   obi?: number; pocPosition?: number; fiiVelocity?: number;
   flowDivergence?: number; cumFlow10d?: number;
+  sp500Overnight?: number; dxyChange?: number; crudeChange?: number;
+  giftNiftyGap?: number; maxPainDist?: number;
 }): FeatureVector {
   const close = row.close || 0;
   const prevClose = prevRow?.close || close;
@@ -94,6 +104,12 @@ function extractFeatures(row: any, prevRow: any, altData?: {
   const fiiVelocity = altData?.fiiVelocity || 0;
   const flowDivergence = altData?.flowDivergence || 0;
   const cumFlow10d = altData?.cumFlow10d || 0;
+  // Phase 3: Global + Options data
+  const sp500Overnight = altData?.sp500Overnight || 0;
+  const dxyChange = altData?.dxyChange || 0;
+  const crudeChange = altData?.crudeChange || 0;
+  const giftNiftyGap = altData?.giftNiftyGap || 0;
+  const maxPainDist = altData?.maxPainDist || 0;
 
   // Feature engineering — 20 engineered features (no intercept needed for GBDT)
   const f_rsi = (rsi - 50) / 50;                                            // RSI deviation from neutral
@@ -121,11 +137,18 @@ function extractFeatures(row: any, prevRow: any, altData?: {
     ? Math.min(1, Math.log(1 + flowDivergence / 100000)) 
     : -Math.min(1, Math.log(1 + Math.abs(flowDivergence) / 100000));
   const f_cumFlow10d = cumFlow10d / 20000;                                   // 10-day cum flow normalized
+  // Phase 3: Global correlations + Options intelligence (already normalized [-1, 1])
+  const f_sp500Overnight = sp500Overnight;
+  const f_dxyChange = dxyChange;
+  const f_crudeChange = crudeChange;
+  const f_giftNiftyGap = giftNiftyGap;
+  const f_maxPainDist = maxPainDist;
 
   return {
     rsi, macdHist, ema20, close, volumeRatio, sentimentScore,
     pcr, deliveryPct, indiaVix, fiiNet, diiNet, bollingerUpper, bollingerLower,
     obi, pocPosition, fiiVelocity, flowDivergence, cumFlow10d,
+    sp500Overnight, dxyChange, crudeChange, giftNiftyGap, maxPainDist,
     features: [
       f_rsi,
       f_macd,
@@ -147,6 +170,12 @@ function extractFeatures(row: any, prevRow: any, altData?: {
       f_fiiVelocity,
       f_flowDivergence,
       f_cumFlow10d,
+      // Phase 3: Global + Options (5 new features)
+      f_sp500Overnight,
+      f_dxyChange,
+      f_crudeChange,
+      f_giftNiftyGap,
+      f_maxPainDist,
     ],
   };
 }
@@ -223,8 +252,36 @@ function predictHeuristic(fv: FeatureVector): { probability: number; signals: st
   if (fv.cumFlow10d > 5000) { score += 1; signals.push(`Strong 10-day FII inflow ₹${(fv.cumFlow10d / 1000).toFixed(1)}KCr`); }
   else if (fv.cumFlow10d < -5000) { score -= 1; signals.push(`Heavy 10-day FII outflow ₹${(Math.abs(fv.cumFlow10d) / 1000).toFixed(1)}KCr`); }
 
-  // Convert score to probability (score typically -10 to +10)
-  const probability = sigmoid(score * 0.35);
+  // ─── Phase 3: Global correlation signals ───
+
+  // GIFT Nifty gap
+  if (fv.giftNiftyGap > 0.3) { score += 1.5; signals.push(`GIFT Nifty indicating gap up (${(fv.giftNiftyGap * 3).toFixed(1)}%)`); }
+  else if (fv.giftNiftyGap < -0.3) { score -= 1.5; signals.push(`GIFT Nifty indicating gap down (${(fv.giftNiftyGap * 3).toFixed(1)}%)`); }
+
+  // S&P 500 overnight
+  if (fv.sp500Overnight > 0.3) { score += 1; signals.push(`S&P 500 rallied overnight — risk-on sentiment`); }
+  else if (fv.sp500Overnight < -0.3) { score -= 1; signals.push(`S&P 500 fell overnight — risk-off pressure`); }
+
+  // DXY (already inverted in feature)
+  if (fv.dxyChange > 0.3) { score += 0.5; signals.push('Weakening dollar — positive for EM flows'); }
+  else if (fv.dxyChange < -0.3) { score -= 0.5; signals.push('Strengthening dollar — FII outflow risk'); }
+
+  // Crude (already inverted in feature)
+  if (fv.crudeChange > 0.3) { score += 0.5; signals.push('Falling crude — eases India inflation pressure'); }
+  else if (fv.crudeChange < -0.3) { score -= 0.5; signals.push('Rising crude — negative for India current account'); }
+
+  // Max Pain proximity (mean-reversion signal)
+  if (Math.abs(fv.maxPainDist) > 0.5) {
+    // Price far from Max Pain — expect pull toward it
+    if (fv.maxPainDist > 0) {
+      score -= 0.5; signals.push(`Price above Max Pain — mean-reversion pull downward on expiry`);
+    } else {
+      score += 0.5; signals.push(`Price below Max Pain — mean-reversion pull upward on expiry`);
+    }
+  }
+
+  // Convert score to probability (score typically -12 to +12)
+  const probability = sigmoid(score * 0.3);
 
   return { probability, signals };
 }
@@ -238,7 +295,136 @@ const FEATURE_NAMES = [
   'Price Momentum', 'Bollinger Position',
   'Order Book Imbalance', 'Volume Profile (POC)', 'FII Velocity',
   'Flow Divergence', 'Cumulative 10d Flow',
+  'S&P 500 Overnight', 'DXY Change', 'Crude Change',
+  'GIFT Nifty Gap', 'Max Pain Distance',
 ];
+
+// ─── Main Prediction Function ───────────────────────────────────────
+
+// ─── Frozen Model Cache ─────────────────────────────────────────────
+
+const frozenModelCache: Map<string, { model: GBDTModel; timestamp: number }> = new Map();
+const FROZEN_MODEL_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+
+async function loadFrozenModel(symbol: string): Promise<GBDTModel | null> {
+  // Check in-memory cache first
+  const cached = frozenModelCache.get(symbol);
+  if (cached && Date.now() - cached.timestamp < FROZEN_MODEL_CACHE_TTL) {
+    return cached.model;
+  }
+
+  try {
+    const db = getServiceClient();
+    const { data } = await db
+      .from('frozen_models')
+      .select('model_json')
+      .eq('symbol', symbol)
+      .order('trained_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (data?.model_json) {
+      const model = data.model_json as GBDTModel;
+      frozenModelCache.set(symbol, { model, timestamp: Date.now() });
+      console.log(`[MLEngine] Loaded frozen model for ${symbol}`);
+      return model;
+    }
+  } catch (err) {
+    console.warn(`[MLEngine] Failed to load frozen model for ${symbol}:`, err);
+  }
+  return null;
+}
+
+async function saveFrozenModel(symbol: string, model: GBDTModel): Promise<void> {
+  try {
+    const db = getServiceClient();
+    await db.from('frozen_models').upsert({
+      symbol,
+      model_json: model as any,
+      training_samples: model.trainingMetrics.totalSamples,
+      training_accuracy: model.trainingMetrics.trainingAccuracy,
+      validation_accuracy: model.trainingMetrics.validationAccuracy,
+      model_version: 'v4-gbdt-frozen',
+      trained_at: new Date().toISOString(),
+    }, { onConflict: 'symbol' });
+    // Update in-memory cache
+    frozenModelCache.set(symbol, { model, timestamp: Date.now() });
+    console.log(`[MLEngine] Saved frozen model for ${symbol} (${model.trainingMetrics.totalSamples} samples, ${model.trainingMetrics.validationAccuracy.toFixed(1)}% val acc)`);
+  } catch (err) {
+    console.warn(`[MLEngine] Failed to save frozen model for ${symbol}:`, err);
+  }
+}
+
+// ─── Train and Save Model (called by cron job) ─────────────────────
+
+export async function trainAndSaveModel(symbol: string): Promise<{
+  success: boolean;
+  samples?: number;
+  valAccuracy?: number;
+  error?: string;
+}> {
+  try {
+    const history = await getHistoricalFeatures(symbol, 500);
+    const fiiFlows = await getRecentFIIDIIFlows(30);
+    const fiiFeatures = computeFIIDIIFeatures(fiiFlows);
+
+    if (history.length < 30) {
+      return { success: false, error: `Insufficient data: ${history.length} rows (need 30+)` };
+    }
+
+    // Build training data
+    const X: number[][] = [];
+    const Y: number[] = [];
+
+    for (let i = 1; i < history.length - 1; i++) {
+      const row = history[i];
+      const prevRow = history[i - 1];
+      const nextRow = history[i + 1];
+
+      const matchingFlow = fiiFlows.find(f => f.date === row.date);
+      if (matchingFlow) {
+        row.fii_net = matchingFlow.fiiNet;
+        row.dii_net = matchingFlow.diiNet;
+      }
+
+      const fv = extractFeatures(row, prevRow);
+      X.push(fv.features);
+      Y.push(nextRow.close > row.close ? 1 : 0);
+    }
+
+    const m = X.length;
+    if (m < 20) {
+      return { success: false, error: `Too few training samples: ${m}` };
+    }
+
+    const trainSize = Math.floor(m * 0.7);
+    const X_train = X.slice(0, trainSize);
+    const Y_train = Y.slice(0, trainSize);
+    const X_val = X.slice(trainSize);
+    const Y_val = Y.slice(trainSize);
+
+    const gbdtModel = trainGBDT(X_train, Y_train, X_val, Y_val, {
+      numTrees: m < 50 ? 30 : m < 100 ? 50 : 80,
+      maxDepth: m < 50 ? 3 : 4,
+      learningRate: 0.08,
+      subsampleRatio: 0.8,
+      minSamplesLeaf: Math.max(2, Math.floor(trainSize * 0.04)),
+      l2Regularization: 1.0,
+      earlyStoppingRounds: 8,
+    });
+
+    await saveFrozenModel(symbol, gbdtModel);
+
+    return {
+      success: true,
+      samples: m,
+      valAccuracy: gbdtModel.trainingMetrics.validationAccuracy,
+    };
+  } catch (error: any) {
+    console.error(`[MLEngine] trainAndSaveModel failed for ${symbol}:`, error);
+    return { success: false, error: error.message || 'Unknown error' };
+  }
+}
 
 // ─── Main Prediction Function ───────────────────────────────────────
 
@@ -252,11 +438,13 @@ export async function generatePrediction(
   altData?: {
     obi?: number; pocPosition?: number; fiiVelocity?: number;
     flowDivergence?: number; cumFlow10d?: number;
+    sp500Overnight?: number; dxyChange?: number; crudeChange?: number;
+    giftNiftyGap?: number; maxPainDist?: number;
   }
 ): Promise<MLPrediction | null> {
   try {
-    // 1. Fetch historical data from Supabase
-    const history = await getHistoricalFeatures(symbol, 120);
+    // 1. Fetch historical data from Supabase (expanded from 120 to 500 days)
+    const history = await getHistoricalFeatures(symbol, 500);
     const fiiFlows = await getRecentFIIDIIFlows(30);
     const fiiFeatures = computeFIIDIIFeatures(fiiFlows);
 
@@ -298,6 +486,11 @@ export async function generatePrediction(
         fiiVelocity: mergedAltData.fiiVelocity,
         flowDivergence: mergedAltData.flowDivergence,
         cumFlow10d: mergedAltData.cumFlow10d,
+        sp500Overnight: altData?.sp500Overnight || 0,
+        dxyChange: altData?.dxyChange || 0,
+        crudeChange: altData?.crudeChange || 0,
+        giftNiftyGap: altData?.giftNiftyGap || 0,
+        maxPainDist: altData?.maxPainDist || 0,
         features: [],
       };
 
@@ -378,16 +571,26 @@ export async function generatePrediction(
     const X_val = X.slice(trainSize);
     const Y_val = Y.slice(trainSize);
 
-    // 6. Train GBDT
-    const gbdtModel = trainGBDT(X_train, Y_train, X_val, Y_val, {
-      numTrees: m < 30 ? 20 : 50,  // Fewer trees for small datasets
-      maxDepth: m < 30 ? 3 : 4,
-      learningRate: 0.1,
-      subsampleRatio: 0.8,
-      minSamplesLeaf: Math.max(2, Math.floor(trainSize * 0.05)),
-      l2Regularization: 1.0,
-      earlyStoppingRounds: 5,
-    });
+    // 6. Try loading frozen model first, fall back to training on-demand
+    let gbdtModel = await loadFrozenModel(symbol);
+    let usedFrozenModel = false;
+
+    if (gbdtModel && gbdtModel.trees && gbdtModel.trees.length > 0) {
+      console.log(`[MLEngine] Using frozen model for ${symbol} (${gbdtModel.trainingMetrics.totalSamples} samples)`);
+      usedFrozenModel = true;
+    } else {
+      // Fall back to training on-demand
+      console.log(`[MLEngine] No frozen model for ${symbol}, training on-demand...`);
+      gbdtModel = trainGBDT(X_train, Y_train, X_val, Y_val, {
+        numTrees: m < 30 ? 20 : m < 100 ? 50 : 70,
+        maxDepth: m < 30 ? 3 : 4,
+        learningRate: 0.08,
+        subsampleRatio: 0.8,
+        minSamplesLeaf: Math.max(2, Math.floor(trainSize * 0.04)),
+        l2Regularization: 1.0,
+        earlyStoppingRounds: 6,
+      });
+    }
 
     // 7. Predict today → tomorrow
     const latestRow = history[history.length - 1];
@@ -467,9 +670,9 @@ export async function generatePrediction(
         trainingAccuracy: gbdtModel.trainingMetrics.trainingAccuracy,
         validationAccuracy: gbdtModel.trainingMetrics.validationAccuracy,
         totalSamples: m,
-        modelVersion: 'v3-gbdt-adaptive',
-        bestIteration: gbdtModel.trainingMetrics.bestIteration,
-        ensembleWeights,
+         modelVersion: usedFrozenModel ? 'v4-gbdt-frozen' : 'v4-gbdt-adaptive',
+         bestIteration: gbdtModel.trainingMetrics.bestIteration,
+         ensembleWeights,
       },
     };
 
