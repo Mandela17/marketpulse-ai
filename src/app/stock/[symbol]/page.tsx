@@ -633,7 +633,13 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
                   {aiPrediction?.prediction?.metrics && (
                     <span className="text-[10px] px-2 py-0.5 rounded-full font-medium"
                       style={{ background: 'rgba(139,92,246,0.15)', color: '#a78bfa', border: '1px solid rgba(139,92,246,0.3)' }}>
-                      {aiPrediction.prediction.metrics.modelVersion} • {aiPrediction.prediction.metrics.totalSamples} samples
+                      {(() => {
+                        const v = aiPrediction.prediction.metrics.modelVersion || '';
+                        const label = v.includes('frozen') ? 'AI Ensemble ⚡' :
+                                      v.includes('adaptive') ? 'AI Ensemble' :
+                                      v.includes('heuristic') ? 'AI Analysis' : 'AI Model';
+                        return `${label} • ${aiPrediction.prediction.metrics.totalSamples} samples`;
+                      })()}
                     </span>
                   )}
                 </div>

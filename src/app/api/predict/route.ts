@@ -138,6 +138,21 @@ export async function GET(request: Request) {
     }
     adjustedConfidence = Math.max(50, Math.min(95, adjustedConfidence));
 
+    // 9b. Sync adjusted confidence back to DB so predictions table matches detail page
+    if (adjustedConfidence !== prediction.confidence) {
+      const todayDateSync = new Date().toISOString().split('T')[0];
+      const db = getServiceClient();
+      try {
+        await db
+          .from('predictions')
+          .update({ probability: adjustedConfidence })
+          .eq('symbol', symbol)
+          .gte('predicted_at', `${todayDateSync}T00:00:00Z`)
+          .lte('predicted_at', `${todayDateSync}T23:59:59Z`)
+          .is('resolved_at', null);
+      } catch {}
+    }
+
     // 10. Historical accuracy for this stock
     const stockAccuracy = accuracyMetrics.find(m => m.symbol === symbol);
 

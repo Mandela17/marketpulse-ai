@@ -509,7 +509,7 @@ export async function generatePrediction(
         featuresJson: { heuristicSignals: heurResult.signals, subModels: { heuristic: { direction, probability: confidence } } },
         supportingSignals,
         contradictingSignals,
-        modelVersion: 'v3-heuristic-only',
+        modelVersion: 'v4-heuristic',
         predictedAt: new Date().toISOString(),
       });
 
@@ -529,7 +529,7 @@ export async function generatePrediction(
           trainingAccuracy: 0,
           validationAccuracy: 0,
           totalSamples: history.length,
-          modelVersion: 'v3-heuristic-only',
+           modelVersion: 'v4-heuristic',
           bestIteration: 0,
           ensembleWeights,
         },

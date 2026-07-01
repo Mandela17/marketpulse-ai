@@ -370,7 +370,13 @@ export default function PredictionsDashboard() {
                         </span>
                         {(pred.modelVersion || pred.model_version) && (
                           <p className="text-[9px] mt-0.5" style={{ color: 'rgba(139,92,246,0.7)' }}>
-                            {pred.modelVersion || pred.model_version}
+                            {(() => {
+                              const v = pred.modelVersion || pred.model_version || '';
+                              if (v.includes('frozen')) return 'AI Ensemble ⚡';
+                              if (v.includes('adaptive')) return 'AI Ensemble';
+                              if (v.includes('heuristic')) return 'AI Analysis';
+                              return 'AI Model';
+                            })()}
                           </p>
                         )}
                       </td>
