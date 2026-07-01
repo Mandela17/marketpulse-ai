@@ -138,39 +138,46 @@ async function refreshNewsCache(): Promise<{ articles: any[]; sectorSentiments: 
 
     const db = getServiceClient();
     const urls = rawArticles.map(a => a.link);
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
-    // 2. Query Supabase for articles already analyzed
-    const { data: existing, error: fetchErr } = await db
-      .from('articles')
-      .select('*')
-      .in('url', urls);
+    // 2. Query Supabase for articles already analyzed (batch URLs to avoid .in() size limit)
+    let existing: any[] = [];
+    const BATCH_SIZE = 20;
+    for (let i = 0; i < urls.length; i += BATCH_SIZE) {
+      const urlBatch = urls.slice(i, i + BATCH_SIZE);
+      const { data, error: fetchErr } = await db
+        .from('articles')
+        .select('*')
+        .in('url', urlBatch)
+        .gte('published_at', sevenDaysAgo);
 
-    if (fetchErr) {
-      console.warn('[News API] DB query for existing articles failed:', fetchErr.message);
+      if (fetchErr) {
+        console.warn(`[News API] DB batch ${i / BATCH_SIZE + 1} query failed:`, fetchErr.message);
+      } else if (data) {
+        existing.push(...data);
+      }
     }
 
     // Map existing DB rows to NewsArticle format
     const existingMap = new Map<string, any>();
-    if (existing) {
-      for (const row of existing) {
-        existingMap.set(row.url, {
-          id: `db-${row.id}`,
-          title: row.title,
-          source: row.source,
-          url: row.url,
-          publishedAt: row.published_at,
-          summary: row.summary,
-          sentiment: row.sentiment,
-          sentimentLabel: row.label,
-          relatedSectors: row.related_sectors || [],
-          relatedStocks: row.related_stocks || [],
-          category: row.category,
-          impactLevel: row.impact_level,
-          weight: row.weight || 1.0,
-          decayedWeight: row.decayed_weight || 1.0,
-          aspects: row.aspects || [],
-        });
-      }
+    for (const row of existing) {
+      existingMap.set(row.url, {
+        id: `db-${row.id}`,
+        title: row.title,
+        source: row.source,
+        url: row.url,
+        publishedAt: row.published_at,
+        summary: row.summary,
+        sentiment: row.sentiment,
+        sentimentLabel: row.label,
+        relatedSectors: row.related_sectors || [],
+        relatedStocks: row.related_stocks || [],
+        category: row.category,
+        impactLevel: row.impact_level,
+        weight: row.weight || 1.0,
+        decayedWeight: row.decayed_weight || 1.0,
+        aspects: row.aspects || [],
+      });
     }
 
     // Filter raw articles into new vs already analyzed
