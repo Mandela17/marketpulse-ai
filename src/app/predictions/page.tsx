@@ -152,6 +152,41 @@ export default function PredictionsDashboard() {
         </div>
       )}
 
+      {/* Stale Data Warning */}
+      {!loading && activePredictions.length > 0 && (() => {
+        const latestPrediction = activePredictions[0];
+        const predTime = new Date(latestPrediction.predictedAt || latestPrediction.predicted_at || 0);
+        const hoursOld = (Date.now() - predTime.getTime()) / (1000 * 60 * 60);
+        if (hoursOld > 24) {
+          return (
+            <div className="p-4 rounded-xl border animate-fade-in" style={{ background: 'rgba(255,77,106,0.08)', borderColor: 'rgba(255,77,106,0.3)' }}>
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <div>
+                  <p className="text-sm font-bold" style={{ color: 'var(--accent-red)' }}>
+                    ⚠️ Predictions are {Math.floor(hoursOld / 24)} day{Math.floor(hoursOld / 24) > 1 ? 's' : ''} old
+                  </p>
+                  <p className="text-[11px] mt-1" style={{ color: 'var(--text-secondary)' }}>
+                    The automated cron job may not have run. Click below to generate fresh predictions now.
+                  </p>
+                </div>
+                <button
+                  onClick={handleSeed}
+                  disabled={seeding}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-sm transition-all cursor-pointer"
+                  style={{ background: 'linear-gradient(135deg, #ef4444, #f97316)', color: 'white', opacity: seeding ? 0.7 : 1 }}>
+                  {seeding ? (
+                    <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Generating...</>
+                  ) : (
+                    <>🔄 Refresh Predictions Now</>
+                  )}
+                </button>
+              </div>
+            </div>
+          );
+        }
+        return null;
+      })()}
+
       {/* Scoreboard */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="p-5 rounded-xl border" style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
@@ -242,9 +277,16 @@ export default function PredictionsDashboard() {
             borderColor: seedResult.success ? 'rgba(0,214,143,0.3)' : 'rgba(255,77,106,0.3)',
           }}>
           {seedResult.success ? (
-            <p className="text-sm font-bold" style={{ color: 'var(--accent-green)' }}>
-              ✅ Generated predictions: {seedResult.summary.ok} stocks predicted, {seedResult.summary.skipped} skipped, {seedResult.summary.errors} errors
-            </p>
+            <div>
+              <p className="text-sm font-bold" style={{ color: 'var(--accent-green)' }}>
+                ✅ Generated predictions: {seedResult.summary.ok} stocks predicted, {seedResult.summary.skipped} skipped, {seedResult.summary.errors} errors
+              </p>
+              {seedResult.summary.resolved > 0 && (
+                <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
+                  📊 Also resolved {seedResult.summary.resolved} stale predictions for accuracy tracking
+                </p>
+              )}
+            </div>
           ) : (
             <p className="text-sm font-bold" style={{ color: 'var(--accent-red)' }}>
               ❌ {seedResult.error}
