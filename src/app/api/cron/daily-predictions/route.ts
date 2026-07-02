@@ -29,11 +29,15 @@ const KEY_STOCKS = [
 export async function GET(request: Request) {
   const startTime = Date.now();
   const { searchParams } = new URL(request.url);
-  const secret = searchParams.get('secret');
+  const querySecret = searchParams.get('secret');
   const cronSecret = process.env.CRON_SECRET;
 
-  // Auth check
-  if (process.env.NODE_ENV !== 'development' && cronSecret && secret !== cronSecret) {
+  // Auth check — Vercel Cron sends CRON_SECRET via Authorization header, not query params
+  const authHeader = request.headers.get('authorization');
+  const headerMatch = authHeader === `Bearer ${cronSecret}`;
+  const queryMatch = querySecret === cronSecret;
+
+  if (process.env.NODE_ENV !== 'development' && cronSecret && !headerMatch && !queryMatch) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

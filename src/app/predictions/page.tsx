@@ -44,10 +44,12 @@ export default function PredictionsDashboard() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
+      const cacheBust = `&_t=${Date.now()}`;
+      const fetchOpts = { cache: 'no-store' as RequestCache };
       const [activeRes, accuracyRes, healthRes] = await Promise.all([
-        fetch('/api/predictions?type=active').then(r => r.json()).catch(() => ({ predictions: [] })),
-        fetch('/api/predictions?type=accuracy').then(r => r.json()).catch(() => null),
-        fetch('/api/health').then(r => r.json()).catch(() => null),
+        fetch(`/api/predictions?type=active${cacheBust}`, fetchOpts).then(r => r.json()).catch(() => ({ predictions: [] })),
+        fetch(`/api/predictions?type=accuracy${cacheBust}`, fetchOpts).then(r => r.json()).catch(() => null),
+        fetch(`/api/health?_t=${Date.now()}`, fetchOpts).then(r => r.json()).catch(() => null),
       ]);
 
       if (activeRes.predictions) setActivePredictions(activeRes.predictions);
@@ -62,6 +64,12 @@ export default function PredictionsDashboard() {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Auto-refresh every 5 minutes to prevent stale data
+  useEffect(() => {
+    const interval = setInterval(fetchData, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [fetchData]);
 
   const handleSeed = async () => {
     setSeeding(true);

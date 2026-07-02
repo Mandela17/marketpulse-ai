@@ -243,7 +243,7 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
   // Fetch server-side AI prediction
   useEffect(() => {
     setLoadingPrediction(true);
-    fetch(`/api/predict?symbol=${encodeURIComponent(decodedSymbol)}`)
+    fetch(`/api/predict?symbol=${encodeURIComponent(decodedSymbol)}&_t=${Date.now()}`, { cache: 'no-store' })
       .then(r => r.json())
       .then(data => {
         if (data && !data.error) {
