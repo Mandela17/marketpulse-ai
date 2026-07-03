@@ -1,75 +1,71 @@
-// API Route: Seed predictions for all key Nifty stocks
-// Generates fresh predictions and resolves stale ones.
-// No auth required — this is a personal project endpoint.
+// API Route: Seed predictions — optimized for Vercel Hobby 60s timeout
+// Processes top 10 stocks quickly. No auth required.
 
 import { NextResponse } from 'next/server';
 import { generatePrediction } from '@/lib/mlEngine';
 import { computeRealTechnicals } from '@/lib/technicalAnalysis';
 import { fetchDeliveryData, fetchRealPCR, fetchIndiaVIX, isFnOStock } from '@/lib/nseData';
-import { fetchStockPrice } from '@/lib/stockData';
-import { resolveUnresolvedPredictions } from '@/lib/predictionHistory';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 120;
+export const maxDuration = 60; // Vercel Hobby max
 
+// Only process 10 stocks per call to stay within timeout
+// The daily cron handles all 25
 const KEY_STOCKS = [
   'RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'ICICIBANK',
-  'SBIN', 'KOTAKBANK', 'AXISBANK', 'HINDUNILVR', 'ITC',
-  'BAJFINANCE', 'BHARTIARTL', 'LT', 'MARUTI', 'TATAMOTORS',
-  'SUNPHARMA', 'WIPRO', 'HCLTECH', 'NTPC', 'ONGC',
-  'TATASTEEL', 'TITAN', 'ADANIENT', 'DRREDDY', 'CIPLA',
+  'SBIN', 'BHARTIARTL', 'LT', 'TATAMOTORS', 'ITC',
 ];
 
-export async function GET() {
+export async function GET(request: Request) {
   const startTime = Date.now();
-  const log: string[] = [];
+  const { searchParams } = new URL(request.url);
+  
+  // Allow selecting a batch: ?batch=2 processes stocks 11-20
+  const batch = parseInt(searchParams.get('batch') || '1', 10);
+  
+  const ALL_STOCKS = [
+    'RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'ICICIBANK',
+    'SBIN', 'BHARTIARTL', 'LT', 'TATAMOTORS', 'ITC',
+    'BAJFINANCE', 'KOTAKBANK', 'AXISBANK', 'HINDUNILVR', 'MARUTI',
+    'SUNPHARMA', 'WIPRO', 'HCLTECH', 'NTPC', 'ONGC',
+    'TATASTEEL', 'TITAN', 'ADANIENT', 'DRREDDY', 'CIPLA',
+  ];
+  
+  const BATCH_SIZE = 10;
+  const startIdx = (batch - 1) * BATCH_SIZE;
+  const stocks = ALL_STOCKS.slice(startIdx, startIdx + BATCH_SIZE);
+  const totalBatches = Math.ceil(ALL_STOCKS.length / BATCH_SIZE);
 
-  // Step 0: Resolve any stale unresolved predictions first
-  let resolved = 0;
-  let resolveCorrect = 0;
-  try {
-    log.push('[Seed] Step 0: Resolving stale predictions...');
-    const closingPrices: Record<string, { todayClose: number; prevClose: number }> = {};
-    for (let i = 0; i < KEY_STOCKS.length; i += 5) {
-      const batch = KEY_STOCKS.slice(i, i + 5);
-      await Promise.all(batch.map(async (sym) => {
-        try {
-          const quote = await fetchStockPrice(sym);
-          if (quote && quote.price > 0) {
-            closingPrices[sym] = { todayClose: quote.price, prevClose: quote.previousClose || quote.price };
-          }
-        } catch {}
-      }));
-    }
-    const res = await resolveUnresolvedPredictions(closingPrices);
-    resolved = res.resolved;
-    resolveCorrect = res.correct;
-    log.push(`[Seed] Resolved ${res.resolved} predictions (${res.correct} correct)`);
-  } catch (err: any) {
-    log.push(`[Seed] Resolution failed: ${err.message}`);
+  if (stocks.length === 0) {
+    return NextResponse.json({ success: true, summary: { ok: 0, total: 0 }, message: 'No stocks in this batch' });
   }
 
-  // Step 1: Generate fresh predictions
-  log.push('[Seed] Step 1: Generating fresh predictions...');
   const results: { symbol: string; status: 'ok' | 'error' | 'skipped'; direction?: string; confidence?: number; error?: string }[] = [];
-  const vix = await fetchIndiaVIX().catch(() => null);
 
-  const batchSize = 5;
-  for (let i = 0; i < KEY_STOCKS.length; i += batchSize) {
-    const batch = KEY_STOCKS.slice(i, i + batchSize);
+  // Process 3 at a time (fast parallel)
+  const parallelSize = 3;
+  for (let i = 0; i < stocks.length; i += parallelSize) {
+    // Check if we're running out of time (leave 5s buffer)
+    if (Date.now() - startTime > 50000) {
+      stocks.slice(i).forEach(s => results.push({ symbol: s, status: 'skipped', error: 'timeout' }));
+      break;
+    }
 
-    await Promise.all(batch.map(async (symbol) => {
+    const chunk = stocks.slice(i, i + parallelSize);
+    await Promise.all(chunk.map(async (symbol) => {
       try {
-        const [technicals, deliveryData, pcrData] = await Promise.all([
-          computeRealTechnicals(symbol),
+        const technicals = await computeRealTechnicals(symbol);
+
+        if (!technicals || technicals.currentPrice === 0) {
+          results.push({ symbol, status: 'skipped', error: 'No data' });
+          return;
+        }
+
+        // Fetch extras in parallel but don't block on failure
+        const [deliveryData, pcrData] = await Promise.all([
           fetchDeliveryData(symbol).catch(() => null),
           isFnOStock(symbol) ? fetchRealPCR(symbol).catch(() => null) : Promise.resolve(null),
         ]);
-
-        if (!technicals || technicals.currentPrice === 0) {
-          results.push({ symbol, status: 'skipped', error: 'No technicals data' });
-          return;
-        }
 
         const prediction = await generatePrediction(symbol, {
           rsi: technicals.rsi,
@@ -85,20 +81,15 @@ export async function GET() {
         });
 
         if (!prediction) {
-          results.push({ symbol, status: 'skipped', error: 'ML engine returned null' });
+          results.push({ symbol, status: 'skipped', error: 'ML returned null' });
           return;
         }
 
         results.push({ symbol, status: 'ok', direction: prediction.direction, confidence: prediction.confidence });
       } catch (err: any) {
-        results.push({ symbol, status: 'error', error: err.message });
-        log.push(`[Seed] Error for ${symbol}: ${err.message}`);
+        results.push({ symbol, status: 'error', error: err.message?.slice(0, 80) });
       }
     }));
-
-    if (i + batchSize < KEY_STOCKS.length) {
-      await new Promise(r => setTimeout(r, 500));
-    }
   }
 
   const ok = results.filter(r => r.status === 'ok').length;
@@ -106,13 +97,12 @@ export async function GET() {
   const errors = results.filter(r => r.status === 'error').length;
   const duration = ((Date.now() - startTime) / 1000).toFixed(1);
 
-  log.push(`[Seed] Done in ${duration}s: ${ok} ok, ${skipped} skipped, ${errors} errors`);
-
   return NextResponse.json({
     success: true,
     duration: `${duration}s`,
-    summary: { ok, skipped, errors, total: KEY_STOCKS.length, resolved, resolveCorrect },
+    batch,
+    totalBatches,
+    summary: { ok, skipped, errors, total: stocks.length },
     results,
-    log,
   });
 }

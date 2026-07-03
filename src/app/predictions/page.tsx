@@ -74,15 +74,44 @@ export default function PredictionsDashboard() {
   const handleSeed = async () => {
     setSeeding(true);
     setSeedResult(null);
+    
+    let totalOk = 0, totalSkipped = 0, totalErrors = 0, totalStocks = 0;
+    const allResults: any[] = [];
+    const totalBatches = 3; // 25 stocks / 10 per batch
+
     try {
-      const res = await fetch(`/api/seed-predictions?_t=${Date.now()}`, { cache: 'no-store' });
-      const data = await res.json();
-      if (!res.ok) {
-        setSeedResult({ success: false, error: data.error || `HTTP ${res.status}` });
-      } else {
-        setSeedResult(data);
+      for (let batch = 1; batch <= totalBatches; batch++) {
+        // Update UI with progress
+        setSeedResult({
+          success: true,
+          duration: 'in progress...',
+          summary: { ok: totalOk, skipped: totalSkipped, errors: totalErrors, total: totalStocks },
+          message: `Processing batch ${batch}/${totalBatches}...`,
+        });
+
+        const res = await fetch(`/api/seed-predictions?batch=${batch}&_t=${Date.now()}`, { cache: 'no-store' });
+        const data = await res.json();
+        
+        if (!res.ok) {
+          setSeedResult({ success: false, error: data.error || `Batch ${batch} failed: HTTP ${res.status}` });
+          await fetchData();
+          return;
+        }
+
+        totalOk += data.summary?.ok || 0;
+        totalSkipped += data.summary?.skipped || 0;
+        totalErrors += data.summary?.errors || 0;
+        totalStocks += data.summary?.total || 0;
+        allResults.push(...(data.results || []));
       }
-      // Re-fetch data after seeding
+
+      setSeedResult({
+        success: true,
+        duration: 'done',
+        summary: { ok: totalOk, skipped: totalSkipped, errors: totalErrors, total: totalStocks },
+        results: allResults,
+      });
+      // Re-fetch predictions data
       await fetchData();
     } catch (err: any) {
       setSeedResult({ success: false, error: `Network error: ${err.message}` });
@@ -272,13 +301,11 @@ export default function PredictionsDashboard() {
           {seedResult.success ? (
             <div>
               <p className="text-sm font-bold" style={{ color: 'var(--accent-green)' }}>
-                ✅ Generated {seedResult.summary?.ok || 0}/{seedResult.summary?.total || 0} predictions in {seedResult.duration || '?'}
+                {seedResult.message
+                  ? `⏳ ${seedResult.message} (${seedResult.summary?.ok || 0} done so far)`
+                  : `✅ Generated ${seedResult.summary?.ok || 0}/${seedResult.summary?.total || 0} predictions`
+                }
               </p>
-              {(seedResult.summary?.resolved > 0) && (
-                <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
-                  📊 Resolved {seedResult.summary.resolved} stale predictions ({seedResult.summary.resolveCorrect} correct)
-                </p>
-              )}
               {(seedResult.summary?.skipped > 0 || seedResult.summary?.errors > 0) && (
                 <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
                   ⚠ {seedResult.summary.skipped} skipped, {seedResult.summary.errors} errors
