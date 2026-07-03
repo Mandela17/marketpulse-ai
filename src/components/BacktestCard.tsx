@@ -23,7 +23,7 @@ export default function BacktestCard() {
   useEffect(() => {
     async function fetchBacktest() {
       try {
-        const res = await fetch('/api/predictions?type=accuracy');
+        const res = await fetch(`/api/predictions?type=accuracy&_t=${Date.now()}`, { cache: 'no-store' });
         const json = await res.json();
 
         const overall = json.overall;

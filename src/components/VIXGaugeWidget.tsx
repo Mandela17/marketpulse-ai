@@ -7,7 +7,7 @@ export default function VIXGaugeWidget() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/market')
+    fetch(`/api/market?_t=${Date.now()}`, { cache: 'no-store' })
       .then(r => r.json())
       .then(d => {
         if (d?.indiaVix) setVix(d.indiaVix.value);

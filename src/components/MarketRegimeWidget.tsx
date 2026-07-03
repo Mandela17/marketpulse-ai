@@ -9,7 +9,7 @@ export default function MarketRegimeWidget() {
   const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
-    fetch('/api/regime')
+    fetch(`/api/regime?_t=${Date.now()}`, { cache: 'no-store' })
       .then(r => r.json())
       .then(d => {
         if (d && !d.error) setRegime(d);

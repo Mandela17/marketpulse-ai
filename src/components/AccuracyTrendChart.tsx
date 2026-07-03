@@ -11,7 +11,7 @@ export default function AccuracyTrendChart() {
   const [containerWidth, setContainerWidth] = useState(500);
 
   useEffect(() => {
-    fetch('/api/predictions?type=trend&weeks=12')
+    fetch(`/api/predictions?type=trend&weeks=12&_t=${Date.now()}`, { cache: 'no-store' })
       .then(r => r.json())
       .then(d => {
         if (d.trend) setTrend(d.trend);

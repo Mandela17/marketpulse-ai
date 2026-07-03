@@ -79,10 +79,12 @@ export default function Dashboard() {
 
     async function fetchData() {
       try {
+        const t = Date.now();
+        const opts = { cache: 'no-store' as RequestCache };
         const [newsRes, marketRes, accuracyRes] = await Promise.all([
-          fetch('/api/news').then(r => r.json()).catch(() => null),
-          fetch('/api/market').then(r => r.json()).catch(() => null),
-          fetch('/api/predictions?type=accuracy').then(r => r.json()).catch(() => null),
+          fetch(`/api/news?_t=${t}`, opts).then(r => r.json()).catch(() => null),
+          fetch(`/api/market?_t=${t}`, opts).then(r => r.json()).catch(() => null),
+          fetch(`/api/predictions?type=accuracy&_t=${t}`, opts).then(r => r.json()).catch(() => null),
         ]);
 
         if (accuracyRes?.overall?.totalResolved > 0) {

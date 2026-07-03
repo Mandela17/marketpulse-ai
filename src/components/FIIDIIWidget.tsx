@@ -13,7 +13,7 @@ export default function FIIDIIWidget() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/fii-dii')
+    fetch(`/api/fii-dii?_t=${Date.now()}`, { cache: 'no-store' })
       .then(r => r.json())
       .then(d => { setData(d); setLoading(false); })
       .catch(() => setLoading(false));
