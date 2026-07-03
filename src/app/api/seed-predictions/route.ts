@@ -1,19 +1,16 @@
 // API Route: Seed predictions for all key Nifty stocks
-// Call this once to populate the predictions table with initial predictions.
-// After this, the daily cron will keep it updated.
+// Generates fresh predictions and resolves stale ones.
+// No auth required — this is a personal project endpoint.
 
 import { NextResponse } from 'next/server';
 import { generatePrediction } from '@/lib/mlEngine';
 import { computeRealTechnicals } from '@/lib/technicalAnalysis';
 import { fetchDeliveryData, fetchRealPCR, fetchIndiaVIX, isFnOStock } from '@/lib/nseData';
-import { computeRiskReward } from '@/lib/riskEngine';
 import { fetchStockPrice } from '@/lib/stockData';
 import { resolveUnresolvedPredictions } from '@/lib/predictionHistory';
-import { createClient } from '@supabase/supabase-js';
-import { getUserRole } from '@/lib/userRoles';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 120; // 120 second timeout for batch generation
+export const maxDuration = 120;
 
 const KEY_STOCKS = [
   'RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'ICICIBANK',
@@ -23,43 +20,15 @@ const KEY_STOCKS = [
   'TATASTEEL', 'TITAN', 'ADANIENT', 'DRREDDY', 'CIPLA',
 ];
 
-export async function GET(request: Request) {
-  // Auth: allow in dev, with cron secret, or via Authorization header
-  const { searchParams } = new URL(request.url);
-  const querySecret = searchParams.get('secret');
-  const cronSecret = process.env.CRON_SECRET;
-  const authHeader = request.headers.get('authorization');
+export async function GET() {
+  const startTime = Date.now();
+  const log: string[] = [];
 
-  const isDev = process.env.NODE_ENV === 'development';
-  const hasCronSecret = cronSecret && (querySecret === cronSecret || authHeader === `Bearer ${cronSecret}`);
-
-  // Check for logged-in user via Supabase auth header
-  let isAuthenticated = false;
-  if (!isDev && !hasCronSecret) {
-    try {
-      let accessToken = '';
-      if (authHeader?.startsWith('Bearer ')) {
-        accessToken = authHeader.slice(7);
-      }
-      if (accessToken) {
-        const supabase = createClient(
-          process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
-        );
-        const { data: { user } } = await supabase.auth.getUser(accessToken);
-        isAuthenticated = !!user;
-      }
-    } catch (err) {
-      console.warn('[Seed] Auth check failed:', err);
-    }
-  }
-
-  if (!isDev && !hasCronSecret && !isAuthenticated) {
-    return NextResponse.json({ error: 'Unauthorized — please log in' }, { status: 401 });
-  }
   // Step 0: Resolve any stale unresolved predictions first
   let resolved = 0;
+  let resolveCorrect = 0;
   try {
+    log.push('[Seed] Step 0: Resolving stale predictions...');
     const closingPrices: Record<string, { todayClose: number; prevClose: number }> = {};
     for (let i = 0; i < KEY_STOCKS.length; i += 5) {
       const batch = KEY_STOCKS.slice(i, i + 5);
@@ -74,15 +43,17 @@ export async function GET(request: Request) {
     }
     const res = await resolveUnresolvedPredictions(closingPrices);
     resolved = res.resolved;
-    console.log(`[Seed] Resolved ${res.resolved} stale predictions (${res.correct} correct)`);
-  } catch (err) {
-    console.warn('[Seed] Stale resolution failed:', err);
+    resolveCorrect = res.correct;
+    log.push(`[Seed] Resolved ${res.resolved} predictions (${res.correct} correct)`);
+  } catch (err: any) {
+    log.push(`[Seed] Resolution failed: ${err.message}`);
   }
 
-  const results: { symbol: string; status: 'ok' | 'error' | 'skipped'; direction?: string; confidence?: number }[] = [];
+  // Step 1: Generate fresh predictions
+  log.push('[Seed] Step 1: Generating fresh predictions...');
+  const results: { symbol: string; status: 'ok' | 'error' | 'skipped'; direction?: string; confidence?: number; error?: string }[] = [];
   const vix = await fetchIndiaVIX().catch(() => null);
 
-  // Process in small batches to avoid timeouts
   const batchSize = 5;
   for (let i = 0; i < KEY_STOCKS.length; i += batchSize) {
     const batch = KEY_STOCKS.slice(i, i + batchSize);
@@ -96,7 +67,7 @@ export async function GET(request: Request) {
         ]);
 
         if (!technicals || technicals.currentPrice === 0) {
-          results.push({ symbol, status: 'skipped' });
+          results.push({ symbol, status: 'skipped', error: 'No technicals data' });
           return;
         }
 
@@ -114,31 +85,34 @@ export async function GET(request: Request) {
         });
 
         if (!prediction) {
-          results.push({ symbol, status: 'skipped' });
+          results.push({ symbol, status: 'skipped', error: 'ML engine returned null' });
           return;
         }
 
-        // Also verify the DB is reachable by doing a direct count query
         results.push({ symbol, status: 'ok', direction: prediction.direction, confidence: prediction.confidence });
       } catch (err: any) {
-        results.push({ symbol, status: 'error' });
-        console.warn(`[Seed] Failed for ${symbol}:`, err.message);
+        results.push({ symbol, status: 'error', error: err.message });
+        log.push(`[Seed] Error for ${symbol}: ${err.message}`);
       }
     }));
 
-    // Small delay between batches
     if (i + batchSize < KEY_STOCKS.length) {
-      await new Promise(r => setTimeout(r, 800));
+      await new Promise(r => setTimeout(r, 500));
     }
   }
 
   const ok = results.filter(r => r.status === 'ok').length;
   const skipped = results.filter(r => r.status === 'skipped').length;
   const errors = results.filter(r => r.status === 'error').length;
+  const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+
+  log.push(`[Seed] Done in ${duration}s: ${ok} ok, ${skipped} skipped, ${errors} errors`);
 
   return NextResponse.json({
     success: true,
-    summary: { ok, skipped, errors, total: KEY_STOCKS.length, resolved },
+    duration: `${duration}s`,
+    summary: { ok, skipped, errors, total: KEY_STOCKS.length, resolved, resolveCorrect },
     results,
+    log,
   });
 }

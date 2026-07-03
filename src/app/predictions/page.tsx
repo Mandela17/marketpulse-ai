@@ -75,27 +75,17 @@ export default function PredictionsDashboard() {
     setSeeding(true);
     setSeedResult(null);
     try {
-      // Get Supabase access token from localStorage for admin auth
-      const headers: Record<string, string> = {};
-      try {
-        const storageKeys = Object.keys(localStorage);
-        const sbKey = storageKeys.find(k => k.startsWith('sb-') && k.endsWith('-auth-token'));
-        if (sbKey) {
-          const parsed = JSON.parse(localStorage.getItem(sbKey) || '{}');
-          const accessToken = parsed?.access_token || parsed?.[0]?.access_token;
-          if (accessToken) {
-            headers['Authorization'] = `Bearer ${accessToken}`;
-          }
-        }
-      } catch {}
-
-      const res = await fetch('/api/seed-predictions', { headers });
+      const res = await fetch(`/api/seed-predictions?_t=${Date.now()}`, { cache: 'no-store' });
       const data = await res.json();
-      setSeedResult(data);
+      if (!res.ok) {
+        setSeedResult({ success: false, error: data.error || `HTTP ${res.status}` });
+      } else {
+        setSeedResult(data);
+      }
       // Re-fetch data after seeding
       await fetchData();
-    } catch (err) {
-      setSeedResult({ success: false, error: 'Failed to seed predictions' });
+    } catch (err: any) {
+      setSeedResult({ success: false, error: `Network error: ${err.message}` });
     } finally {
       setSeeding(false);
     }
@@ -154,9 +144,12 @@ export default function PredictionsDashboard() {
 
       {/* Stale Data Warning */}
       {!loading && activePredictions.length > 0 && (() => {
-        const latestPrediction = activePredictions[0];
-        const predTime = new Date(latestPrediction.predictedAt || latestPrediction.predicted_at || 0);
-        const hoursOld = (Date.now() - predTime.getTime()) / (1000 * 60 * 60);
+        // Find the NEWEST prediction timestamp (predictions are sorted by confidence, not time)
+        const newestTime = Math.max(...activePredictions.map(p => {
+          const t = p.predictedAt || p.predicted_at;
+          return t ? new Date(t).getTime() : 0;
+        }));
+        const hoursOld = (Date.now() - newestTime) / (1000 * 60 * 60);
         if (hoursOld > 24) {
           return (
             <div className="p-4 rounded-xl border animate-fade-in" style={{ background: 'rgba(255,77,106,0.08)', borderColor: 'rgba(255,77,106,0.3)' }}>
@@ -279,18 +272,29 @@ export default function PredictionsDashboard() {
           {seedResult.success ? (
             <div>
               <p className="text-sm font-bold" style={{ color: 'var(--accent-green)' }}>
-                ✅ Generated predictions: {seedResult.summary.ok} stocks predicted, {seedResult.summary.skipped} skipped, {seedResult.summary.errors} errors
+                ✅ Generated {seedResult.summary?.ok || 0}/{seedResult.summary?.total || 0} predictions in {seedResult.duration || '?'}
               </p>
-              {seedResult.summary.resolved > 0 && (
+              {(seedResult.summary?.resolved > 0) && (
                 <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
-                  📊 Also resolved {seedResult.summary.resolved} stale predictions for accuracy tracking
+                  📊 Resolved {seedResult.summary.resolved} stale predictions ({seedResult.summary.resolveCorrect} correct)
+                </p>
+              )}
+              {(seedResult.summary?.skipped > 0 || seedResult.summary?.errors > 0) && (
+                <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+                  ⚠ {seedResult.summary.skipped} skipped, {seedResult.summary.errors} errors
+                  {seedResult.results?.filter((r: any) => r.status === 'error').map((r: any) => ` [${r.symbol}: ${r.error}]`).join('')}
                 </p>
               )}
             </div>
           ) : (
-            <p className="text-sm font-bold" style={{ color: 'var(--accent-red)' }}>
-              ❌ {seedResult.error}
-            </p>
+            <div>
+              <p className="text-sm font-bold" style={{ color: 'var(--accent-red)' }}>
+                ❌ {seedResult.error || 'Unknown error'}
+              </p>
+              <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>
+                Check browser console (F12) for details
+              </p>
+            </div>
           )}
         </div>
       )}
