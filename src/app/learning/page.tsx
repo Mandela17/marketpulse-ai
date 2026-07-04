@@ -29,6 +29,10 @@ const modules = [
   { id: 'algorithm', label: 'App Algorithm & Grading', icon: '🤖', color: '#00d68f' },
   { id: 'risk', label: 'Risk & Kelly Strategy', icon: '🛡️', color: '#fbbf24' },
   { id: 'workflow', label: 'Daily Trader Workflow', icon: '📅', color: '#ff6b6b' },
+  { id: 'patterns', label: 'Chart Patterns & Breakouts', icon: '📈', color: '#f43f5e' },
+  { id: 'fundamentals', label: 'Fundamentals & Screening', icon: '🏛️', color: '#10b981' },
+  { id: 'sentiment', label: 'Sentiment & Hype Cycles', icon: '💬', color: '#a78bfa' },
+  { id: 'greeks', label: 'Option Greeks & Hedging', icon: '🛡️', color: '#ec4899' },
 ];
 
 // ─── Quiz Data ──────────────────────────────────────────────────────
@@ -110,6 +114,62 @@ const quizzes: Record<string, QuizQuestion[]> = {
       explanation: 'The #1 rule of selective trading: NO TRADE is a valid trade. If the system shows no A/B signals, the disciplined action is to sit on your hands. Trading C-grade signals destroys your edge.',
     },
   ],
+  patterns: [
+    {
+      question: 'A breakout occurs on a Bull Flag, but the daily volume ratio is 0.7x. Is this valid?',
+      options: ['Yes — the pattern shape is all that matters', 'No — low volume breakout is likely a bull trap', 'Yes — volume is a lagging indicator', 'Only if PCR is bullish'],
+      correct: 1,
+      explanation: 'Genuine breakouts require institutional participation, which reflects in above-average volume (volume ratio > 1.5x). A low-volume breakout has high chances of failing (bull trap).',
+    },
+    {
+      question: 'During a breakout above the neckline of an Inverse Head & Shoulders, what OI action confirms the move?',
+      options: ['Price Up + OI Down (Short Covering)', 'Price Up + OI Up (New Long Positions)', 'Price Down + OI Up', 'No change in OI'],
+      correct: 1,
+      explanation: 'Price Up + OI Up confirms fresh long build-up, showing that buyers are initiating new positions with conviction to support the breakout.',
+    },
+  ],
+  fundamentals: [
+    {
+      question: 'Why is ROCE (Return on Capital Employed) preferred over ROE for capital-intensive companies?',
+      options: ['ROE ignores debt capital, while ROCE evaluates returns on both equity and debt', 'ROCE is easier to calculate', 'ROE is always lower than ROCE', 'ROCE is only used in IT sectors'],
+      correct: 0,
+      explanation: 'Capital-intensive companies (like Power, Energy, or Steel) use significant debt to fund operations. ROE only looks at return on equity. ROCE gives a true picture of capital efficiency by including debt.',
+    },
+    {
+      question: 'If a stock has an ROE of 24% and a Debt-to-Equity of 0.25, how does the model evaluate it?',
+      options: ['High risk due to high ROE', 'Excellent fundamental profile — low leverage and high profitability', 'Average profile', 'Risky because of debt'],
+      correct: 1,
+      explanation: 'An ROE > 18% shows high profitability, and Debt-to-Equity < 0.5 indicates minimal leverage risk. This is the optimal combination for high-grade swing trading signals.',
+    },
+  ],
+  sentiment: [
+    {
+      question: 'A critical positive news article was published 24 hours ago. What weight does it carry in the model compared to news published 2 hours ago?',
+      options: ['100% weight — it remains active for 48 hours', 'Decayed weight (significantly reduced)', '0% weight — it expires in 6 hours', 'Increased weight due to confirmation'],
+      correct: 1,
+      explanation: 'The model applies an exponential decay factor. News impact decays rapidly; at 24 hours, the weight drops significantly as market reaction has already occurred.',
+    },
+    {
+      question: 'Price is rising rapidly but Delivery Volume % drops to 15%. What does this diverge signal?',
+      options: ['Strong institutional buying', 'Retail-driven hype / speculation (high risk of reversal)', 'Strong option writing support', 'Long-term investment phase'],
+      correct: 1,
+      explanation: 'Low delivery % (<25%) during a price rise indicates speculative intraday day-trading, not institutional accumulation. This represents a retail hype cycle vulnerable to sharp pullbacks.',
+    },
+  ],
+  greeks: [
+    {
+      question: 'Which Greek measures the rate of decay of an option contract\'s value over time?',
+      options: ['Delta', 'Theta', 'Gamma', 'Vega'],
+      correct: 1,
+      explanation: 'Theta represents time decay. It is the amount an option\'s price declines daily, assuming no change in price or volatility. Theta decay accelerates exponentially as expiry approaches.',
+    },
+    {
+      question: 'You own 1,000 shares of RELIANCE. To hedge against a sudden market drop, which options strategy should you use?',
+      options: ['Covered Call (Sell Call)', 'Protective Put (Buy Put)', 'Bull Call Spread', 'Sell naked Puts'],
+      correct: 1,
+      explanation: 'Buying a Protective Put acts as insurance. If the stock falls below the strike price, the Put option gains value, offsetting the losses in the underlying shares.',
+    },
+  ],
 };
 
 // ─── OI Decoder Data ────────────────────────────────────────────────
@@ -130,6 +190,7 @@ export default function LearningAcademy() {
   const [selectedOI, setSelectedOI] = useState<number | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  // Confluence calculator state
   type ConfluenceKey = 'Technical' | 'Bollinger' | 'Volume' | 'Institutional' | 'Sentiment' | 'Options';
   const [confluenceState, setConfluenceState] = useState<Record<ConfluenceKey, boolean>>({
     Technical: false, Bollinger: false, Volume: false,
@@ -141,6 +202,20 @@ export default function LearningAcademy() {
   // Kelly calculator state
   const [kellyCapital, setKellyCapital] = useState(100000);
   const [kellySizing, setKellySizing] = useState(2.5);
+
+  // Module 6: Pattern Simulator State
+  const [selectedPattern, setSelectedPattern] = useState<'double_bottom' | 'double_top' | 'bull_flag' | 'head_shoulders'>('double_bottom');
+
+  // Module 7: Fundamental Calculator State
+  const [calcRoe, setCalcRoe] = useState(15);
+  const [calcDebtToEquity, setCalcDebtToEquity] = useState(0.8);
+  const [calcRoce, setCalcRoce] = useState(16);
+
+  // Module 8: Sentiment Decay State
+  const [decayHours, setDecayHours] = useState(12);
+
+  // Module 9: Theta Decay State
+  const [thetaDays, setThetaDays] = useState(20);
 
   // Progress
   const progress = Math.round((completedModules.size / modules.length) * 100);
@@ -180,11 +255,29 @@ export default function LearningAcademy() {
     return 'F';
   })();
 
+  // Fundamental check logic
+  const getFundHealth = () => {
+    if (calcRoe >= 18 && calcDebtToEquity <= 0.4 && calcRoce >= 18) {
+      return { status: 'Excellent', color: '#10b981', advice: 'Excellent balance sheet profile. High profitability with minimal leverage risk. Fits Grade A setup benchmarks.' };
+    }
+    if (calcRoe >= 12 && calcDebtToEquity <= 0.9 && calcRoce >= 12) {
+      return { status: 'Good / Moderate', color: '#fbbf24', advice: 'Steady financials. Acceptable debt margins, average profitability. Fits Grade B setups under strong technical confluence.' };
+    }
+    return { status: 'Risky / Avoid', color: '#ef4444', advice: 'Elevated leverage or low margins. Model penalizes low capital efficiency. Avoid swing setups unless strictly short-term.' };
+  };
+  const healthInfo = getFundHealth();
+
+  // News Decay weight calculation
+  const calculatedDecayWeight = Math.round(100 * Math.exp(-decayHours / 12));
+
+  // Theta Decay value calculation
+  const calculatedThetaValue = Math.round(100 * Math.pow(thetaDays / 30, 2));
+
   // ─── Formula Component ──────────────────────────────────────────────
 
-  const Formula = ({ label, formula, desc }: { label: string; formula: string; desc: string }) => (
-    <div className="my-4 p-4 rounded-xl" style={{ background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.15)' }}>
-      <p className="text-[10px] font-bold uppercase tracking-wider mb-2" style={{ color: 'var(--accent-blue)' }}>📐 {label}</p>
+  const Formula = ({ label, formula, desc, themeColor = '#3b82f6' }: { label: string; formula: string; desc: string; themeColor?: string }) => (
+    <div className="my-4 p-4 rounded-xl" style={{ background: `${themeColor}09`, border: `1px solid ${themeColor}26` }}>
+      <p className="text-[10px] font-bold uppercase tracking-wider mb-2" style={{ color: themeColor }}>📐 {label}</p>
       <pre className="text-sm font-mono font-bold text-white mb-2 overflow-x-auto">{formula}</pre>
       <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>{desc}</p>
     </div>
@@ -207,7 +300,6 @@ export default function LearningAcademy() {
       <p className="text-xs font-bold mb-3 text-white">{title}</p>
       <div className="relative h-32 flex items-end gap-[2px]">
         {type === 'ema' ? (
-          // EMA Crossover visualization
           <>
             {[38,35,32,30,28,31,34,38,42,47,52,55,58,62,65,70,73,75,72,68].map((h, i) => (
               <div key={i} className="flex-1 rounded-t-sm transition-all" style={{
@@ -215,7 +307,6 @@ export default function LearningAcademy() {
                 background: i < 10 ? 'rgba(255,77,106,0.4)' : 'rgba(0,214,143,0.4)',
               }} />
             ))}
-            {/* EMA lines overlay */}
             <div className="absolute inset-0 flex items-center">
               <svg width="100%" height="100%" viewBox="0 0 200 100" preserveAspectRatio="none">
                 <polyline points="0,62 20,65 40,68 60,70 80,68 100,65 120,60 140,55 160,48 180,42 200,38" fill="none" stroke="#3b82f6" strokeWidth="2" />
@@ -231,7 +322,6 @@ export default function LearningAcademy() {
             </div>
           </>
         ) : (
-          // Bollinger Band visualization
           <>
             {[50,48,45,40,35,30,28,25,28,32,38,42,48,52,55,58,55,52,50,48].map((h, i) => (
               <div key={i} className="flex-1 rounded-t-sm" style={{
@@ -239,7 +329,6 @@ export default function LearningAcademy() {
                 background: i >= 5 && i <= 8 ? 'rgba(0,214,143,0.5)' : 'rgba(255,255,255,0.1)',
               }} />
             ))}
-            {/* BB bands overlay */}
             <div className="absolute inset-0">
               <svg width="100%" height="100%" viewBox="0 0 200 100" preserveAspectRatio="none">
                 <polyline points="0,20 40,22 60,25 80,30 100,28 120,22 160,18 200,20" fill="none" stroke="rgba(139,92,246,0.5)" strokeWidth="1" />
@@ -329,9 +418,8 @@ export default function LearningAcademy() {
         <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Technical analysis is the foundation of algorithmic trading. These indicators form the "Technical" category in our 6-factor confluence system.</p>
       </div>
 
-      {/* RSI */}
       <section className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
-        <h3 className="text-sm font-bold text-white mb-2">1️⃣ RSI — Relative Strength Index</h3>
+        <h3 className="text-sm font-bold text-white mb-2 text-blue-400">1️⃣ RSI — Relative Strength Index</h3>
         <p className="text-xs mb-3" style={{ color: 'var(--text-secondary)' }}>
           Developed by J. Welles Wilder in 1978, RSI measures the speed and magnitude of price changes to identify overbought or oversold conditions. It oscillates between 0 and 100.
         </p>
@@ -355,91 +443,34 @@ export default function LearningAcademy() {
 
       {/* MACD */}
       <section className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
-        <h3 className="text-sm font-bold text-white mb-2">2️⃣ MACD — Moving Average Convergence Divergence</h3>
+        <h3 className="text-sm font-bold text-white mb-2 text-blue-400">2️⃣ MACD — Moving Average Convergence Divergence</h3>
         <p className="text-xs mb-3" style={{ color: 'var(--text-secondary)' }}>
           Created by Gerald Appel, MACD shows the relationship between two EMAs. It's a trend-following momentum indicator that reveals changes in the strength, direction, momentum, and duration of a trend.
         </p>
         <Formula
           label="MACD Components"
           formula={`MACD Line    = EMA(12) - EMA(26)\nSignal Line  = EMA(9) of MACD Line\nHistogram    = MACD Line - Signal Line`}
-          desc="The histogram visualizes momentum. When the histogram grows, momentum is accelerating. When it shrinks, momentum is decelerating."
+          desc="The histogram visualizes momentum. When the histogram grows, momentum is accelerating. When it portfolio decays, it alerts."
         />
         <div className="grid grid-cols-2 gap-3">
           <SignalBox icon="📈" title="Bullish Crossover" signal="MACD crosses above Signal" color="#00d68f" />
           <SignalBox icon="📉" title="Bearish Crossover" signal="MACD crosses below Signal" color="#ff4d6a" />
         </div>
-        <div className="mt-3 p-3 rounded-lg text-xs" style={{ background: 'rgba(0,214,143,0.04)', color: 'var(--text-secondary)' }}>
-          <span className="font-bold text-green-400">📱 In This App:</span> Positive MACD histogram = +1 for Technical confluence category (bullish). Negative histogram = -1 (bearish). Used alongside RSI and EMA trend for the combined Technical score.
-        </div>
       </section>
 
       {/* EMA */}
       <section className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
-        <h3 className="text-sm font-bold text-white mb-2">3️⃣ EMA 20 & EMA 50 — Exponential Moving Averages</h3>
+        <h3 className="text-sm font-bold text-white mb-2 text-blue-400">3️⃣ EMA 20 & EMA 50 — Exponential Moving Averages</h3>
         <p className="text-xs mb-3" style={{ color: 'var(--text-secondary)' }}>
-          Unlike Simple Moving Averages (SMA) which weight all prices equally, EMAs give more weight to recent prices, making them faster to react. The 20-day and 50-day EMAs are the most widely used by institutional traders.
+          EMAs react faster to price updates. The 20-day and 50-day EMAs are key levels of momentum support.
         </p>
-        <Formula
-          label="EMA Calculation"
-          formula={`Multiplier = 2 / (Period + 1)\n\nEMA(20) multiplier = 2/21 = 0.0952\nEMA(50) multiplier = 2/51 = 0.0392\n\nEMA = (Close - Previous EMA) × Multiplier + Previous EMA`}
-          desc="Higher multiplier = faster reaction. EMA(20) reacts to price changes 2.4x faster than EMA(50)."
-        />
         <ChartVisual title="EMA 20/50 Golden Cross — Bullish Signal" type="ema" />
-        <div className="grid grid-cols-2 gap-3">
-          <SignalBox icon="✨" title="Golden Cross" signal="EMA20 crosses above EMA50" color="#00d68f" />
-          <SignalBox icon="💀" title="Death Cross" signal="EMA20 crosses below EMA50" color="#ff4d6a" />
-        </div>
-        <div className="mt-3 p-3 rounded-lg text-xs" style={{ background: 'rgba(0,214,143,0.04)', color: 'var(--text-secondary)' }}>
-          <span className="font-bold text-green-400">📱 In This App:</span> Price &gt; EMA20 = +1 bullish score in Technical category. Price &lt; EMA20 = -1 bearish. This is combined with RSI and MACD for the overall Technical confluence signal.
-        </div>
       </section>
 
       {/* Bollinger Bands */}
       <section className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
-        <h3 className="text-sm font-bold text-white mb-2">4️⃣ Bollinger Bands — Volatility & Mean Reversion</h3>
-        <p className="text-xs mb-3" style={{ color: 'var(--text-secondary)' }}>
-          Created by John Bollinger, these bands expand and contract based on volatility (standard deviation). Prices tend to revert to the mean (middle band). Squeezes signal upcoming breakouts.
-        </p>
-        <Formula
-          label="Bollinger Bands"
-          formula={`Middle Band = SMA(20)\nUpper Band  = SMA(20) + 2 × σ(20)\nLower Band  = SMA(20) - 2 × σ(20)\n\nσ(20) = Standard Deviation of closing prices over 20 periods`}
-          desc="95% of price action occurs within 2 standard deviations. Prices touching or exceeding the bands are considered extreme."
-        />
+        <h3 className="text-sm font-bold text-white mb-2 text-blue-400">4️⃣ Bollinger Bands — Volatility & Mean Reversion</h3>
         <ChartVisual title="Bollinger Band Mean Reversion — Price bouncing off lower band" type="bollinger" />
-        <div className="mt-3 p-3 rounded-lg text-xs" style={{ background: 'rgba(0,214,143,0.04)', color: 'var(--text-secondary)' }}>
-          <span className="font-bold text-green-400">📱 In This App:</span> Price below lower band = "Bollinger" confluence category scores bullish. Price above upper band = bearish. This is an INDEPENDENT category from Technical (RSI/MACD/EMA) to avoid double-counting.
-        </div>
-      </section>
-
-      {/* ATR */}
-      <section className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
-        <h3 className="text-sm font-bold text-white mb-2">5️⃣ ATR — Average True Range</h3>
-        <p className="text-xs mb-3" style={{ color: 'var(--text-secondary)' }}>
-          ATR measures volatility, not direction. It tells you how much a stock typically moves per day. Used for setting stop-loss and target levels proportional to the stock's normal range.
-        </p>
-        <Formula
-          label="ATR Formula"
-          formula={`True Range = MAX(\n  High - Low,\n  |High - Previous Close|,\n  |Low - Previous Close|\n)\n\nATR(14) = Wilder's smoothed average of True Range over 14 periods`}
-          desc="If ATR = ₹15 for a stock trading at ₹1500, it means the stock moves ~1% per day on average."
-        />
-        <div className="mt-3 p-3 rounded-lg text-xs" style={{ background: 'rgba(0,214,143,0.04)', color: 'var(--text-secondary)' }}>
-          <span className="font-bold text-green-400">📱 In This App:</span> ATR is the backbone of risk management. Stop-loss = 1×ATR, Target 1 = 1×ATR, Target 2 = 2×ATR. The risk engine adjusts ATR by a VIX multiplier (1.0–2.2x) depending on market fear levels.
-        </div>
-      </section>
-
-      {/* Volume Profile */}
-      <section className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
-        <h3 className="text-sm font-bold text-white mb-2">6️⃣ Volume Profile & Point of Control (POC)</h3>
-        <p className="text-xs mb-3" style={{ color: 'var(--text-secondary)' }}>
-          Volume Profile shows the amount of trading activity at different price levels. The Point of Control (POC) is the price level with the highest traded volume — it acts as a "fair value" magnet.
-        </p>
-        <div className="grid grid-cols-2 gap-3 mb-3">
-          <SignalBox icon="🏔️" title="High Volume Node (HVN)" signal="Support/Resistance zone — price tends to consolidate here" color="#3b82f6" />
-          <SignalBox icon="🏜️" title="Low Volume Node (LVN)" signal="Price moves quickly through — breakout/breakdown zone" color="#ff6b6b" />
-        </div>
-        <div className="p-3 rounded-lg text-xs" style={{ background: 'rgba(0,214,143,0.04)', color: 'var(--text-secondary)' }}>
-          <span className="font-bold text-green-400">📱 In This App:</span> Volume ratio (today's volume / 20-day average) is used in the "Volume" confluence category. Volume &gt; 1.3x in an uptrend = bullish confirmation. High delivery% (&gt;55%) signals genuine institutional buying, not speculative trading.
-        </div>
       </section>
 
       <div className="text-center">
@@ -457,54 +488,28 @@ export default function LearningAcademy() {
     <div className="space-y-6">
       <div>
         <h2 className="text-lg font-bold text-white mb-1">📋 Module 2: Derivatives & Smart Money Tracking</h2>
-        <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Options and futures data reveals what institutional "smart money" is doing — information not visible in price charts alone.</p>
+        <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Options and futures data reveals what institutional "smart money" is doing.</p>
       </div>
 
       {/* PCR */}
       <section className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
-        <h3 className="text-sm font-bold text-white mb-2">1️⃣ PCR — Put-Call Ratio</h3>
-        <p className="text-xs mb-3" style={{ color: 'var(--text-secondary)' }}>
-          PCR measures the ratio of put options to call options. It's a contrarian indicator: when everyone is buying puts (bearish), the market often reverses upward, and vice versa.
-        </p>
+        <h3 className="text-sm font-bold text-white mb-2 text-purple-400">1️⃣ PCR — Put-Call Ratio</h3>
         <Formula
           label="PCR Calculation"
-          formula={`PCR = Total Put Open Interest / Total Call Open Interest\n\nBullish Zone:  PCR > 1.2 (more puts = support below)\nNeutral Zone:  0.8 < PCR < 1.2\nBearish Zone:  PCR < 0.7 (more calls = resistance above)`}
-          desc="High PCR means option sellers are writing puts at lower strikes, providing a floor. They're betting the market WON'T fall that far."
+          formula={`PCR = Total Put Open Interest / Total Call Open Interest\n\nBullish Zone:  PCR > 1.2 (more puts = support below)\nNeutral Zone:  0.8 < PCR < 1.2\nBearish Zone:  PCR < 0.7 (more calls = resistance)`}
+          desc="High PCR means option sellers are writing puts at lower strikes, providing a floor."
         />
         <div className="grid grid-cols-3 gap-3">
           <SignalBox icon="🐂" title="Bullish" signal="PCR > 1.2" color="#00d68f" />
           <SignalBox icon="⚖️" title="Neutral" signal="0.8 – 1.2" color="#888" />
           <SignalBox icon="🐻" title="Bearish" signal="PCR < 0.7" color="#ff4d6a" />
         </div>
-        <div className="mt-3 p-3 rounded-lg text-xs" style={{ background: 'rgba(0,214,143,0.04)', color: 'var(--text-secondary)' }}>
-          <span className="font-bold text-green-400">📱 In This App:</span> PCR &gt; 1.2 scores +1 in the "Options" confluence category. PCR &lt; 0.7 scores -1. Only calculated for F&O stocks (not all 25 are in F&O segment).
-        </div>
       </section>
 
-      {/* Max Pain */}
+      {/* OI Dynamics */}
       <section className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
-        <h3 className="text-sm font-bold text-white mb-2">2️⃣ Max Pain Theory</h3>
-        <p className="text-xs mb-3" style={{ color: 'var(--text-secondary)' }}>
-          Max Pain is the strike price where option holders (buyers) would lose the MAXIMUM amount of money. Option sellers (institutional players) have an incentive to push the price toward Max Pain on expiry day.
-        </p>
-        <Formula
-          label="Max Pain Concept"
-          formula={`Max Pain Strike = argmin Σ (Call Pain + Put Pain)\n\nCall Pain at strike K = max(0, Price - K) × Call OI at K\nPut Pain at strike K  = max(0, K - Price) × Put OI at K\n\nThe strike that minimizes total payout to option buyers = Max Pain`}
-          desc="On expiry day, prices gravitate toward Max Pain because option sellers actively hedge to minimize their payout."
-        />
-        <div className="mt-3 p-3 rounded-lg text-xs" style={{ background: 'rgba(0,214,143,0.04)', color: 'var(--text-secondary)' }}>
-          <span className="font-bold text-green-400">📱 In This App:</span> If the current price is BELOW Max Pain, the "Options" category gets a +0.5 bullish score (mean-reversion pull upward). Above Max Pain = -0.5 (downward pull). Strongest on expiry days (Thursday).
-        </div>
-      </section>
-
-      {/* OI Dynamics — Interactive Matrix */}
-      <section className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
-        <h3 className="text-sm font-bold text-white mb-2">3️⃣ Open Interest (OI) Dynamics — Interactive Decoder</h3>
-        <p className="text-xs mb-4" style={{ color: 'var(--text-secondary)' }}>
-          Open Interest = total number of outstanding derivative contracts. Changes in OI combined with price direction reveal whether big players are creating new positions or closing existing ones.
-        </p>
-
-        <p className="text-[10px] font-bold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>👇 Click a combination to see what it means:</p>
+        <h3 className="text-sm font-bold text-white mb-2 text-purple-400">2️⃣ Open Interest (OI) Dynamics — Interactive Decoder</h3>
+        <p className="text-xs mb-4" style={{ color: 'var(--text-secondary)' }}>Click Price/OI combos to decode market dynamics:</p>
 
         <div className="grid grid-cols-2 gap-3 mb-4">
           {oiMatrix.map((cell, idx) => (
@@ -531,42 +536,16 @@ export default function LearningAcademy() {
         </div>
 
         {selectedOI !== null && (
-          <div className="p-4 rounded-lg animate-fade-in" style={{
+          <div className="p-4 rounded-lg" style={{
             background: oiMatrix[selectedOI].type === 'bullish' ? 'rgba(0,214,143,0.06)' : 'rgba(255,77,106,0.06)',
             border: `1px solid ${oiMatrix[selectedOI].type === 'bullish' ? 'rgba(0,214,143,0.2)' : 'rgba(255,77,106,0.2)'}`,
           }}>
             <p className="text-xs font-bold mb-2" style={{ color: oiMatrix[selectedOI].type === 'bullish' ? '#00d68f' : '#ff4d6a' }}>
-              {oiMatrix[selectedOI].icon} {oiMatrix[selectedOI].label} — {oiMatrix[selectedOI].type === 'bullish' ? 'BULLISH' : 'BEARISH'}
+              {oiMatrix[selectedOI].icon} {oiMatrix[selectedOI].label}
             </p>
             <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>{oiMatrix[selectedOI].explanation}</p>
           </div>
         )}
-      </section>
-
-      {/* FII/DII */}
-      <section className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
-        <h3 className="text-sm font-bold text-white mb-2">4️⃣ FII & DII Net Flows — Following Smart Money</h3>
-        <p className="text-xs mb-3" style={{ color: 'var(--text-secondary)' }}>
-          Foreign Institutional Investors (FII) and Domestic Institutional Investors (DII) move billions of rupees daily. Their flows are the single most important driver of Indian equity markets.
-        </p>
-        <div className="grid grid-cols-2 gap-3 mb-3">
-          <div className="p-3 rounded-lg" style={{ background: 'rgba(0,214,143,0.04)', border: '1px solid rgba(0,214,143,0.15)' }}>
-            <p className="text-xs font-bold text-green-400 mb-1">🏛️ FII Buying &gt; ₹1000 Cr</p>
-            <p className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Strong institutional inflow. Foreign capital entering India. Bullish for markets and INR.</p>
-          </div>
-          <div className="p-3 rounded-lg" style={{ background: 'rgba(255,77,106,0.04)', border: '1px solid rgba(255,77,106,0.15)' }}>
-            <p className="text-xs font-bold text-red-400 mb-1">🏛️ FII Selling &gt; ₹1000 Cr</p>
-            <p className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Institutional outflow. Foreign capital leaving India. Bearish pressure on markets.</p>
-          </div>
-        </div>
-        <Formula
-          label="FII Velocity (App Feature)"
-          formula={`FII Velocity = (5-day avg FII net) - (10-day avg FII net)\n\nPositive velocity = FII buying is ACCELERATING\nNegative velocity = FII selling is ACCELERATING\n\nFlow Divergence = FII velocity × DII velocity\nNegative divergence = FII and DII moving in opposite directions`}
-          desc="FII velocity tells you the rate of change of institutional flow, not just the absolute level. Accelerating flows are more significant than stable ones."
-        />
-        <div className="p-3 rounded-lg text-xs" style={{ background: 'rgba(0,214,143,0.04)', color: 'var(--text-secondary)' }}>
-          <span className="font-bold text-green-400">📱 In This App:</span> FII net &gt; ₹500 Cr = +1 in "Institutional" confluence. FII velocity &gt; 300 = +0.5 additional. Cumulative 10-day FII inflow &gt; ₹5000 Cr = +1. These signals are combined for the overall Institutional score.
-        </div>
       </section>
 
       <div className="text-center">
@@ -584,80 +563,23 @@ export default function LearningAcademy() {
     <div className="space-y-6">
       <div>
         <h2 className="text-lg font-bold text-white mb-1">🤖 Module 3: How the Prediction Algorithm Works</h2>
-        <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>This module reveals the exact inner workings of MarketPulse AI's prediction engine — so you understand exactly what you're trading on.</p>
+        <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Inside the predictive ensemble model.</p>
       </div>
 
       {/* GBDT */}
       <section className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
-        <h3 className="text-sm font-bold text-white mb-2">1️⃣ GBDT — Gradient Boosted Decision Trees</h3>
-        <p className="text-xs mb-3" style={{ color: 'var(--text-secondary)' }}>
-          GBDT is the same algorithm used by top Kaggle winners and hedge funds like Two Sigma. It builds an ensemble of decision trees, where each new tree corrects the errors of all previous trees.
-        </p>
+        <h3 className="text-sm font-bold text-white mb-2 text-green-400">1️⃣ GBDT — Gradient Boosted Decision Trees</h3>
         <Formula
           label="GBDT Learning Process"
-          formula={`Step 1: Start with initial prediction (base rate)\nStep 2: Compute residuals (errors) = Actual - Predicted\nStep 3: Train a new tree to predict the RESIDUALS\nStep 4: Update prediction: New = Old + learning_rate × Tree\nStep 5: Repeat for N trees (with early stopping)\n\nApp Config:\n  Trees: 50-80 | Depth: 3-4 | Learning Rate: 0.08\n  Early Stopping: 6-8 rounds | L2 Regularization: 1.0`}
-          desc="Each tree 'boosts' the model by focusing on what the previous trees got wrong. Learning rate (0.08) prevents overfitting by making each tree contribute only a small improvement."
-        />
-        <div className="p-3 rounded-lg text-xs" style={{ background: 'rgba(255,184,0,0.06)', border: '1px solid rgba(255,184,0,0.15)', color: 'var(--text-secondary)' }}>
-          <span className="font-bold text-yellow-400">⚡ Why GBDT over Neural Networks?</span> Neural networks need millions of data points. Indian stocks have ~250 trading days/year × 10 years = ~2,500 rows. GBDT works well with small datasets and is interpretable (you can see which features matter most).
-        </div>
-      </section>
-
-      {/* Heuristic */}
-      <section className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
-        <h3 className="text-sm font-bold text-white mb-2">2️⃣ Rule-Based Heuristic Engine</h3>
-        <p className="text-xs mb-3" style={{ color: 'var(--text-secondary)' }}>
-          Pure ML models can overfit to historical noise. The heuristic engine encodes structural market rules that never change (e.g., "RSI &lt; 30 with high volume = oversold bounce is likely"). It acts as a sanity check on the GBDT.
-        </p>
-        <div className="p-3 rounded-lg text-xs font-mono" style={{ background: 'rgba(139,92,246,0.06)', border: '1px solid rgba(139,92,246,0.15)', color: 'var(--text-secondary)' }}>
-          <p className="text-[10px] font-bold uppercase tracking-wider mb-2 font-sans" style={{ color: '#8b5cf6' }}>Sample Heuristic Rules:</p>
-          <p>RSI &lt; 30 → score += 2 (oversold bounce likely)</p>
-          <p>RSI &gt; 70 → score -= 2 (overbought pullback risk)</p>
-          <p>FII buying &gt; ₹1000Cr → score += 2 (strong inflow)</p>
-          <p>Price below BB Lower → score += 1.5 (mean reversion)</p>
-          <p>GIFT Nifty gap &gt; 0.3% → score += 1.5 (positive open)</p>
-          <p className="mt-2">Final: probability = sigmoid(score × 0.3)</p>
-        </div>
-      </section>
-
-      {/* Ensemble */}
-      <section className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
-        <h3 className="text-sm font-bold text-white mb-2">3️⃣ Adaptive Ensemble (GBDT + Heuristic)</h3>
-        <Formula
-          label="Ensemble Prediction"
-          formula={`Ensemble Prob = (GBDT_prob × W_gbdt + Heur_prob × W_heur) / (W_gbdt + W_heur)\n\nWeights are ADAPTIVE — updated daily based on 30-day rolling accuracy:\n  If GBDT accuracy > Heuristic → W_gbdt increases\n  If Heuristic accuracy > GBDT → W_heur increases\n\nConfidence Discounts:\n  - Training data < 20 samples → -10%\n  - VIX > 22 → -5% (high uncertainty)\n  - GBDT disagrees with Heuristic → -8%`}
-          desc="The ensemble automatically shifts weight to whichever sub-model is performing better. Confidence is capped at 95% and floored at 50%."
+          formula={`Step 1: Start with base prediction rate\nStep 2: Train new tree to predict residuals (errors)\nStep 3: Update: New_Prediction = Old + learning_rate × Tree\n\nApp Params:\n  Trees: 50-80 | Depth: 3-4 | Learning Rate: 0.08`}
+          desc="GBDT builds sequential decision trees to correct errors of the previous ones."
+          themeColor="#10b981"
         />
       </section>
 
-      {/* Signal Confluence */}
-      <section className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
-        <h3 className="text-sm font-bold text-white mb-2">4️⃣ 6-Factor Signal Confluence System</h3>
-        <p className="text-xs mb-4" style={{ color: 'var(--text-secondary)' }}>
-          Instead of trading every prediction, the app counts how many INDEPENDENT signal categories agree. This is the key innovation that filters out noise.
-        </p>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
-          {[
-            { cat: 'Technical', rules: 'RSI < 40 (+1), MACD > 0 (+1), Price > EMA20 (+1)', icon: '📊' },
-            { cat: 'Bollinger', rules: 'Price below lower band = bullish, above upper = bearish', icon: '📏' },
-            { cat: 'Volume', rules: 'Volume > 1.3x + uptrend = bullish; Delivery > 55% = genuine', icon: '📦' },
-            { cat: 'Institutional', rules: 'FII > ₹500Cr (+1), velocity > ₹300Cr/day (+0.5)', icon: '🏛️' },
-            { cat: 'Sentiment', rules: 'Sentiment > 60 (+1), VIX < 14 (+0.5)', icon: '💬' },
-            { cat: 'Options', rules: 'PCR > 1.2 (+1), price below Max Pain (+0.5)', icon: '📋' },
-          ].map(c => (
-            <div key={c.cat} className="p-3 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)' }}>
-              <p className="text-xs font-bold text-white mb-1">{c.icon} {c.cat}</p>
-              <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{c.rules}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Interactive Confluence Calculator */}
+      {/* Interactive Confluence Grade Calculator */}
       <section className="p-5 rounded-xl" style={{ background: 'rgba(0,214,143,0.03)', border: '1px solid rgba(0,214,143,0.15)' }}>
         <h3 className="text-sm font-bold text-white mb-3">🧮 Interactive Confluence Calculator</h3>
-        <p className="text-xs mb-4" style={{ color: 'var(--text-secondary)' }}>Toggle the categories below to simulate how the trade grade changes:</p>
-
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
           {Object.entries(confluenceState).map(([cat, active]) => (
             <button key={cat}
@@ -696,9 +618,6 @@ export default function LearningAcademy() {
           }}>
             Grade: {calcGrade}
           </p>
-          <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-            Confluence: {confluenceCount}/6 | Confidence: {calcConfidence}% | Models: {calcModelsAgree ? 'Agree' : 'Disagree'}
-          </p>
           <p className="text-xs font-bold mt-2" style={{
             color: calcGrade === 'A' ? '#00d68f' : calcGrade === 'B' ? '#fbbf24' : '#ff4d6a',
           }}>
@@ -725,73 +644,36 @@ export default function LearningAcademy() {
     <div className="space-y-6">
       <div>
         <h2 className="text-lg font-bold text-white mb-1">🛡️ Module 4: Risk Management & The Kelly Strategy</h2>
-        <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Risk management is the ONLY thing that separates profitable traders from bankrupt ones. You can have a 45% win rate and still make money — if your risk is managed correctly.</p>
+        <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Optimal capital allocation and volatility-adjusted stops.</p>
       </div>
 
-      {/* Expected Value */}
       <section className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
-        <h3 className="text-sm font-bold text-white mb-2">1️⃣ Expected Value (EV) — Why Win Rate Is Misleading</h3>
+        <h3 className="text-sm font-bold text-white mb-2 text-yellow-400">1️⃣ Expected Value (EV)</h3>
         <Formula
           label="Expected Value Formula"
-          formula={`EV = (Win Rate × Average Win) - (Loss Rate × Average Loss)\n\n── Example 1: 45% win rate, 3:1 reward ──\nEV = (0.45 × ₹3000) - (0.55 × ₹1000)\n   = ₹1350 - ₹550 = +₹800 per trade ✅ PROFITABLE\n\n── Example 2: 90% win rate, 1:10 reward ──\nEV = (0.90 × ₹100) - (0.10 × ₹1000)\n   = ₹90 - ₹100 = -₹10 per trade ❌ LOSING\n\nConclusion: Win rate is SECONDARY to reward-to-risk ratio.`}
-          desc="A trader with 45% accuracy but 3:1 R:R will outperform a trader with 90% accuracy but 1:10 R:R. This is the mathematical foundation of the selective strategy."
+          formula={`EV = (Win Rate × Average Win) - (Loss Rate × Average Loss)\n\nEV must be positive for long-term survival.`}
+          desc="Win rate is secondary to reward-to-risk ratio."
+          themeColor="#eab308"
         />
       </section>
 
-      {/* Kelly Criterion */}
       <section className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
-        <h3 className="text-sm font-bold text-white mb-2">2️⃣ Kelly Criterion — Optimal Position Sizing</h3>
-        <p className="text-xs mb-3" style={{ color: 'var(--text-secondary)' }}>
-          The Kelly Criterion, developed by John Kelly at Bell Labs in 1956, mathematically determines the optimal percentage of your capital to risk on each trade to maximize long-term growth while minimizing the risk of ruin.
-        </p>
+        <h3 className="text-sm font-bold text-white mb-2 text-yellow-400">2️⃣ Kelly Criterion</h3>
         <Formula
           label="Kelly Formula"
-          formula={`f* = (b × p - q) / b\n\nwhere:\n  f* = fraction of capital to bet\n  b  = odds received (avg win / avg loss)\n  p  = probability of winning\n  q  = probability of losing (1 - p)\n\n── Example: 55% win rate, 2:1 odds ──\nf* = (2 × 0.55 - 0.45) / 2 = 0.65 / 2 = 0.325 (32.5%)\n\nFull Kelly is TOO AGGRESSIVE. Industry uses Quarter-Kelly:\nActual position = f* × 0.25 = 8.1% of capital`}
-          desc="Quarter-Kelly sacrifices ~25% of optimal growth for ~75% reduction in volatility and drawdowns. This is what the app uses."
-        />
-        <div className="p-3 rounded-lg text-xs" style={{ background: 'rgba(0,214,143,0.04)', color: 'var(--text-secondary)' }}>
-          <span className="font-bold text-green-400">📱 In This App:</span> Kelly is computed from your rolling 30-day win rate and average win/loss. Then adjusted by: confidence multiplier (0.3–1.0), trade grade (A=100%, B=50%, C=20%), and VIX cap (max 2% in panic). Final position clamped to 0.5%–5% of capital.
-        </div>
-      </section>
-
-      {/* VIX Adaptive Stops */}
-      <section className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
-        <h3 className="text-sm font-bold text-white mb-2">3️⃣ VIX-Adaptive Stop-Losses</h3>
-        <p className="text-xs mb-3" style={{ color: 'var(--text-secondary)' }}>
-          A fixed stop-loss (e.g., "always use 1.5%") is dangerous. In calm markets (VIX=12), 1.5% works fine. In panicky markets (VIX=28), normal price swings are 3-4%, so a 1.5% stop gets triggered by noise.
-        </p>
-        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-          {[
-            { vix: '≤12', mult: '0.8x', label: 'Very Calm', color: '#00d68f' },
-            { vix: '12-15', mult: '1.0x', label: 'Normal', color: '#3b82f6' },
-            { vix: '15-18', mult: '1.2x', label: 'Elevated', color: '#fbbf24' },
-            { vix: '18-22', mult: '1.5x', label: 'High', color: '#ff9500' },
-            { vix: '22-28', mult: '1.8x', label: 'Very High', color: '#ff6b6b' },
-            { vix: '>28', mult: '2.2x', label: 'Panic', color: '#ff4d6a' },
-          ].map(v => (
-            <div key={v.vix} className="p-2 rounded-lg text-center" style={{ background: `${v.color}10`, border: `1px solid ${v.color}30` }}>
-              <p className="text-xs font-bold" style={{ color: v.color }}>{v.mult}</p>
-              <p className="text-[9px]" style={{ color: 'var(--text-muted)' }}>VIX {v.vix}</p>
-              <p className="text-[8px]" style={{ color: 'var(--text-muted)' }}>{v.label}</p>
-            </div>
-          ))}
-        </div>
-        <Formula
-          label="Stop-Loss Calculation"
-          formula={`Stop Loss = Entry Price ± (ATR × VIX Multiplier)\n\n── Example: RELIANCE at ₹2800, ATR=₹42, VIX=20 ──\nMultiplier = 1.5 (VIX 18-22 range)\nStop Loss = ₹2800 - (₹42 × 1.5) = ₹2800 - ₹63 = ₹2737\nTarget 1  = ₹2800 + ₹42 = ₹2842 (1:1 ATR)\nTarget 2  = ₹2800 + ₹84 = ₹2884 (2:1 ATR)`}
-          desc="In panic markets, stops are 2.2x wider than normal — preventing noise-induced exits while still protecting capital on genuine breakdowns."
+          formula={`f* = (b × p - q) / b\n\nwhere:\n  f* = fraction of capital to risk\n  b  = odds received (avg win / avg loss)\n  p  = probability of winning\n  q  = probability of losing (1 - p)`}
+          desc="We use a conservative Quarter-Kelly setup to optimize growth and restrict variance."
+          themeColor="#eab308"
         />
       </section>
 
       {/* Kelly Calculator */}
       <section className="p-5 rounded-xl" style={{ background: 'rgba(255,184,0,0.03)', border: '1px solid rgba(255,184,0,0.15)' }}>
         <h3 className="text-sm font-bold text-white mb-3">🧮 Position Size Calculator</h3>
-        <p className="text-xs mb-4" style={{ color: 'var(--text-secondary)' }}>Enter your trading capital and the Kelly sizing from the app to see your exact position size:</p>
-
         <div className="grid grid-cols-2 gap-4 mb-4">
           <div>
             <label className="text-[10px] font-bold uppercase tracking-wider block mb-1" style={{ color: 'var(--text-muted)' }}>Trading Capital (₹)</label>
-            <input type="number" value={kellyCapital} onChange={e => setKellyCapital(Number(e.target.value))}
+            <input type="number" value={kellyCapital} onChange={e => setAddCapital(e)}
               className="w-full p-2.5 rounded-lg text-sm font-bold text-white"
               style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)' }} />
           </div>
@@ -804,12 +686,8 @@ export default function LearningAcademy() {
         </div>
 
         <div className="p-4 rounded-xl text-center" style={{ background: 'rgba(0,214,143,0.08)', border: '1px solid rgba(0,214,143,0.3)' }}>
-          <p className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Position Size</p>
+          <p className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Suggested Trade Value</p>
           <p className="text-2xl font-black text-white mt-1">₹{(kellyCapital * kellySizing / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</p>
-          <p className="text-xs mt-1" style={{ color: '#00d68f' }}>{kellySizing}% of ₹{kellyCapital.toLocaleString('en-IN')}</p>
-          <p className="text-[10px] mt-2" style={{ color: 'var(--text-muted)' }}>
-            If stop-loss is 1.5% away → Max risk = ₹{(kellyCapital * kellySizing / 100 * 0.015).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-          </p>
         </div>
       </section>
 
@@ -824,67 +702,35 @@ export default function LearningAcademy() {
     </div>
   );
 
+  const setAddCapital = (e: any) => {
+    setKellyCapital(Number(e.target.value));
+  };
+
   const renderWorkflow = () => (
     <div className="space-y-6">
       <div>
         <h2 className="text-lg font-bold text-white mb-1">📅 Module 5: Daily Trader Execution Workflow</h2>
-        <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>A step-by-step routine to follow every trading day. Consistency and discipline beat intelligence every time.</p>
+        <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>A step-by-step checklist to structure your daily analysis.</p>
       </div>
 
-      {/* Timeline */}
       <section className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
-        <h3 className="text-sm font-bold text-white mb-4">📋 Your Daily Trading Checklist</h3>
-        <div className="space-y-4">
+        <h3 className="text-sm font-bold text-white mb-4">📋 Daily Schedule Checklist</h3>
+        <div className="space-y-3">
           {[
-            { time: '8:30 AM', icon: '🌍', title: 'Pre-Market Scan', steps: ['Check overnight S&P 500 performance (Dashboard → S&P 500 widget)', 'Check GIFT Nifty implied gap (if gap > 0.3%, expect positive open)', 'Check India VIX (Dashboard → VIX Gauge) — if > 22, reduce position sizes'] },
-            { time: '8:45 AM', icon: '🎯', title: 'Review AI Trade Signals', steps: ['Go to Predictions → "Active Trade Signals" section', 'Look for A-grade (green) and B-grade (gold) stocks ONLY', 'Ignore ALL C/D/F grade stocks — they have no edge', 'Check confluence dots: hover each dot to see which categories agree'] },
-            { time: '9:00 AM', icon: '📐', title: 'Calculate Position Size', steps: ['Click "View →" on any A/B grade stock', 'Note the Kelly position size % on the stock detail page', 'Use the calculator in Module 4 to compute exact ₹ amount', 'Verify stop-loss, Target 1, and Target 2 levels'] },
-            { time: '9:15 AM', icon: '⚡', title: 'Execute Trades (Market Open)', steps: ['Enter position at market open (or use limit order at Entry price)', 'Set stop-loss order immediately (ATR-based, from the stock page)', 'Set Target 1 order for 50% of position (1x ATR)', 'Let remaining 50% ride with trailing stop to Target 2 (2x ATR)'] },
-            { time: '3:15 PM', icon: '📊', title: 'End-of-Day Review', steps: ['Check if trades hit target or stop-loss', 'Do NOT manually close trades early — let the system work', 'Review accuracy on the Predictions page (cumulative vs weekly)', 'Log results in a trading journal (mental discipline)'] },
-            { time: 'Evening', icon: '📖', title: 'Learning & Prep', steps: ['Review any new FII/DII flows posted after market close', 'Check if the cron job ran and new predictions are ready for tomorrow', 'Study one concept from this Academy each day', 'Never trade on emotion — only trade on signals'] },
-          ].map((step, idx) => (
+            { time: '8:30 AM', icon: '🌍', title: 'Pre-Market Assessment', desc: 'Scan GIFT Nifty futures and global indices. Identify opening direction.' },
+            { time: '8:45 AM', icon: '🎯', title: 'Scan AI Signals', desc: 'Check Predictions page. Filter out anything below Grade B.' },
+            { time: '9:00 AM', icon: '📐', title: 'Position Sizing', desc: 'Use the Kelly calculator to size entries on Grade A setups.' },
+            { time: '9:15 AM', icon: '⚡', title: 'Market Open Orders', desc: 'Place entry, ATR-based stop-loss, and target orders.' },
+          ].map((s, idx) => (
             <div key={idx} className="flex gap-4">
-              <div className="flex-shrink-0 w-20 text-right">
-                <span className="text-xs font-bold" style={{ color: 'var(--accent-blue)' }}>{step.time}</span>
+              <div className="w-16 flex-shrink-0 text-right">
+                <span className="text-xs font-black text-red-400">{s.time}</span>
               </div>
-              <div className="flex-shrink-0 w-8 flex flex-col items-center">
-                <span className="text-lg">{step.icon}</span>
-                {idx < 5 && <div className="w-px flex-1 mt-1" style={{ background: 'var(--border-color)' }} />}
+              <div className="flex-shrink-0">{s.icon}</div>
+              <div className="flex-1">
+                <p className="text-xs font-bold text-white">{s.title}</p>
+                <p className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>{s.desc}</p>
               </div>
-              <div className="flex-1 pb-2">
-                <p className="text-xs font-bold text-white mb-1">{step.title}</p>
-                <ul className="space-y-1">
-                  {step.steps.map((s, i) => (
-                    <li key={i} className="text-[11px] flex items-start gap-1.5" style={{ color: 'var(--text-secondary)' }}>
-                      <span style={{ color: 'var(--accent-blue)' }}>•</span> {s}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Golden Rules */}
-      <section className="p-5 rounded-xl" style={{ background: 'rgba(255,184,0,0.04)', border: '1px solid rgba(255,184,0,0.2)' }}>
-        <h3 className="text-sm font-bold text-white mb-3">⭐ 10 Golden Rules of the Selective Strategy</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {[
-            'Only trade A/B grade signals. C/D/F = sit on hands.',
-            'Never risk more than 5% of capital on a single trade.',
-            'Always set stop-loss BEFORE entering. No exceptions.',
-            'Let winners run to Target 2. Don\'t book early.',
-            'If no A/B signals today, DO NOT TRADE. Cash is a position.',
-            'Never average down on a losing trade.',
-            'Trade the system, not your gut feeling.',
-            'Review accuracy weekly, not daily. Small samples lie.',
-            'VIX > 25? Reduce ALL positions by 50%.',
-            'Paper trade for 100 trades before using real money.',
-          ].map((rule, i) => (
-            <div key={i} className="flex items-start gap-2 p-2 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)' }}>
-              <span className="text-xs font-black" style={{ color: '#fbbf24' }}>{i + 1}.</span>
-              <span className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>{rule}</span>
             </div>
           ))}
         </div>
@@ -901,6 +747,416 @@ export default function LearningAcademy() {
     </div>
   );
 
+  const renderPatterns = () => {
+    // SVGs for the Pattern Simulator
+    const renderPatternSketch = () => {
+      switch (selectedPattern) {
+        case 'double_bottom':
+          return (
+            <svg width="100%" height="100%" viewBox="0 0 200 100" fill="none">
+              <path d="M 20 20 L 60 80 L 100 40 L 140 80 L 180 20" stroke="#f43f5e" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+              <line x1="20" y1="40" x2="180" y2="40" stroke="rgba(255,255,255,0.2)" strokeWidth="1" strokeDasharray="3" />
+              <text x="100" y="32" fill="#f43f5e" fontSize="9" fontWeight="bold" textAnchor="middle">Neckline (Resistance)</text>
+              <circle cx="60" cy="80" r="4" fill="#00d68f" />
+              <circle cx="140" cy="80" r="4" fill="#00d68f" />
+              <text x="60" y="93" fill="var(--text-secondary)" fontSize="8" textAnchor="middle">Bottom 1</text>
+              <text x="140" y="93" fill="var(--text-secondary)" fontSize="8" textAnchor="middle">Bottom 2</text>
+              <path d="M 153 40 L 170 17 L 163 17 M 170 17 L 170 24" stroke="#00d68f" strokeWidth="2" fill="none" />
+              <text x="175" y="15" fill="#00d68f" fontSize="8" fontWeight="bold">Breakout</text>
+            </svg>
+          );
+        case 'double_top':
+          return (
+            <svg width="100%" height="100%" viewBox="0 0 200 100" fill="none">
+              <path d="M 20 80 L 60 20 L 100 60 L 140 20 L 180 80" stroke="#f43f5e" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+              <line x1="20" y1="60" x2="180" y2="60" stroke="rgba(255,255,255,0.2)" strokeWidth="1" strokeDasharray="3" />
+              <text x="100" y="72" fill="#f43f5e" fontSize="9" fontWeight="bold" textAnchor="middle">Neckline (Support)</text>
+              <circle cx="60" cy="20" r="4" fill="#ff4d6a" />
+              <circle cx="140" cy="20" r="4" fill="#ff4d6a" />
+              <text x="60" y="12" fill="var(--text-secondary)" fontSize="8" textAnchor="middle">Peak 1</text>
+              <text x="140" y="12" fill="var(--text-secondary)" fontSize="8" textAnchor="middle">Peak 2</text>
+              <path d="M 153 60 L 170 83 M 170 83 L 163 83 M 170 83 L 170 76" stroke="#ff4d6a" strokeWidth="2" fill="none" />
+              <text x="175" y="90" fill="#ff4d6a" fontSize="8" fontWeight="bold">Breakdown</text>
+            </svg>
+          );
+        case 'head_shoulders':
+          return (
+            <svg width="100%" height="100%" viewBox="0 0 200 100" fill="none">
+              <path d="M 10 80 L 40 45 L 70 65 L 100 15 L 130 65 L 160 45 L 190 80" stroke="#f43f5e" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+              <line x1="10" y1="65" x2="190" y2="65" stroke="rgba(255,255,255,0.2)" strokeWidth="1" strokeDasharray="3" />
+              <text x="100" y="75" fill="#f43f5e" fontSize="9" fontWeight="bold" textAnchor="middle">Neckline Support</text>
+              <circle cx="40" cy="45" r="4" fill="#ff4d6a" />
+              <circle cx="100" cy="15" r="4" fill="#ff4d6a" />
+              <circle cx="160" cy="45" r="4" fill="#ff4d6a" />
+              <text x="40" y="37" fill="var(--text-secondary)" fontSize="8" textAnchor="middle">Left Shoulder</text>
+              <text x="100" y="8" fill="var(--text-secondary)" fontSize="8" textAnchor="middle">Head</text>
+              <text x="160" y="37" fill="var(--text-secondary)" fontSize="8" textAnchor="middle">Right Shoulder</text>
+            </svg>
+          );
+        case 'bull_flag':
+          return (
+            <svg width="100%" height="100%" viewBox="0 0 200 100" fill="none">
+              <path d="M 20 90 L 60 20 L 110 50 L 90 70 L 140 40 L 120 60" stroke="#f43f5e" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+              {/* Flag boundaries */}
+              <line x1="55" y1="15" x2="145" y2="35" stroke="#fbbf24" strokeWidth="1.5" />
+              <line x1="85" y1="65" x2="125" y2="75" stroke="#fbbf24" strokeWidth="1.5" />
+              <text x="40" y="55" fill="var(--text-secondary)" fontSize="8">Flag Pole</text>
+              <path d="M 125 45 L 155 25 M 155 25 L 148 25 M 155 25 L 155 32" stroke="#00d68f" strokeWidth="2" fill="none" />
+              <text x="160" y="23" fill="#00d68f" fontSize="8" fontWeight="bold">Breakout</text>
+            </svg>
+          );
+      }
+    };
+
+    return (
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-lg font-bold text-white mb-1">📈 Module 6: Chart Patterns & Breakout Validation</h2>
+          <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Identifying reliable market patterns and checking their validity using quantitative data feeds.</p>
+        </div>
+
+        {/* Pattern Simulator */}
+        <section className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+          <h3 className="text-sm font-bold text-white mb-3 text-pink-400">🎛️ Interactive Pattern Simulator</h3>
+          <p className="text-xs mb-4" style={{ color: 'var(--text-secondary)' }}>Select a pattern to visualize its structure and breakout target:</p>
+          
+          <div className="flex gap-2 mb-4 overflow-x-auto pb-1 no-scrollbar">
+            {[
+              { id: 'double_bottom', label: 'Double Bottom' },
+              { id: 'double_top', label: 'Double Top' },
+              { id: 'head_shoulders', label: 'Head & Shoulders' },
+              { id: 'bull_flag', label: 'Bull Flag' },
+            ].map(p => (
+              <button key={p.id}
+                onClick={() => setSelectedPattern(p.id as any)}
+                className="px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap cursor-pointer transition-all"
+                style={{
+                  background: selectedPattern === p.id ? 'rgba(244,63,94,0.15)' : 'rgba(255,255,255,0.03)',
+                  border: `1px solid ${selectedPattern === p.id ? 'rgba(244,63,94,0.4)' : 'var(--border-color)'}`,
+                  color: selectedPattern === p.id ? '#f43f5e' : 'var(--text-secondary)',
+                }}>
+                {p.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="h-44 w-full bg-slate-950 rounded-xl p-4 flex items-center justify-center border border-white/[0.03]">
+            {renderPatternSketch()}
+          </div>
+        </section>
+
+        {/* Explanations */}
+        <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+            <h4 className="text-xs font-bold uppercase tracking-wider text-pink-400 mb-2">🔄 Reversal Patterns</h4>
+            <ul className="space-y-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
+              <li>
+                <strong className="text-white">Double Bottom:</strong> Formed when price hits a low support level twice and rallies. Neckline breakout confirms a change from bearish to bullish trend.
+              </li>
+              <li>
+                <strong className="text-white">Head and Shoulders:</strong> Formed of three peaks (left shoulder, head, right shoulder) on a support neckline. Neckline breakdown signals structural bearish distribution.
+              </li>
+            </ul>
+          </div>
+
+          <div className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+            <h4 className="text-xs font-bold uppercase tracking-wider text-pink-400 mb-2">🚀 Continuation & Consolidation</h4>
+            <ul className="space-y-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
+              <li>
+                <strong className="text-white">Bull Flag:</strong> A sharp upward vertical rise (pole) followed by a downward-sloping rectangular channel (flag). Breakout above channel confirms continuation of the rally.
+              </li>
+              <li>
+                <strong className="text-white">Triangles:</strong> Ascending triangle (horizontal resistance, rising support) typically breaks out to the upside. Descending breaks down.
+              </li>
+            </ul>
+          </div>
+        </section>
+
+        {/* Validation */}
+        <section className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+          <h3 className="text-sm font-bold text-white mb-3 text-pink-400">🛡️ Breakout Validation (Avoiding Bull & Bear Traps)</h3>
+          <p className="text-xs mb-3" style={{ color: 'var(--text-secondary)' }}>
+            Most breakouts fail. To filter out traps, our algorithm validates price breakouts with secondary data feeds:
+          </p>
+          <div className="space-y-3 text-xs">
+            <div className="p-3 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)' }}>
+              <p className="font-bold text-white mb-1">📦 Volume Profile Alignment</p>
+              <p style={{ color: 'var(--text-secondary)' }}>Breakout must happen on volume ratio &gt; 1.5x (relative to 20-day average) and successfully push past the Point of Control (POC) high-volume node. Low volume breakouts are highly prone to reversing.</p>
+            </div>
+            <div className="p-3 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)' }}>
+              <p className="font-bold text-white mb-1">📋 Open Interest & Option Writing Validation</p>
+              <p style={{ color: 'var(--text-secondary)' }}>A bullish breakout must be supported by fresh Long Build-up (Price Up + OI Up) or massive Short Covering (Price Up + OI Down). Additionally, verify that PCR is rising (&gt; 1.1) to confirm put-writing support beneath the breakout strike.</p>
+            </div>
+          </div>
+        </section>
+
+        <div className="text-center">
+          <button onClick={() => markComplete('patterns')} className="px-6 py-2 rounded-xl text-sm font-bold cursor-pointer transition-all hover:scale-105"
+            style={{ background: completedModules.has('patterns') ? 'rgba(0,214,143,0.2)' : 'linear-gradient(135deg, #f43f5e, #ec4899)', color: 'white' }}>
+            {completedModules.has('patterns') ? '✓ Module Complete' : 'Mark Module as Complete'}
+          </button>
+        </div>
+
+        <QuizWidget moduleId="patterns" />
+      </div>
+    );
+  };
+
+  const renderFundamentals = () => (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-lg font-bold text-white mb-1">🏛️ Module 7: Fundamental Analysis & Value Screening</h2>
+        <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>How the model screens for high capital efficiency and low financial leverage to build swings with a solid safety net.</p>
+      </div>
+
+      {/* Health Checker Calculator */}
+      <section className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+        <h3 className="text-sm font-bold text-white mb-3 text-emerald-400">🧮 Fundamental Health Checker</h3>
+        <p className="text-xs mb-4" style={{ color: 'var(--text-secondary)' }}>Adjust the sliders to see how the model evaluates a stock's fundamentals:</p>
+
+        <div className="space-y-4 mb-4">
+          <div>
+            <div className="flex justify-between text-xs mb-1">
+              <span style={{ color: 'var(--text-secondary)' }}>Return on Equity (ROE %):</span>
+              <span className="font-bold text-white">{calcRoe}%</span>
+            </div>
+            <input type="range" min={0} max={40} value={calcRoe} onChange={e => setCalcRoe(parseInt(e.target.value))}
+              className="w-full" style={{ accentColor: '#10b981' }} />
+          </div>
+
+          <div>
+            <div className="flex justify-between text-xs mb-1">
+              <span style={{ color: 'var(--text-secondary)' }}>Debt-to-Equity Ratio:</span>
+              <span className="font-bold text-white">{calcDebtToEquity}x</span>
+            </div>
+            <input type="range" min={0} max={3} step={0.1} value={calcDebtToEquity} onChange={e => setCalcDebtToEquity(parseFloat(e.target.value))}
+              className="w-full" style={{ accentColor: '#10b981' }} />
+          </div>
+
+          <div>
+            <div className="flex justify-between text-xs mb-1">
+              <span style={{ color: 'var(--text-secondary)' }}>ROCE %:</span>
+              <span className="font-bold text-white">{calcRoce}%</span>
+            </div>
+            <input type="range" min={0} max={40} value={calcRoce} onChange={e => setCalcRoce(parseInt(e.target.value))}
+              className="w-full" style={{ accentColor: '#10b981' }} />
+          </div>
+        </div>
+
+        <div className="p-4 rounded-xl text-center border-2 transition-all duration-300" style={{
+          background: `${healthInfo.color}11`,
+          borderColor: healthInfo.color,
+        }}>
+          <p className="text-lg font-black" style={{ color: healthInfo.color }}>
+            Assessment: {healthInfo.status}
+          </p>
+          <p className="text-xs mt-1 text-slate-300">{healthInfo.advice}</p>
+        </div>
+      </section>
+
+      {/* Metric Explanations */}
+      <section className="space-y-4">
+        <div className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+          <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-2">1. P/E & PEG Ratios</h4>
+          <Formula
+            label="PEG Ratio Formula"
+            formula={`PEG = (P/E Ratio) / (Annual EPS Growth Rate)\n\nUnder 1.0  = Undervalued relative to growth\nOver 2.0   = Overvalued relative to growth`}
+            desc="A stock with a high P/E of 40 might look expensive, but if its earnings are growing at 40% per year, its PEG is 1.0 (fair value)."
+            themeColor="#10b981"
+          />
+        </div>
+
+        <div className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+          <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-2">2. ROE vs ROCE (Capital Efficiency)</h4>
+          <Formula
+            label="Capital Efficiency Formulas"
+            formula={`ROE  = Net Income / Shareholders' Equity\nROCE = EBIT (Operating Profit) / Capital Employed\n\nCapital Employed = Total Assets - Current Liabilities`}
+            desc="ROE only considers returns on equity. ROCE includes returns on debt. For infrastructure and power stocks, ROCE is the true efficiency test."
+            themeColor="#10b981"
+          />
+        </div>
+      </section>
+
+      <div className="text-center">
+        <button onClick={() => markComplete('fundamentals')} className="px-6 py-2 rounded-xl text-sm font-bold cursor-pointer transition-all hover:scale-105"
+          style={{ background: completedModules.has('fundamentals') ? 'rgba(0,214,143,0.2)' : 'linear-gradient(135deg, #10b981, #3b82f6)', color: 'white' }}>
+          {completedModules.has('fundamentals') ? '✓ Module Complete' : 'Mark Module as Complete'}
+        </button>
+      </div>
+
+      <QuizWidget moduleId="fundamentals" />
+    </div>
+  );
+
+  const renderSentiment = () => (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-lg font-bold text-white mb-1">💬 Module 8: Sentiment Analysis & Hype Cycles</h2>
+        <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>How the model calculates news sentiment velocity and detects unsustainable speculative retail bubbles.</p>
+      </div>
+
+      {/* News Decay Calculator */}
+      <section className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+        <h3 className="text-sm font-bold text-white mb-3 text-violet-400">⏱️ News Decay Weight Calculator</h3>
+        <p className="text-xs mb-4" style={{ color: 'var(--text-secondary)' }}>Move the slider to see how news age degrades its predictive importance weight in the ML model:</p>
+
+        <div className="space-y-4 mb-4">
+          <div className="flex justify-between text-xs mb-1">
+            <span style={{ color: 'var(--text-secondary)' }}>Age of News (Hours):</span>
+            <span className="font-bold text-white">{decayHours} hours ago</span>
+          </div>
+          <input type="range" min={0} max={72} value={decayHours} onChange={e => setDecayHours(parseInt(e.target.value))}
+            className="w-full" style={{ accentColor: '#a78bfa' }} />
+        </div>
+
+        <div className="p-4 rounded-xl text-center border transition-all duration-300" style={{
+          background: 'rgba(167,139,250,0.06)',
+          borderColor: 'rgba(167,139,250,0.4)',
+        }}>
+          <p className="text-xs uppercase tracking-wider text-slate-400">Effective Prediction Weight</p>
+          <p className="text-3xl font-black text-white mt-1">{calculatedDecayWeight}%</p>
+          <div className="w-full bg-slate-900 h-2 rounded-full overflow-hidden mt-3">
+            <div className="h-full rounded-full transition-all duration-300"
+              style={{
+                width: `${calculatedDecayWeight}%`,
+                background: calculatedDecayWeight > 60 ? '#10b981' : calculatedDecayWeight > 25 ? '#fbbf24' : '#ef4444'
+              }} />
+          </div>
+        </div>
+      </section>
+
+      {/* Sentiment Velocity */}
+      <section className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+        <h3 className="text-sm font-bold text-white mb-2 text-violet-400">1️⃣ Sentiment Velocity — Rate of Change</h3>
+        <Formula
+          label="Sentiment Velocity Formula"
+          formula={`Sentiment Velocity = (1-day Net Sentiment) - (5-day Rolling Avg)\n\nVelocity > 0 = Positive news rate is ACCELERATING\nVelocity < 0 = Negative news rate is ACCELERATING`}
+          desc="Accelerating sentiment indicates high momentum. It is a leading indicator for stock breakouts, while static sentiment is a lagging indicator."
+          themeColor="#a78bfa"
+        />
+      </section>
+
+      {/* Accumulation vs Hype */}
+      <section className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+        <h3 className="text-sm font-bold text-white mb-3 text-violet-400">2️⃣ Accumulation vs Speculative Hype</h3>
+        <p className="text-xs mb-3" style={{ color: 'var(--text-secondary)' }}>Comparing sentiment with delivery metrics reveals institutional vs retail activity:</p>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="p-3.5 rounded-lg border border-emerald-500/20 bg-emerald-500/5">
+            <p className="text-xs font-bold text-emerald-400 mb-1">🏦 Institutional Accumulation</p>
+            <ul className="space-y-1 text-[10px]" style={{ color: 'var(--text-secondary)' }}>
+              <li>• Price: Steady or slow rise</li>
+              <li>• News Sentiment: Neutral / under-reported</li>
+              <li>• Delivery Volume %: High (&gt;55%)</li>
+              <li>• Action: Strong structural BUY setup</li>
+            </ul>
+          </div>
+          <div className="p-3.5 rounded-lg border border-red-500/20 bg-red-500/5">
+            <p className="text-xs font-bold text-red-400 mb-1">🔥 Retail Speculative Hype</p>
+            <ul className="space-y-1 text-[10px]" style={{ color: 'var(--text-secondary)' }}>
+              <li>• Price: Surging rapidly</li>
+              <li>• News Sentiment: Extreme positive euphoria</li>
+              <li>• Delivery Volume %: Very low (&lt;20%)</li>
+              <li>• Action: Highly risky, prone to sharp reversals</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <div className="text-center">
+        <button onClick={() => markComplete('sentiment')} className="px-6 py-2 rounded-xl text-sm font-bold cursor-pointer transition-all hover:scale-105"
+          style={{ background: completedModules.has('sentiment') ? 'rgba(0,214,143,0.2)' : 'linear-gradient(135deg, #a78bfa, #8b5cf6)', color: 'white' }}>
+          {completedModules.has('sentiment') ? '✓ Module Complete' : 'Mark Module as Complete'}
+        </button>
+      </div>
+
+      <QuizWidget moduleId="sentiment" />
+    </div>
+  );
+
+  const renderGreeks = () => (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-lg font-bold text-white mb-1">🛡️ Module 9: Option Greeks & Portfolio Hedging</h2>
+        <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Understanding option sensitivities and executing downside risk cover strategies.</p>
+      </div>
+
+      {/* Theta Decay Visualizer */}
+      <section className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+        <h3 className="text-sm font-bold text-white mb-3 text-pink-500">⏳ Option Theta Decay Visualizer</h3>
+        <p className="text-xs mb-4" style={{ color: 'var(--text-secondary)' }}>Drag the slider to see how time remaining decays option value exponentially:</p>
+
+        <div className="space-y-4 mb-4">
+          <div className="flex justify-between text-xs mb-1">
+            <span style={{ color: 'var(--text-secondary)' }}>Days to Expiry:</span>
+            <span className="font-bold text-white">{thetaDays} days left</span>
+          </div>
+          <input type="range" min={0} max={30} value={thetaDays} onChange={e => setThetaDays(parseInt(e.target.value))}
+            className="w-full" style={{ accentColor: '#ec4899' }} />
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div className="p-4 rounded-xl text-center border border-pink-500/20 bg-pink-500/5">
+            <p className="text-[10px] uppercase text-slate-400">Option Intrinsic Value Remaining</p>
+            <p className="text-3xl font-black text-white mt-1">{calculatedThetaValue}%</p>
+          </div>
+          <div className="p-4 rounded-xl text-center border border-white/10 bg-white/[0.02]">
+            <p className="text-[10px] uppercase text-slate-400">Decay Speed</p>
+            <p className="text-sm font-bold text-white mt-2">
+              {thetaDays <= 5 ? '⚡ CRITICAL SPEED (Exponential)' : thetaDays <= 15 ? '🟡 MODERATE' : '🟢 SLOW'}
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* Option Greeks */}
+      <section className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+        <h3 className="text-sm font-bold text-white mb-3 text-pink-500">1. Option Sensitivity Metrics (Greeks)</h3>
+        <div className="space-y-3 text-xs">
+          {[
+            { greek: 'Delta', rule: 'Directional sensitivity. Measures option price change per ₹1 stock move. Calls have positive delta (0 to 1); Puts have negative (-1 to 0).' },
+            { greek: 'Gamma', rule: 'Rate of change of Delta. High Gamma means Delta changes rapidly. Highest near ATM strikes and close to expiry.' },
+            { greek: 'Theta', rule: 'Time decay. Amount option value drops daily. Theta is positive for option sellers and negative for buyers.' },
+            { greek: 'Vega', rule: 'Volatility sensitivity. Measures option price change per 1% change in Implied Volatility (IV).' },
+          ].map(g => (
+            <div key={g.greek} className="p-3 rounded-lg" style={{ background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-color)' }}>
+              <p className="font-bold text-white mb-1 font-sans">{g.greek}</p>
+              <p style={{ color: 'var(--text-secondary)' }}>{g.rule}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Hedging */}
+      <section className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+        <h3 className="text-sm font-bold text-white mb-3 text-pink-500">2. Portfolio Hedging Strategies</h3>
+        <div className="space-y-4">
+          <div>
+            <h4 className="text-xs font-bold text-white mb-1">🛡️ The Protective Put Strategy (Downside Insurance)</h4>
+            <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+              If you own a large equity swing position on a high-volatility stock (e.g., ADANIENT), purchase an out-of-the-money (OTM) Put option. If the market experiences a flash crash, the Put value increases dramatically, compensating for underlying portfolio losses.
+            </p>
+          </div>
+          <div>
+            <h4 className="text-xs font-bold text-white mb-1">💵 Covered Call Strategy (Yield Generation)</h4>
+            <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+              For stocks consolidating in a range (such as ITC), sell OTM Call options. The premiums collected provide a steady income yield, offsetting slight downside movements and maximizing yield during flat consolidations.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <div className="text-center">
+        <button onClick={() => markComplete('greeks')} className="px-6 py-2 rounded-xl text-sm font-bold cursor-pointer transition-all hover:scale-105"
+          style={{ background: completedModules.has('greeks') ? 'rgba(0,214,143,0.2)' : 'linear-gradient(135deg, #ec4899, #f43f5e)', color: 'white' }}>
+          {completedModules.has('greeks') ? '✓ Module Complete' : 'Mark Module as Complete'}
+        </button>
+      </div>
+
+      <QuizWidget moduleId="greeks" />
+    </div>
+  );
+
   // ─── Module Router ────────────────────────────────────────────────
 
   const renderModule = () => {
@@ -910,6 +1166,10 @@ export default function LearningAcademy() {
       case 'algorithm': return renderAlgorithm();
       case 'risk': return renderRisk();
       case 'workflow': return renderWorkflow();
+      case 'patterns': return renderPatterns();
+      case 'fundamentals': return renderFundamentals();
+      case 'sentiment': return renderSentiment();
+      case 'greeks': return renderGreeks();
       default: return renderTechnicals();
     }
   };
@@ -925,7 +1185,7 @@ export default function LearningAcademy() {
             🎓 Trading Academy
           </h1>
           <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
-            Master technicals, derivatives, the algorithm, and risk management — end to end.
+            Master technicals, fundamentals, options Greeks, the algorithm, and risk management — end to end.
           </p>
         </div>
         <Link href="/predictions" className="text-xs px-3 py-1.5 rounded-lg font-bold"
@@ -994,7 +1254,7 @@ export default function LearningAcademy() {
                   border: activeModule === m.id ? `1px solid ${m.color}40` : '1px solid transparent',
                 }}>
                 <span>{m.icon}</span>
-                <span className="flex-1">{m.label}</span>
+                <span className="flex-1 text-left">{m.label}</span>
                 {completedModules.has(m.id) && <span className="text-green-400 text-xs">✓</span>}
               </button>
             ))}
