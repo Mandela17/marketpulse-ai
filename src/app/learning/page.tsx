@@ -33,6 +33,9 @@ const modules = [
   { id: 'fundamentals', label: 'Fundamentals & Screening', icon: '🏛️', color: '#10b981' },
   { id: 'sentiment', label: 'Sentiment & Hype Cycles', icon: '💬', color: '#a78bfa' },
   { id: 'greeks', label: 'Option Greeks & Hedging', icon: '🛡️', color: '#ec4899' },
+  { id: 'psychology', label: 'Trading Psychology & Biases', icon: '🧠', color: '#f43f5e' },
+  { id: 'metrics', label: 'Performance Metrics', icon: '📊', color: '#10b981' },
+  { id: 'taxation', label: 'Indian Taxation & Audits', icon: '🏦', color: '#06b6d4' },
 ];
 
 // ─── Quiz Data ──────────────────────────────────────────────────────
@@ -170,6 +173,48 @@ const quizzes: Record<string, QuizQuestion[]> = {
       explanation: 'Buying a Protective Put acts as insurance. If the stock falls below the strike price, the Put option gains value, offsetting the losses in the underlying shares.',
     },
   ],
+  psychology: [
+    {
+      question: 'Which cognitive bias causes traders to hold onto a losing stock hoping to break even?',
+      options: ['FOMO', 'Loss Aversion (Prospect Theory)', 'Confirmation Bias', 'Revenge Trading'],
+      correct: 1,
+      explanation: 'Loss Aversion causes traders to hold losing trades because admitting a loss hurts twice as much as the happiness of a gain. This behavior leads to massive drawdowns.',
+    },
+    {
+      question: 'In a trading system with a 55% Win Rate, how likely is it to experience 3 consecutive losses?',
+      options: ['Virtually impossible', 'Around 9.1% (roughly 1 in 11 sets of trades)', '55%', 'Less than 1%'],
+      correct: 1,
+      explanation: 'P(3 losses) = (1 - 0.55)^3 = (0.45)^3 = 9.11%. A run of 3 consecutive losses is mathematically very common and should be expected as normal variance.',
+    },
+  ],
+  metrics: [
+    {
+      question: 'What does a Profit Factor of 1.8x imply?',
+      options: ['The system is losing money', 'Gross profits are 1.8 times the gross losses (profitable)', 'You win 1.8% of your trades', 'Sharpe ratio is 1.8'],
+      correct: 1,
+      explanation: 'Profit Factor = Gross Profits / Gross Losses. A value > 1.0 means the strategy is profitable. A profit factor of 1.8x is considered very healthy.',
+    },
+    {
+      question: 'Which metric only evaluates downside risk variance (ignoring upside volatility)?',
+      options: ['Sharpe Ratio', 'Sortino Ratio', 'Profit Factor', 'Win Rate'],
+      correct: 1,
+      explanation: 'Sortino Ratio only penalizes downside (negative) volatility. Sharpe Ratio penalizes both upside and downside volatility. Traders prefer Sortino because upside volatility is desirable.',
+    },
+  ],
+  taxation: [
+    {
+      question: 'Under Indian Income Tax rules, how is F&O (Futures & Options) trading classified?',
+      options: ['Speculative Business Income', 'Non-Speculative Business Income', 'Short Term Capital Gains (STCG)', 'Salaried Income'],
+      correct: 1,
+      explanation: 'F&O is treated as Non-Speculative Business Income. This allows traders to declare expenses like internet, charts, brokerage, and laptop depreciation as business costs to offset taxes.',
+    },
+    {
+      question: 'Which equity segment allows tax losses to be carried forward for 8 years and offset against general business income?',
+      options: ['F&O (Non-Speculative Business)', 'Intraday Equity (Speculative Business)', 'Long Term Capital Gains only', 'None of the above'],
+      correct: 0,
+      explanation: 'Non-speculative business losses (like F&O) can be carried forward for 8 years and offset against any other business profits. Intraday speculative losses can only be carried forward for 4 years.',
+    },
+  ],
 };
 
 // ─── OI Decoder Data ────────────────────────────────────────────────
@@ -216,6 +261,14 @@ export default function LearningAcademy() {
 
   // Module 9: Theta Decay State
   const [thetaDays, setThetaDays] = useState(20);
+
+  // Module 10: Psychology Bias State
+  const [selectedBias, setSelectedBias] = useState<string | null>(null);
+
+  // Module 11: Performance Metrics State
+  const [metricsWinRate, setMetricsWinRate] = useState(55);
+  const [metricsAvgProfit, setMetricsAvgProfit] = useState(3000);
+  const [metricsAvgLoss, setMetricsAvgLoss] = useState(1000);
 
   // Progress
   const progress = Math.round((completedModules.size / modules.length) * 100);
@@ -1157,6 +1210,263 @@ export default function LearningAcademy() {
     </div>
   );
 
+  const renderPsychology = () => {
+    const biasScenarios = [
+      {
+        id: 'fomo',
+        title: '🔥 Stock is surging +12%! I want to buy now.',
+        advice: '🚨 FOMO RISK! Entering after a parabolic move exposes you to severe pullback risk. The AI model checks if the price is >10% extended from the 20-day EMA and discounts the confidence level. Wait for a breakout retest or a pullback to the EMA support.',
+      },
+      {
+        id: 'loss_aversion',
+        title: '📉 Trade hit my stop-loss, but I want to hold.',
+        advice: '🚨 LOSS AVERSION RISK! Prospect theory proves humans feel the pain of a loss twice as strongly as the pleasure of a gain, leading to holding losers to zero. Your stop-loss is your mathematical protection. Trust the VIX-adaptive stop and exit immediately.',
+      },
+      {
+        id: 'revenge_trading',
+        title: '😡 I just had 3 losses in a row. I need to make it back.',
+        advice: '🚨 REVENGE TRADING RISK! Over-leveraging or force-trading non-signals to recover capital usually leads to account blowouts. Mathematically, even in a 55% win-rate system, there is a 9.1% probability of experiencing 3 losses in a row. Stop trading for the day.',
+      },
+      {
+        id: 'confirmation_bias',
+        title: '📖 I am looking for news supporting my open position.',
+        advice: '🚨 CONFIRMATION BIAS RISK! Seeking only positive articles and ignoring red flags (like falling delivery volumes or rising PCR) leads to trading blind. The ML model looks at news neutral/objectively, calculating sentiment decay and velocity without emotional bias.',
+      },
+    ];
+
+    return (
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-lg font-bold text-white mb-1">🧠 Module 10: Trading Psychology & Emotional Discipline</h2>
+          <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Trading is 10% strategy and 90% execution discipline. Neutralize cognitive biases using system rules.</p>
+        </div>
+
+        {/* Self Test */}
+        <section className="p-5 rounded-xl animate-fade-in" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+          <h3 className="text-sm font-bold text-white mb-3 text-rose-400">🧠 Interactive Trader Bias Self-Test</h3>
+          <p className="text-xs mb-4" style={{ color: 'var(--text-secondary)' }}>Click on the scenario you are currently feeling to reveal psychological advice:</p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+            {biasScenarios.map(s => (
+              <button key={s.id}
+                onClick={() => setSelectedBias(selectedBias === s.id ? null : s.id)}
+                className="p-3.5 rounded-xl text-left transition-all cursor-pointer hover:scale-[1.02]"
+                style={{
+                  background: selectedBias === s.id ? 'rgba(244,63,94,0.1)' : 'rgba(255,255,255,0.02)',
+                  border: `1px solid ${selectedBias === s.id ? 'rgba(244,63,94,0.4)' : 'var(--border-color)'}`,
+                }}>
+                <span className="text-xs font-bold text-white">{s.title}</span>
+              </button>
+            ))}
+          </div>
+
+          {selectedBias && (
+            <div className="p-4 rounded-lg animate-fade-in" style={{
+              background: 'rgba(244,63,94,0.06)',
+              border: '1px solid rgba(244,63,94,0.2)',
+            }}>
+              <p className="text-xs text-slate-300">
+                {biasScenarios.find(s => s.id === selectedBias)?.advice}
+              </p>
+            </div>
+          )}
+        </section>
+
+        {/* Drawdowns */}
+        <section className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+          <h3 className="text-sm font-bold text-white mb-3 text-rose-400">📊 The Math of Drawdowns</h3>
+          <p className="text-xs mb-3" style={{ color: 'var(--text-secondary)' }}>
+            Drawdowns are normal. A sequence of losses does not mean your edge is gone:
+          </p>
+          <Formula
+            label="Probability of Consecutive Losses"
+            formula={`P(N consecutive losses) = (1 - Win Rate)^N\n\nFor a system with a 55% Win Rate:\n  • 3 losses in a row: (0.45)^3 = 9.1% (1 in 11 trades)\n  • 5 losses in a row: (0.45)^5 = 1.8% (1 in 55 trades)`}
+            desc="Statistically, you will experience 5 losses in a row eventually. Professional traders do not panic or change their strategy during drawdowns — they preserve capital using proper sizing."
+            themeColor="#f43f5e"
+          />
+        </section>
+
+        <div className="text-center">
+          <button onClick={() => markComplete('psychology')} className="px-6 py-2 rounded-xl text-sm font-bold cursor-pointer transition-all hover:scale-105"
+            style={{ background: completedModules.has('psychology') ? 'rgba(0,214,143,0.2)' : 'linear-gradient(135deg, #f43f5e, #ff6b6b)', color: 'white' }}>
+            {completedModules.has('psychology') ? '✓ Module Complete' : 'Mark Module as Complete'}
+          </button>
+        </div>
+
+        <QuizWidget moduleId="psychology" />
+      </div>
+    );
+  };
+
+  const renderMetrics = () => {
+    const expectancy = (metricsWinRate / 100 * metricsAvgProfit) - ((1 - metricsWinRate / 100) * metricsAvgLoss);
+    const profitFactor = (metricsWinRate / 100 * metricsAvgProfit) / (((1 - metricsWinRate / 100) * metricsAvgLoss) || 1);
+
+    return (
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-lg font-bold text-white mb-1">📊 Module 11: Quantitative Performance Metrics</h2>
+          <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>How quantitative systems analyze performance using statistical indices rather than raw dollar returns.</p>
+        </div>
+
+        {/* Expectancy Calculator */}
+        <section className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+          <h3 className="text-sm font-bold text-white mb-3 text-emerald-400">🧮 Interactive Expectancy Calculator</h3>
+          <p className="text-xs mb-4" style={{ color: 'var(--text-secondary)' }}>Input your system metrics to calculate Expected Value (EV):</p>
+
+          <div className="grid grid-cols-3 gap-3 mb-4">
+            <div>
+              <label className="text-[9px] uppercase font-bold text-slate-400 block mb-1">Win Rate %</label>
+              <input type="number" value={metricsWinRate} onChange={e => setMetricsWinRate(Math.min(100, Math.max(0, parseInt(e.target.value) || 0)))}
+                className="w-full p-2 rounded bg-slate-900 border border-white/10 text-white font-bold text-xs" />
+            </div>
+            <div>
+              <label className="text-[9px] uppercase font-bold text-slate-400 block mb-1">Avg Profit (₹)</label>
+              <input type="number" value={metricsAvgProfit} onChange={e => setMetricsAvgProfit(parseInt(e.target.value) || 0)}
+                className="w-full p-2 rounded bg-slate-900 border border-white/10 text-white font-bold text-xs" />
+            </div>
+            <div>
+              <label className="text-[9px] uppercase font-bold text-slate-400 block mb-1">Avg Loss (₹)</label>
+              <input type="number" value={metricsAvgLoss} onChange={e => setMetricsAvgLoss(parseInt(e.target.value) || 0)}
+                className="w-full p-2 rounded bg-slate-900 border border-white/10 text-white font-bold text-xs" />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="p-4 rounded-xl text-center border transition-all duration-300" style={{
+              background: expectancy > 0 ? 'rgba(16,185,129,0.06)' : 'rgba(239,68,68,0.06)',
+              borderColor: expectancy > 0 ? '#10b981' : '#ef4444',
+            }}>
+              <p className="text-[10px] uppercase text-slate-400">Expectancy (Value per Trade)</p>
+              <p className="text-2xl font-black text-white mt-1">₹{Math.round(expectancy).toLocaleString('en-IN')}</p>
+              <p className="text-[10px] mt-1" style={{ color: expectancy > 0 ? '#10b981' : '#ef4444' }}>
+                {expectancy > 0 ? '🏆 Mathematically Profitable Setup' : '⚠️ Mathematically Ruinous Strategy'}
+              </p>
+            </div>
+
+            <div className="p-4 rounded-xl text-center border border-white/10 bg-white/[0.02]">
+              <p className="text-[10px] uppercase text-slate-400">Implied Profit Factor</p>
+              <p className="text-2xl font-black text-white mt-1">{profitFactor.toFixed(2)}x</p>
+              <p className="text-[10px] mt-1 text-slate-400">Ratio of profits to losses</p>
+            </div>
+          </div>
+        </section>
+
+        {/* Detailed Metrics */}
+        <section className="space-y-4">
+          <div className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+            <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-2">1. Sharpe Ratio vs Sortino Ratio</h4>
+            <ul className="space-y-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
+              <li>
+                <strong className="text-white">Sharpe Ratio:</strong> Evaluates return per unit of volatility. Considers both upside and downside swings.
+              </li>
+              <li>
+                <strong className="text-white">Sortino Ratio:</strong> A variant of Sharpe that only penalizes downside volatility. Since upside volatility is desirable, Sortino is preferred by active traders.
+              </li>
+            </ul>
+          </div>
+        </section>
+
+        <div className="text-center">
+          <button onClick={() => markComplete('metrics')} className="px-6 py-2 rounded-xl text-sm font-bold cursor-pointer transition-all hover:scale-105"
+            style={{ background: completedModules.has('metrics') ? 'rgba(0,214,143,0.2)' : 'linear-gradient(135deg, #10b981, #3b82f6)', color: 'white' }}>
+            {completedModules.has('metrics') ? '✓ Module Complete' : 'Mark Module as Complete'}
+          </button>
+        </div>
+
+        <QuizWidget moduleId="metrics" />
+      </div>
+    );
+  };
+
+  const renderTaxation = () => (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-lg font-bold text-white mb-1">🏦 Module 12: Indian Trader Taxation & Compliance</h2>
+        <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Taxation frameworks under the Income Tax Act for F&O, intraday, and capital gains in India.</p>
+      </div>
+
+      {/* Tax Matrix Table */}
+      <section className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+        <h3 className="text-sm font-bold text-white mb-3 text-cyan-400">📊 Tax Classification Matrix</h3>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="border-b border-white/10 text-slate-400">
+                <th className="py-2 pr-4 font-bold">Segment</th>
+                <th className="py-2 px-4 font-bold">Income Type</th>
+                <th className="py-2 px-4 font-bold">Tax Rate</th>
+                <th className="py-2 pl-4 font-bold">Loss Offset Limits</th>
+              </tr>
+            </thead>
+            <tbody style={{ color: 'var(--text-secondary)' }}>
+              <tr className="border-b border-white/5">
+                <td className="py-2.5 pr-4 font-bold text-white">Intraday Equity</td>
+                <td className="py-2.5 px-4 text-amber-400">Speculative Business</td>
+                <td className="py-2.5 px-4">Individual Income Slab Rates</td>
+                <td className="py-2.5 pl-4">4 years (only against speculative profit)</td>
+              </tr>
+              <tr className="border-b border-white/5">
+                <td className="py-2.5 pr-4 font-bold text-white">F&O (Derivatives)</td>
+                <td className="py-2.5 px-4 text-emerald-400">Non-Speculative Business</td>
+                <td className="py-2.5 px-4">Individual Income Slab Rates</td>
+                <td className="py-2.5 pl-4">8 years (against any business income)</td>
+              </tr>
+              <tr className="border-b border-white/5">
+                <td className="py-2.5 pr-4 font-bold text-white">Delivery Equity (&lt;1 yr)</td>
+                <td className="py-2.5 px-4 text-blue-400">STCG</td>
+                <td className="py-2.5 px-4">Flat 15%</td>
+                <td className="py-2.5 pl-4">8 years (against STCG/LTCG)</td>
+              </tr>
+              <tr>
+                <td className="py-2.5 pr-4 font-bold text-white">Delivery Equity (&gt;1 yr)</td>
+                <td className="py-2.5 px-4 text-indigo-400">LTCG</td>
+                <td className="py-2.5 px-4">10% on gains &gt; ₹1 Lakh</td>
+                <td className="py-2.5 pl-4">8 years (only against LTCG)</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* Compliance Rules */}
+      <section className="space-y-4">
+        <div className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+          <h4 className="text-xs font-bold text-cyan-400 uppercase tracking-wider mb-2">📑 Non-Speculative Business Expenses (F&O)</h4>
+          <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+            Since F&O is treated as business income, you can claim tax deductions for business-related expenses. Deductible items include:
+          </p>
+          <ul className="list-disc list-inside text-xs mt-2 space-y-1.5" style={{ color: 'var(--text-secondary)' }}>
+            <li>• Transaction fees (brokerage, STT, exchange transaction charges).</li>
+            <li>• Equipment costs (laptop, monitor depreciation).</li>
+            <li>• Operations expense (internet bills, electricity fraction, office rent).</li>
+            <li>• Subscriptions (charts, data feeds, and algorithmic alert systems).</li>
+          </ul>
+        </div>
+
+        <div className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+          <h4 className="text-xs font-bold text-cyan-400 uppercase tracking-wider mb-2">🧑‍💼 Section 44AB — Audit Limits</h4>
+          <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+            A tax audit by a Chartered Accountant is required if your business turnover exceeds limits:
+          </p>
+          <ul className="list-disc list-inside text-xs mt-2 space-y-1.5" style={{ color: 'var(--text-secondary)' }}>
+            <li>• The standard threshold is ₹10 Crore (for digital transactions, which covers all stock market trades).</li>
+            <li>• If audit conditions apply, you must file ITR-3 and submit audited financials.</li>
+          </ul>
+        </div>
+      </section>
+
+      <div className="text-center">
+        <button onClick={() => markComplete('taxation')} className="px-6 py-2 rounded-xl text-sm font-bold cursor-pointer transition-all hover:scale-105"
+          style={{ background: completedModules.has('taxation') ? 'rgba(0,214,143,0.2)' : 'linear-gradient(135deg, #22d3ee, #06b6d4)', color: 'white' }}>
+          {completedModules.has('taxation') ? '✓ Module Complete' : 'Mark Module as Complete'}
+        </button>
+      </div>
+
+      <QuizWidget moduleId="taxation" />
+    </div>
+  );
+
   // ─── Module Router ────────────────────────────────────────────────
 
   const renderModule = () => {
@@ -1170,6 +1480,9 @@ export default function LearningAcademy() {
       case 'fundamentals': return renderFundamentals();
       case 'sentiment': return renderSentiment();
       case 'greeks': return renderGreeks();
+      case 'psychology': return renderPsychology();
+      case 'metrics': return renderMetrics();
+      case 'taxation': return renderTaxation();
       default: return renderTechnicals();
     }
   };
