@@ -13,11 +13,19 @@ import { getServiceClient } from './supabase';
 
 // ─── Types ──────────────────────────────────────────────────────────
 
+export type TradeGrade = 'A' | 'B' | 'C' | 'D' | 'F';
+
 export interface MLPrediction {
   symbol: string;
   direction: 'up' | 'down';
   confidence: number;          // 0-100
   confidenceLevel: 'low' | 'moderate' | 'high' | 'very_high';
+  // Signal confluence
+  tradeGrade: TradeGrade;
+  confluenceScore: number;      // 0-6: how many signal categories agree
+  tradeable: boolean;           // Only true for A/B grades
+  confluenceBreakdown: Record<string, 'bullish' | 'bearish' | 'neutral'>;
+  // Signals
   supportingSignals: string[];
   contradictingSignals: string[];
   featureImportance: Record<string, number>;
@@ -299,6 +307,104 @@ const FEATURE_NAMES = [
   'GIFT Nifty Gap', 'Max Pain Distance',
 ];
 
+// ─── Signal Confluence Scoring ──────────────────────────────────────
+// Counts how many INDEPENDENT signal categories agree on direction.
+// 6 categories: Technical Momentum, Mean Reversion, Volume, Institutional Flow,
+//               Sentiment/VIX, Options Data
+
+interface ConfluenceResult {
+  score: number;                    // 0-6: categories agreeing with predicted direction
+  breakdown: Record<string, 'bullish' | 'bearish' | 'neutral'>;
+  grade: TradeGrade;
+  tradeable: boolean;
+}
+
+function computeConfluence(
+  fv: FeatureVector,
+  direction: 'up' | 'down',
+  gbdtDir: 'up' | 'down',
+  heurDir: 'up' | 'down',
+  confidence: number,
+): ConfluenceResult {
+  const breakdown: Record<string, 'bullish' | 'bearish' | 'neutral'> = {};
+
+  // 1. Technical Momentum (RSI + MACD + EMA trend)
+  let techScore = 0;
+  if (fv.rsi < 40) techScore++;
+  if (fv.rsi > 60) techScore--;
+  if (fv.macdHist > 0) techScore++;
+  if (fv.macdHist < 0) techScore--;
+  if (fv.close > fv.ema20) techScore++;
+  if (fv.close < fv.ema20) techScore--;
+  breakdown['Technical'] = techScore > 0 ? 'bullish' : techScore < 0 ? 'bearish' : 'neutral';
+
+  // 2. Mean Reversion / Bollinger
+  let bbScore = 0;
+  if (fv.close < fv.bollingerLower) bbScore = 1;      // Oversold → bullish reversion
+  else if (fv.close > fv.bollingerUpper) bbScore = -1; // Overbought → bearish reversion
+  breakdown['Bollinger'] = bbScore > 0 ? 'bullish' : bbScore < 0 ? 'bearish' : 'neutral';
+
+  // 3. Volume Confirmation
+  let volScore = 0;
+  if (fv.volumeRatio > 1.3 && fv.close > fv.ema20) volScore = 1;
+  else if (fv.volumeRatio > 1.3 && fv.close < fv.ema20) volScore = -1;
+  else if (fv.deliveryPct > 55 && fv.close > fv.ema20) volScore = 1;
+  breakdown['Volume'] = volScore > 0 ? 'bullish' : volScore < 0 ? 'bearish' : 'neutral';
+
+  // 4. Institutional Flow (FII + DII)
+  let flowScore = 0;
+  if (fv.fiiNet > 500) flowScore++;
+  if (fv.fiiNet < -500) flowScore--;
+  if (fv.diiNet > 500) flowScore += 0.5;
+  if (fv.diiNet < -500) flowScore -= 0.5;
+  if (fv.fiiVelocity > 300) flowScore += 0.5;
+  if (fv.fiiVelocity < -300) flowScore -= 0.5;
+  breakdown['Institutional'] = flowScore > 0 ? 'bullish' : flowScore < 0 ? 'bearish' : 'neutral';
+
+  // 5. Sentiment / VIX
+  let sentScore = 0;
+  if (fv.sentimentScore > 60) sentScore++;
+  if (fv.sentimentScore < 40) sentScore--;
+  if (fv.indiaVix < 14) sentScore += 0.5;  // Calm = bullish
+  if (fv.indiaVix > 22) sentScore -= 0.5;  // Fear = bearish
+  breakdown['Sentiment'] = sentScore > 0 ? 'bullish' : sentScore < 0 ? 'bearish' : 'neutral';
+
+  // 6. Options Data (PCR + Max Pain)
+  let optScore = 0;
+  if (fv.pcr > 1.2) optScore++;    // High PCR = bullish
+  if (fv.pcr < 0.7) optScore--;    // Low PCR = bearish
+  if (fv.maxPainDist < -0.3) optScore += 0.5;   // Below max pain = upward pull
+  if (fv.maxPainDist > 0.3) optScore -= 0.5;    // Above max pain = downward pull
+  breakdown['Options'] = optScore > 0 ? 'bullish' : optScore < 0 ? 'bearish' : 'neutral';
+
+  // Count categories agreeing with predicted direction
+  const targetSentiment = direction === 'up' ? 'bullish' : 'bearish';
+  let confluenceScore = 0;
+  for (const cat of Object.values(breakdown)) {
+    if (cat === targetSentiment) confluenceScore++;
+  }
+
+  // Grade calculation
+  const modelsAgree = gbdtDir === heurDir;
+  let grade: TradeGrade;
+
+  if (confluenceScore >= 4 && confidence >= 62 && modelsAgree) {
+    grade = 'A';  // Strong edge
+  } else if (confluenceScore >= 3 && confidence >= 58 && modelsAgree) {
+    grade = 'B';  // Moderate edge
+  } else if (confluenceScore >= 2 && confidence >= 55) {
+    grade = 'C';  // Weak — no trade
+  } else if (confluenceScore >= 1) {
+    grade = 'D';  // Very weak — avoid
+  } else {
+    grade = 'F';  // No signals agree — strong avoid
+  }
+
+  const tradeable = grade === 'A' || grade === 'B';
+
+  return { score: confluenceScore, breakdown, grade, tradeable };
+}
+
 // ─── Main Prediction Function ───────────────────────────────────────
 
 // ─── Frozen Model Cache ─────────────────────────────────────────────
@@ -498,6 +604,9 @@ export async function generatePrediction(
       const direction: 'up' | 'down' = heurResult.probability >= 0.5 ? 'up' : 'down';
       const confidence = Math.round((direction === 'up' ? heurResult.probability : 1 - heurResult.probability) * 100);
 
+      // Compute confluence (heuristic-only: both models = heuristic)
+      const confluence = computeConfluence(fv, direction, direction, direction, confidence);
+
       const supportingSignals = classifySignals(heurResult.signals, direction, 'supporting').slice(0, 5);
       const contradictingSignals = classifySignals(heurResult.signals, direction, 'contradicting').slice(0, 3);
 
@@ -506,10 +615,17 @@ export async function generatePrediction(
         predictedDirection: direction,
         probability: confidence,
         confidenceLevel: getConfidenceLevel(confidence),
-        featuresJson: { heuristicSignals: heurResult.signals, subModels: { heuristic: { direction, probability: confidence } } },
+        featuresJson: {
+          heuristicSignals: heurResult.signals,
+          subModels: { heuristic: { direction, probability: confidence } },
+          tradeGrade: confluence.grade,
+          confluenceScore: confluence.score,
+          confluenceBreakdown: confluence.breakdown,
+          tradeable: confluence.tradeable,
+        },
         supportingSignals,
         contradictingSignals,
-        modelVersion: 'v4-heuristic',
+        modelVersion: 'v5-selective',
         predictedAt: new Date().toISOString(),
       });
 
@@ -518,6 +634,10 @@ export async function generatePrediction(
         direction,
         confidence,
         confidenceLevel: getConfidenceLevel(confidence),
+        tradeGrade: confluence.grade,
+        confluenceScore: confluence.score,
+        tradeable: confluence.tradeable,
+        confluenceBreakdown: confluence.breakdown,
         supportingSignals,
         contradictingSignals,
         featureImportance: {},
@@ -529,7 +649,7 @@ export async function generatePrediction(
           trainingAccuracy: 0,
           validationAccuracy: 0,
           totalSamples: history.length,
-           modelVersion: 'v4-heuristic',
+          modelVersion: 'v5-selective',
           bestIteration: 0,
           ensembleWeights,
         },
@@ -638,11 +758,14 @@ export async function generatePrediction(
 
     const confidence = Math.max(50, Math.min(95, rawConfidence - confidenceDiscount));
 
-    // 9. Generate human-readable signals
+    // 9. Signal confluence and trade grading
+    const confluence = computeConfluence(todayFV, direction, gbdtDir, heurDir, confidence);
+
+    // 10. Generate human-readable signals
     const supportingSignals = classifySignals(heurResult.signals, direction, 'supporting').slice(0, 5);
     const contradictingSignals = classifySignals(heurResult.signals, direction, 'contradicting').slice(0, 3);
 
-    // 10. Feature importance from GBDT
+    // 11. Feature importance from GBDT
     const featureImportance: Record<string, number> = {};
     for (let j = 0; j < gbdtModel.featureImportance.length && j < FEATURE_NAMES.length; j++) {
       featureImportance[FEATURE_NAMES[j]] = gbdtModel.featureImportance[j];
@@ -653,6 +776,10 @@ export async function generatePrediction(
       direction,
       confidence,
       confidenceLevel: getConfidenceLevel(confidence),
+      tradeGrade: confluence.grade,
+      confluenceScore: confluence.score,
+      tradeable: confluence.tradeable,
+      confluenceBreakdown: confluence.breakdown,
       supportingSignals,
       contradictingSignals,
       featureImportance,
@@ -670,13 +797,13 @@ export async function generatePrediction(
         trainingAccuracy: gbdtModel.trainingMetrics.trainingAccuracy,
         validationAccuracy: gbdtModel.trainingMetrics.validationAccuracy,
         totalSamples: m,
-         modelVersion: usedFrozenModel ? 'v4-gbdt-frozen' : 'v4-gbdt-adaptive',
-         bestIteration: gbdtModel.trainingMetrics.bestIteration,
-         ensembleWeights,
+        modelVersion: usedFrozenModel ? 'v5-selective-frozen' : 'v5-selective',
+        bestIteration: gbdtModel.trainingMetrics.bestIteration,
+        ensembleWeights,
       },
     };
 
-    // 11. Save prediction to Supabase
+    // 12. Save prediction to Supabase
     await savePrediction({
       symbol,
       predictedDirection: direction,
@@ -688,6 +815,10 @@ export async function generatePrediction(
         gbdtTrainAcc: gbdtModel.trainingMetrics.trainingAccuracy,
         gbdtValAcc: gbdtModel.trainingMetrics.validationAccuracy,
         ensembleWeights,
+        tradeGrade: confluence.grade,
+        confluenceScore: confluence.score,
+        confluenceBreakdown: confluence.breakdown,
+        tradeable: confluence.tradeable,
       },
       supportingSignals,
       contradictingSignals,

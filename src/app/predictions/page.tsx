@@ -326,156 +326,201 @@ export default function PredictionsDashboard() {
         </div>
       )}
 
-      {/* Predictions Table */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-bold border-b pb-2 w-full" style={{ color: 'var(--text-primary)', borderColor: 'var(--border-color)' }}>
-            Active Predictions ({activePredictions.length})
-          </h2>
-        </div>
+      {/* Predictions Split View */}
+      {!loading && !isEmpty && (() => {
+        // Helper to get trade grade from features_json
+        const getGrade = (pred: any) => pred.features_json?.tradeGrade || pred.featuresJson?.tradeGrade || 'C';
+        const getTradeable = (pred: any) => pred.features_json?.tradeable || pred.featuresJson?.tradeable || false;
+        const getConfluence = (pred: any) => pred.features_json?.confluenceScore ?? pred.featuresJson?.confluenceScore ?? 0;
+        const getBreakdown = (pred: any) => pred.features_json?.confluenceBreakdown || pred.featuresJson?.confluenceBreakdown || {};
 
-        <div className="rounded-xl border overflow-hidden" style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
-          {loading ? (
-            <div className="p-12 text-center">
-              <div className="w-8 h-8 border-2 rounded-full animate-spin mx-auto mb-3"
-                style={{ borderColor: 'var(--border-color)', borderTopColor: 'var(--accent-blue)' }} />
-              <p className="text-sm text-slate-400">Loading predictions...</p>
+        const tradeSignals = activePredictions.filter(p => getTradeable(p));
+        const monitoring = activePredictions.filter(p => !getTradeable(p));
+
+        const gradeStyles: Record<string, { bg: string; border: string; color: string; label: string }> = {
+          A: { bg: 'rgba(0,214,143,0.12)', border: 'rgba(0,214,143,0.4)', color: '#00d68f', label: 'STRONG' },
+          B: { bg: 'rgba(255,184,0,0.10)', border: 'rgba(255,184,0,0.4)', color: '#fbbf24', label: 'MODERATE' },
+          C: { bg: 'rgba(255,255,255,0.03)', border: 'var(--border-color)', color: 'var(--text-muted)', label: 'WEAK' },
+          D: { bg: 'rgba(255,77,106,0.05)', border: 'rgba(255,77,106,0.2)', color: 'var(--text-muted)', label: 'AVOID' },
+          F: { bg: 'rgba(255,77,106,0.05)', border: 'rgba(255,77,106,0.2)', color: 'var(--text-muted)', label: 'NO EDGE' },
+        };
+
+        const categories = ['Technical', 'Bollinger', 'Volume', 'Institutional', 'Sentiment', 'Options'];
+        const catIcons: Record<string, string> = {
+          Technical: '📊', Bollinger: '📏', Volume: '📦', Institutional: '🏛️', Sentiment: '💬', Options: '📋',
+        };
+
+        const renderRow = (pred: any, highlight: boolean) => {
+          const dir = pred.predictedDirection || pred.predicted_direction;
+          const grade = getGrade(pred);
+          const confluence = getConfluence(pred);
+          const breakdown = getBreakdown(pred);
+          const gs = gradeStyles[grade] || gradeStyles.C;
+
+          return (
+            <tr key={pred.id}
+              className="border-b transition-colors hover:bg-white hover:bg-opacity-[0.02]"
+              style={{ borderColor: 'var(--border-color)', opacity: highlight ? 1 : 0.6 }}>
+              {/* Grade Badge */}
+              <td className="p-3">
+                <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-xs font-black"
+                  style={{ background: gs.bg, border: `1px solid ${gs.border}`, color: gs.color }}>
+                  {grade}
+                </span>
+              </td>
+              {/* Symbol */}
+              <td className="p-3">
+                <Link href={`/stock/${pred.symbol}`}
+                  className="font-bold hover:underline" style={{ color: highlight ? 'var(--accent-blue)' : 'var(--text-secondary)' }}>
+                  {pred.symbol}
+                </Link>
+              </td>
+              {/* Direction */}
+              <td className="p-3">
+                <span className="flex items-center gap-1 text-sm font-bold"
+                  style={{ color: dir === 'up' ? 'var(--accent-green)' : 'var(--accent-red)' }}>
+                  {dir === 'up' ? '▲ BUY' : '▼ SELL'}
+                </span>
+              </td>
+              {/* Confidence */}
+              <td className="p-3">
+                <span className="font-bold text-sm" style={{ color: 'var(--text-primary)' }}>{pred.probability}%</span>
+              </td>
+              {/* Confluence Dots */}
+              <td className="p-3">
+                <div className="flex gap-1" title={`${confluence}/6 signals aligned`}>
+                  {categories.map(cat => {
+                    const state = breakdown[cat] || 'neutral';
+                    const dotColor = state === 'bullish' ? '#00d68f' : state === 'bearish' ? '#ff4d6a' : 'rgba(255,255,255,0.15)';
+                    return (
+                      <span key={cat} title={`${catIcons[cat]} ${cat}: ${state}`}
+                        className="w-3.5 h-3.5 rounded-full inline-block"
+                        style={{ background: dotColor, border: '1px solid rgba(255,255,255,0.1)' }} />
+                    );
+                  })}
+                  <span className="text-[10px] ml-1 font-bold" style={{ color: 'var(--text-muted)' }}>{confluence}/6</span>
+                </div>
+              </td>
+              {/* Time */}
+              <td className="p-3 text-right">
+                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                  {(pred.predictedAt || pred.predicted_at) ? formatPredictionTime(pred.predictedAt || pred.predicted_at) : '—'}
+                </span>
+              </td>
+              {/* Action */}
+              <td className="p-3 text-right">
+                <Link href={`/stock/${pred.symbol}`}
+                  className="text-[11px] px-2 py-1 rounded font-bold hover:bg-blue-600 transition-colors"
+                  style={{ background: 'rgba(59,130,246,0.15)', color: '#60a5fa' }}>
+                  View →
+                </Link>
+              </td>
+            </tr>
+          );
+        };
+
+        return (
+          <div className="space-y-6">
+            {/* Active Trade Signals (A/B) */}
+            <div>
+              <div className="flex items-center gap-3 mb-3">
+                <h2 className="text-sm font-bold" style={{ color: 'var(--accent-green)' }}>
+                  🎯 Active Trade Signals
+                </h2>
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-bold"
+                  style={{ background: 'rgba(0,214,143,0.1)', color: '#00d68f' }}>
+                  {tradeSignals.length} of {activePredictions.length}
+                </span>
+                <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                  High confluence — multiple signals aligned
+                </span>
+              </div>
+
+              {tradeSignals.length === 0 ? (
+                <div className="rounded-xl border p-6 text-center" style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
+                  <p className="text-lg mb-1">🔍</p>
+                  <p className="text-sm font-bold text-white">No strong trade signals today</p>
+                  <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+                    The system is being selective — no stocks have enough signal confluence for a high-conviction trade right now. This is by design.
+                  </p>
+                </div>
+              ) : (
+                <div className="rounded-xl border overflow-hidden" style={{ background: 'var(--bg-card)', borderColor: 'rgba(0,214,143,0.2)' }}>
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr className="border-b" style={{ background: 'rgba(0,214,143,0.04)', borderColor: 'var(--border-color)' }}>
+                        <th className="p-3 text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Grade</th>
+                        <th className="p-3 text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Symbol</th>
+                        <th className="p-3 text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Signal</th>
+                        <th className="p-3 text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Confidence</th>
+                        <th className="p-3 text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Confluence</th>
+                        <th className="p-3 text-[10px] font-bold uppercase tracking-wider text-right" style={{ color: 'var(--text-muted)' }}>Time</th>
+                        <th className="p-3 text-[10px] font-bold uppercase tracking-wider text-right" style={{ color: 'var(--text-muted)' }}>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tradeSignals.map(pred => renderRow(pred, true))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
-          ) : isEmpty ? (
-            <div className="p-10 text-center space-y-4">
-              <p className="text-4xl">📊</p>
+
+            {/* Monitoring (C/D/F) */}
+            {monitoring.length > 0 && (
               <div>
-                <h3 className="text-lg font-bold text-white mb-1">No Active Predictions Yet</h3>
-                <p className="text-sm text-slate-400 max-w-md mx-auto">
-                  The ML engine hasn't run yet. Click the button below to generate predictions for the top 25 Nifty stocks right now, or visit individual stock pages to trigger predictions one at a time.
-                </p>
-              </div>
-
-              <div className="flex flex-col sm:flex-row items-center justify-center gap-3 mt-4">
-                <button
-                  onClick={handleSeed}
-                  disabled={seeding}
-                  className="flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-sm transition-all cursor-pointer"
-                  style={{
-                    background: seeding ? 'rgba(255,255,255,0.05)' : 'linear-gradient(135deg, #3b82f6, #8b5cf6)',
-                    color: 'white',
-                    opacity: seeding ? 0.7 : 1,
-                  }}>
-                  {seeding ? (
-                    <>
-                      <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      Generating ({KEY_STOCKS_COUNT} stocks)...
-                    </>
-                  ) : (
-                    <>🚀 Generate Predictions Now</>
-                  )}
-                </button>
-
-                <span className="text-xs text-slate-500">or visit a stock page to trigger individually</span>
-              </div>
-
-              <div className="mt-4 p-3 rounded-lg text-left max-w-sm mx-auto"
-                style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)' }}>
-                <p className="text-[10px] font-bold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
-                  Quick Links — Popular Stocks
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {['RELIANCE', 'TCS', 'HDFCBANK', 'ICICIBANK', 'INFY', 'SBIN', 'BHARTIARTL'].map(s => (
-                    <Link key={s} href={`/stock/${s}`}
-                      className="text-[11px] px-2 py-1 rounded font-medium hover:bg-blue-600 transition-colors"
-                      style={{ background: 'rgba(59,130,246,0.15)', color: '#60a5fa' }}>
-                      {s}
-                    </Link>
-                  ))}
+                <div className="flex items-center gap-3 mb-3">
+                  <h2 className="text-sm font-bold" style={{ color: 'var(--text-muted)' }}>
+                    ⚪ Monitoring ({monitoring.length})
+                  </h2>
+                  <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                    Low confluence — no trade recommended
+                  </span>
+                </div>
+                <div className="rounded-xl border overflow-hidden" style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)', opacity: 0.7 }}>
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr className="border-b" style={{ background: 'rgba(255,255,255,0.02)', borderColor: 'var(--border-color)' }}>
+                        <th className="p-3 text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Grade</th>
+                        <th className="p-3 text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Symbol</th>
+                        <th className="p-3 text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Direction</th>
+                        <th className="p-3 text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Conf</th>
+                        <th className="p-3 text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Confluence</th>
+                        <th className="p-3 text-[10px] font-bold uppercase tracking-wider text-right" style={{ color: 'var(--text-muted)' }}>Time</th>
+                        <th className="p-3 text-[10px] font-bold uppercase tracking-wider text-right" style={{ color: 'var(--text-muted)' }}>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {monitoring.map(pred => renderRow(pred, false))}
+                    </tbody>
+                  </table>
                 </div>
               </div>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left">
-                <thead>
-                  <tr className="border-b" style={{ background: 'rgba(255,255,255,0.03)', borderColor: 'var(--border-color)' }}>
-                    <th className="p-4 text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Symbol</th>
-                    <th className="p-4 text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Direction</th>
-                    <th className="p-4 text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Confidence</th>
-                    <th className="p-4 text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Level</th>
-                    <th className="p-4 text-[10px] font-bold uppercase tracking-wider text-right" style={{ color: 'var(--text-muted)' }}>Predicted At</th>
-                    <th className="p-4 text-[10px] font-bold uppercase tracking-wider text-right" style={{ color: 'var(--text-muted)' }}>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {activePredictions.map((pred, idx) => (
-                    <tr key={pred.id}
-                      className="border-b transition-colors hover:bg-white hover:bg-opacity-[0.02]"
-                      style={{ borderColor: 'var(--border-color)' }}>
-                      <td className="p-4">
-                        <Link href={`/stock/${pred.symbol}`}
-                          className="font-bold hover:underline" style={{ color: 'var(--accent-blue)' }}>
-                          {pred.symbol}
-                        </Link>
-                      </td>
-                      <td className="p-4">
-                        <span className="flex items-center gap-1.5 text-sm font-bold"
-                          style={{ color: (pred.predictedDirection || pred.predicted_direction) === 'up' ? 'var(--accent-green)' : 'var(--accent-red)' }}>
-                          {(pred.predictedDirection || pred.predicted_direction) === 'up' ? '📈 BULLISH' : '📉 BEARISH'}
-                        </span>
-                      </td>
-                      <td className="p-4">
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-sm" style={{ color: 'var(--text-primary)' }}>{pred.probability}%</span>
-                          {/* Confidence bar */}
-                          <div className="w-16 h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.1)' }}>
-                            <div className="h-full rounded-full transition-all"
-                              style={{
-                                width: `${pred.probability}%`,
-                                background: pred.probability >= 70 ? 'var(--accent-green)' :
-                                            pred.probability >= 60 ? 'var(--accent-yellow)' : 'var(--text-muted)',
-                              }} />
-                          </div>
-                        </div>
-                      </td>
-                      <td className="p-4">
-                        <span className="text-[10px] px-2 py-0.5 rounded capitalize font-medium"
-                          style={{
-                            background: (pred.confidenceLevel || pred.confidence_level) === 'high' || (pred.confidenceLevel || pred.confidence_level) === 'very_high'
-                              ? 'rgba(0,214,143,0.1)' : 'rgba(255,255,255,0.05)',
-                            color: (pred.confidenceLevel || pred.confidence_level) === 'high' || (pred.confidenceLevel || pred.confidence_level) === 'very_high'
-                              ? 'var(--accent-green)' : 'var(--text-secondary)',
-                          }}>
-                          {(pred.confidenceLevel || pred.confidence_level)?.replace('_', ' ')}
-                        </span>
-                      </td>
-                      <td className="p-4 text-right">
-                        <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                          {(pred.predictedAt || pred.predicted_at) ? formatPredictionTime(pred.predictedAt || pred.predicted_at) : '—'}
-                        </span>
-                        {(pred.modelVersion || pred.model_version) && (
-                          <p className="text-[9px] mt-0.5" style={{ color: 'rgba(139,92,246,0.7)' }}>
-                            {(() => {
-                              const v = pred.modelVersion || pred.model_version || '';
-                              if (v.includes('frozen')) return 'AI Ensemble ⚡';
-                              if (v.includes('adaptive')) return 'AI Ensemble';
-                              if (v.includes('heuristic')) return 'AI Analysis';
-                              return 'AI Model';
-                            })()}
-                          </p>
-                        )}
-                      </td>
-                      <td className="p-4 text-right">
-                        <Link href={`/stock/${pred.symbol}`}
-                          className="text-[11px] px-2 py-1 rounded font-bold hover:bg-blue-600 transition-colors"
-                          style={{ background: 'rgba(59,130,246,0.15)', color: '#60a5fa' }}>
-                          View →
-                        </Link>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+            )}
+          </div>
+        );
+      })()}
+
+      {/* Loading / Empty states */}
+      {loading && (
+        <div className="rounded-xl border p-12 text-center" style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
+          <div className="w-8 h-8 border-2 rounded-full animate-spin mx-auto mb-3"
+            style={{ borderColor: 'var(--border-color)', borderTopColor: 'var(--accent-blue)' }} />
+          <p className="text-sm text-slate-400">Loading predictions...</p>
         </div>
-      </div>
+      )}
+
+      {isEmpty && (
+        <div className="rounded-xl border p-10 text-center space-y-4" style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
+          <p className="text-4xl">📊</p>
+          <div>
+            <h3 className="text-lg font-bold text-white mb-1">No Active Predictions Yet</h3>
+            <p className="text-sm text-slate-400 max-w-md mx-auto">
+              Click "Generate Predictions" above to create predictions for the top Nifty stocks.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Footer note */}
       <p className="text-[10px] text-center" style={{ color: 'var(--text-muted)', opacity: 0.5 }}>

@@ -1,6 +1,8 @@
-// Advanced Risk Engine v3 — Kelly Criterion + VIX-Aware Adaptive Stops
+// Advanced Risk Engine v4 — Kelly Criterion + VIX-Aware Adaptive Stops + Trade Grade
 // Computes entry, two targets, stop-loss, invalidation, and position sizing.
-// Adjusts dynamically based on India VIX, model confidence, and historical win rate.
+// Adjusts dynamically based on India VIX, model confidence, trade grade, and historical win rate.
+
+import type { TradeGrade } from './mlEngine';
 
 import { getServiceClient } from './supabase';
 
@@ -107,7 +109,8 @@ export async function computeRiskReward(
     ema20: number;
     indiaVix?: number;
   },
-  symbol?: string
+  symbol?: string,
+  tradeGrade?: TradeGrade
 ): Promise<RiskReward> {
   const { bollingerUpper, bollingerLower, atr, ema20 } = context;
   const vix = context.indiaVix || 14;
@@ -124,9 +127,16 @@ export async function computeRiskReward(
   // Kelly fraction
   const kellyFraction = computeKellyFraction(winStats.winRate, winStats.avgWinPct, winStats.avgLossPct);
 
-  // Position size: Kelly adjusted by confidence
+  // Position size: Kelly adjusted by confidence and trade grade
   const confidenceMultiplier = Math.max(0.3, (confidence - 50) / 50); // 0.3 at 50% conf, 1.0 at 100%
-  let positionSizePct = kellyFraction * 100 * confidenceMultiplier;
+  
+  // Grade-based Kelly multiplier
+  const gradeMultiplier = tradeGrade === 'A' ? 1.0   // Full Kelly for A-grade
+    : tradeGrade === 'B' ? 0.5                        // Half Kelly for B-grade
+    : tradeGrade === 'C' ? 0.2                         // Minimal for C
+    : 0.1;                                             // Nearly zero for D/F
+  
+  let positionSizePct = kellyFraction * 100 * confidenceMultiplier * gradeMultiplier;
 
   // Clamp position size: 0.5% to 5%
   positionSizePct = Math.max(0.5, Math.min(5.0, positionSizePct));
@@ -134,6 +144,11 @@ export async function computeRiskReward(
   // VIX > 25 caps confidence and reduces position
   if (vix > 25) {
     positionSizePct = Math.min(positionSizePct, 2.0);
+  }
+  
+  // Non-tradeable grades get minimal position
+  if (tradeGrade && !['A', 'B'].includes(tradeGrade)) {
+    positionSizePct = Math.min(positionSizePct, 0.5);
   }
 
   if (direction === 'up') {
