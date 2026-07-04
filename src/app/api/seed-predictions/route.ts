@@ -4,7 +4,7 @@
 import { NextResponse } from 'next/server';
 import { generatePrediction } from '@/lib/mlEngine';
 import { computeRealTechnicals } from '@/lib/technicalAnalysis';
-import { fetchDeliveryData, fetchRealPCR, fetchIndiaVIX, isFnOStock } from '@/lib/nseData';
+import { fetchDeliveryData, fetchRealPCR, isFnOStock } from '@/lib/nseData';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60; // Vercel Hobby max
@@ -18,6 +18,7 @@ const KEY_STOCKS = [
 
 export async function GET(request: Request) {
   const startTime = Date.now();
+  try {
   const { searchParams } = new URL(request.url);
   
   // Allow selecting a batch: ?batch=2 processes stocks 11-20
@@ -105,4 +106,11 @@ export async function GET(request: Request) {
     summary: { ok, skipped, errors, total: stocks.length },
     results,
   });
+  } catch (err: any) {
+    console.error('[seed-predictions] Top-level crash:', err);
+    return NextResponse.json(
+      { success: false, error: `Server error: ${err.message?.slice(0, 100)}` },
+      { status: 500 }
+    );
+  }
 }

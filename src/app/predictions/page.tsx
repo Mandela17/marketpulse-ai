@@ -90,7 +90,17 @@ export default function PredictionsDashboard() {
         });
 
         const res = await fetch(`/api/seed-predictions?batch=${batch}&_t=${Date.now()}`, { cache: 'no-store' });
-        const data = await res.json();
+        
+        // Handle non-JSON responses (e.g., Vercel timeout HTML pages)
+        const text = await res.text();
+        let data: any;
+        try {
+          data = JSON.parse(text);
+        } catch {
+          setSeedResult({ success: false, error: `Batch ${batch} failed: Server returned non-JSON (HTTP ${res.status}). Likely a timeout — try again.` });
+          await fetchData();
+          return;
+        }
         
         if (!res.ok) {
           setSeedResult({ success: false, error: data.error || `Batch ${batch} failed: HTTP ${res.status}` });
