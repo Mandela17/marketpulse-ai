@@ -77,7 +77,7 @@ export default function PredictionsDashboard() {
     
     let totalOk = 0, totalSkipped = 0, totalErrors = 0, totalStocks = 0;
     const allResults: any[] = [];
-    const totalBatches = 3; // 25 stocks / 10 per batch
+    const totalBatches = 5; // 25 stocks / 5 per batch
 
     try {
       for (let batch = 1; batch <= totalBatches; batch++) {

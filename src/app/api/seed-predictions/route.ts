@@ -32,7 +32,7 @@ export async function GET(request: Request) {
     'TATASTEEL', 'TITAN', 'ADANIENT', 'DRREDDY', 'CIPLA',
   ];
   
-  const BATCH_SIZE = 10;
+  const BATCH_SIZE = 5;
   const startIdx = (batch - 1) * BATCH_SIZE;
   const stocks = ALL_STOCKS.slice(startIdx, startIdx + BATCH_SIZE);
   const totalBatches = Math.ceil(ALL_STOCKS.length / BATCH_SIZE);
@@ -43,23 +43,21 @@ export async function GET(request: Request) {
 
   const results: { symbol: string; status: 'ok' | 'error' | 'skipped'; direction?: string; confidence?: number; error?: string }[] = [];
 
-  // Process 3 at a time (fast parallel)
-  const parallelSize = 3;
-  for (let i = 0; i < stocks.length; i += parallelSize) {
-    // Check if we're running out of time (leave 5s buffer)
-    if (Date.now() - startTime > 50000) {
+  // Process 1 at a time (sequential — safer for timeout)
+  for (let i = 0; i < stocks.length; i++) {
+    // Check if we're running out of time (leave 10s buffer)
+    if (Date.now() - startTime > 45000) {
       stocks.slice(i).forEach(s => results.push({ symbol: s, status: 'skipped', error: 'timeout' }));
       break;
     }
 
-    const chunk = stocks.slice(i, i + parallelSize);
-    await Promise.all(chunk.map(async (symbol) => {
-      try {
+    const symbol = stocks[i];
+    try {
         const technicals = await computeRealTechnicals(symbol);
 
         if (!technicals || technicals.currentPrice === 0) {
           results.push({ symbol, status: 'skipped', error: 'No data' });
-          return;
+          continue;
         }
 
         // Fetch extras in parallel but don't block on failure
@@ -83,14 +81,13 @@ export async function GET(request: Request) {
 
         if (!prediction) {
           results.push({ symbol, status: 'skipped', error: 'ML returned null' });
-          return;
+          continue;
         }
 
         results.push({ symbol, status: 'ok', direction: prediction.direction, confidence: prediction.confidence });
-      } catch (err: any) {
-        results.push({ symbol, status: 'error', error: err.message?.slice(0, 80) });
-      }
-    }));
+    } catch (err: any) {
+      results.push({ symbol, status: 'error', error: err.message?.slice(0, 80) });
+    }
   }
 
   const ok = results.filter(r => r.status === 'ok').length;
