@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-import { LayoutDashboard, Newspaper, TrendingUp, Star, Plug, ChevronRight, LogOut, X, Grid3x3, Search, Briefcase, Scale, Shield } from 'lucide-react';
+import { LayoutDashboard, Newspaper, TrendingUp, Star, Plug, ChevronRight, LogOut, X, Grid3x3, Search, Briefcase, Scale, Shield, GraduationCap } from 'lucide-react';
 
 const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -14,6 +14,7 @@ const navItems = [
   { href: '/compare', label: 'Compare', icon: Scale },
   { href: '/news', label: 'News Feed', icon: Newspaper },
   { href: '/predictions', label: 'AI Predictions', icon: TrendingUp },
+  { href: '/learning', label: 'Trading Academy', icon: GraduationCap },
   { href: '/sectors', label: 'Sectors', icon: TrendingUp },
   { href: '/watchlist', label: 'Watchlist', icon: Star },
   { href: '/broker', label: 'Broker API', icon: Plug },
