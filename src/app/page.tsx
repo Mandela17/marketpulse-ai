@@ -12,6 +12,7 @@ import MarketRegimeWidget from '@/components/MarketRegimeWidget';
 import TopMoversWidget from '@/components/TopMoversWidget';
 import VIXGaugeWidget from '@/components/VIXGaugeWidget';
 import GlobalMarketsWidget from '@/components/GlobalMarketsWidget';
+import BlockDealsWidget from '@/components/BlockDealsWidget';
 import { loadDashboardCache, saveDashboardCache, timeAgo } from '@/lib/dashboardCache';
 
 interface MarketData {
@@ -481,6 +482,9 @@ export default function Dashboard() {
 
           {/* Global Markets */}
           <GlobalMarketsWidget />
+
+          {/* Institutional Block Deals Widget */}
+          <BlockDealsWidget limit={6} />
 
           {/* News Feed */}
           <div className="xl:sticky xl:top-6">

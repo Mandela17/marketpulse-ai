@@ -13,6 +13,7 @@ import { getDerivativesData, DerivativesData, getBrokerConfig } from '@/lib/brok
 import { useAuth } from '@/context/AuthContext';
 import AlertManager from '@/components/AlertManager';
 import { checkPredictionAlerts, checkPriceAlerts } from '@/lib/priceAlerts';
+import BlockDealsWidget from '@/components/BlockDealsWidget';
 
 // Lazy-load heavy chart component (defers ~48KB lightweight-charts from initial bundle)
 const TradingViewChart = dynamic(() => import('@/components/TradingViewChart'), {
@@ -141,6 +142,7 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
   const [sentimentHistory, setSentimentHistory] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [derivatives, setDerivatives] = useState<DerivativesData | null>(null);
+  const [blockDeals, setBlockDeals] = useState<any[]>([]);
   const [mlResult, setMlResult] = useState<any>(null);
   const [activeTab, setActiveTab] = useState<'technicals' | 'derivatives'>('technicals');
   const [lookbackDays, setLookbackDays] = useState<number>(90);
@@ -256,6 +258,18 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
       })
       .catch(err => console.warn('AI prediction fetch failed:', err))
       .finally(() => setLoadingPrediction(false));
+  }, [decodedSymbol]);
+
+  // Fetch block deals for this stock symbol
+  useEffect(() => {
+    fetch(`/api/block-deals?symbol=${encodeURIComponent(decodedSymbol)}&limit=15`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.success) {
+          setBlockDeals(data.deals || []);
+        }
+      })
+      .catch(err => console.warn('Block deals fetch failed:', err));
   }, [decodedSymbol]);
 
   // Train ML model — only depends on chartData + sentimentHistory (NOT derivatives)
@@ -512,6 +526,7 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
                   direction: aiPrediction.direction as 'up' | 'down',
                   confidence: aiPrediction.confidence || 50,
                 }] : undefined}
+                blockDeals={blockDeals}
               />
             </div>
           ) : (
@@ -1435,6 +1450,9 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
                 confidence: aiPrediction.confidence || 50,
               } : null}
             />
+
+            {/* Institutional Block Deals Widget */}
+            <BlockDealsWidget symbol={decodedSymbol} limit={5} />
 
             <h2 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>
               📰 Related News

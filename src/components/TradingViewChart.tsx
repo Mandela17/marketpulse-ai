@@ -29,11 +29,21 @@ interface PredictionMarker {
   confidence: number;
 }
 
+interface BlockDealMarker {
+  timestamp: string;
+  price: number;
+  valueCr: number;
+  action: 'BUY' | 'SELL';
+  buyerName: string;
+  dealType: 'Block' | 'Ultra Block';
+}
+
 interface TradingViewChartProps {
   priceData: ChartPricePoint[];
   sentimentHistory?: { date: string; sentiment: number }[];
   symbol: string;
   predictions?: PredictionMarker[];
+  blockDeals?: BlockDealMarker[];
 }
 
 // ─── EMA Computation ────────────────────────────────
@@ -79,7 +89,7 @@ function computeRSI(prices: number[], period: number = 14): number[] {
   return rsiValues;
 }
 
-export default function TradingViewChart({ priceData, sentimentHistory, symbol, predictions }: TradingViewChartProps) {
+export default function TradingViewChart({ priceData, sentimentHistory, symbol, predictions, blockDeals }: TradingViewChartProps) {
   const priceContainerRef = useRef<HTMLDivElement>(null);
   const rsiContainerRef = useRef<HTMLDivElement>(null);
   const priceChartRef = useRef<IChartApi | null>(null);
@@ -202,20 +212,48 @@ export default function TradingViewChart({ priceData, sentimentHistory, symbol, 
       })));
     }
 
-    // Prediction markers
+    // Combined markers (Lightweight Charts only supports setting markers once per series)
+    const seriesMarkers: SeriesMarker<Time>[] = [];
+    const dateSet = new Set(data.map(d => d.date));
+
+    // 1. Add predictions
     if (predictions?.length) {
-      const dateSet = new Set(data.map(d => d.date));
-      const validPreds = predictions.filter(p => dateSet.has(p.date));
-      if (validPreds.length) {
-        createSeriesMarkers(candleSeries, validPreds.map(p => ({
-          time: p.date as Time,
-          position: p.direction === 'up' ? 'belowBar' as const : 'aboveBar' as const,
-          color: p.direction === 'up' ? '#00d68f' : '#ff4d6a',
-          shape: p.direction === 'up' ? 'arrowUp' as const : 'arrowDown' as const,
-          text: `${p.direction === 'up' ? '▲' : '▼'} ${p.confidence}%`,
-          size: 1,
-        })));
-      }
+      predictions.forEach(p => {
+        if (dateSet.has(p.date)) {
+          seriesMarkers.push({
+            time: p.date as Time,
+            position: p.direction === 'up' ? 'belowBar' as const : 'aboveBar' as const,
+            color: p.direction === 'up' ? '#00d68f' : '#ff4d6a',
+            shape: p.direction === 'up' ? 'arrowUp' as const : 'arrowDown' as const,
+            text: `${p.direction === 'up' ? '▲' : '▼'} ${p.confidence}%`,
+            size: 1,
+          });
+        }
+      });
+    }
+
+    // 2. Add block deals
+    if (blockDeals?.length) {
+      blockDeals.forEach(deal => {
+        const dealDate = deal.timestamp.split('T')[0]; // Get YYYY-MM-DD
+        if (dateSet.has(dealDate)) {
+          const isUltra = deal.dealType === 'Ultra Block';
+          seriesMarkers.push({
+            time: dealDate as Time,
+            position: 'inBar' as const,
+            color: isUltra ? '#fbbf24' : '#3b82f6',
+            shape: 'circle' as const,
+            text: `🏛️ ₹${deal.valueCr}Cr`,
+            size: 1.2,
+          });
+        }
+      });
+    }
+
+    // Sort markers by time to prevent lightweight-charts errors
+    if (seriesMarkers.length > 0) {
+      seriesMarkers.sort((a, b) => (a.time as string).localeCompare(b.time as string));
+      createSeriesMarkers(candleSeries, seriesMarkers);
     }
 
     priceChart.timeScale().fitContent();
