@@ -183,7 +183,7 @@ export default function ComparePage() {
   }
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 animate-fade-in">
+    <div className="animate-fade-in" style={{ width: '100%' }}>
       <div className="mb-6">
         <h1 className="text-2xl sm:text-3xl font-bold text-white">⚖️ Stock Comparison</h1>
         <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>

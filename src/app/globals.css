@@ -104,6 +104,102 @@ body {
   overflow-x: hidden;
 }
 
+/* ─── Responsive Layout ───────────────────────────────── */
+
+/* Page content wrapper — responsive padding for all devices */
+.page-content-wrapper {
+  flex: 1;
+  padding: 12px;
+  padding-bottom: 24px;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/* Tablet (640px+) */
+@media (min-width: 640px) {
+  .page-content-wrapper {
+    padding: 16px;
+    padding-bottom: 28px;
+  }
+}
+
+/* Laptop/Desktop (1024px+) */
+@media (min-width: 1024px) {
+  .page-content-wrapper {
+    padding: 24px;
+    padding-bottom: 32px;
+  }
+}
+
+/* Large desktop (1536px+) */
+@media (min-width: 1536px) {
+  .page-content-wrapper {
+    padding: 28px 32px;
+  }
+}
+
+/* ─── Responsive News Grid ────────────────────────────── */
+.news-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  width: 100%;
+}
+
+/* Tablet (640px+): 1 column still but wider cards */
+@media (min-width: 640px) {
+  .news-grid {
+    gap: 14px;
+  }
+}
+
+/* Laptop (1024px+): 2 columns */
+@media (min-width: 1024px) {
+  .news-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+}
+
+/* Large desktop (1536px+): 3 columns for ultrawide */
+@media (min-width: 1536px) {
+  .news-grid {
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 18px;
+  }
+}
+
+/* ─── Spin Animation ──────────────────────────────────── */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ─── Responsive Strategy Grid ────────────────────────── */
+.strategy-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  width: 100%;
+}
+
+@media (min-width: 768px) {
+  .strategy-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (min-width: 1400px) {
+  .strategy-grid {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+}
+
 /* ─── Scrollbar ───────────────────────────────────────── */
 ::-webkit-scrollbar {
   width: 6px;

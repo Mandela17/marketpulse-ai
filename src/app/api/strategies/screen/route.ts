@@ -1,0 +1,740 @@
+// API Route: Proven Strategies Stock Screener
+// Screens 250 NSE stocks against 10 quantitative swing trading strategies
+// using REAL OHLCV + fundamental data from Yahoo Finance
+
+import { NextResponse } from 'next/server';
+import {
+  fetchHistoricalOHLCV,
+  calculateRSI,
+  calculateEMA,
+  calculateMACD,
+  calculateBollingerBands,
+  calculateVolumeProfile,
+  type OHLCV,
+} from '@/lib/technicalAnalysis';
+import { toYahooTicker } from '@/lib/symbolMap';
+
+export const dynamic = 'force-dynamic';
+
+// ─── Stock Universe: 250 NSE Stocks (Large + Mid + Small Cap) ───────
+// Covers Nifty 50, Nifty Next 50, Nifty Midcap 100, and select small-cap hidden gems
+const SCREEN_STOCKS = [
+  // ── Nifty 50 (Large Cap) ──
+  'RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'BHARTIARTL',
+  'ITC', 'LT', 'KOTAKBANK', 'AXISBANK', 'TITAN', 'SUNPHARMA', 'BAJFINANCE',
+  'MARUTI', 'TATAMOTORS', 'WIPRO', 'HCLTECH', 'NTPC', 'POWERGRID',
+  'M&M', 'TATASTEEL', 'JSWSTEEL', 'COALINDIA', 'ADANIENT', 'ADANIPORTS',
+  'HINDUNILVR', 'DRREDDY', 'CIPLA', 'NESTLEIND', 'ASIANPAINT', 'HEROMOTOCO',
+  'BAJAJ-AUTO', 'EICHERMOT', 'BPCL', 'ONGC', 'ULTRACEMCO', 'GRASIM',
+  'BEL', 'HAL', 'TRENT', 'INDUSINDBK', 'BRITANNIA', 'TATACONSUM',
+  'APOLLOHOSP', 'BAJAJFINSV', 'TECHM', 'DIVISLAB', 'SHRIRAMFIN', 'JSWENERGY',
+
+  // ── Nifty Next 50 (Large-Mid Cap) ──
+  'DLF', 'GODREJCP', 'PIDILITIND', 'DABUR', 'MARICO', 'COLPAL',
+  'HAVELLS', 'VOLTAS', 'SIEMENS', 'ABB', 'BOSCHLTD', 'CUMMINSIND',
+  'TORNTPHARM', 'LUPIN', 'BIOCON', 'AUROPHARMA', 'ALKEM', 'IPCALAB',
+  'PERSISTENT', 'COFORGE', 'LTIM', 'MPHASIS', 'NAUKRI', 'ZOMATO',
+  'POLICYBZR', 'SBILIFE', 'HDFCLIFE', 'ICICIPRULI', 'MUTHOOTFIN', 'CHOLAFIN',
+  'PFC', 'RECLTD', 'IRFC', 'PNB', 'BANKBARODA', 'CANBK', 'IDFCFIRSTB',
+  'FEDERALBNK', 'BANDHANBNK', 'IDBI',
+  'VEDL', 'HINDALCO', 'NMDC', 'NATIONALUM', 'HINDCOPPER',
+  'TATAPOWER', 'NHPC', 'SJVN', 'IREDA', 'ADANIGREEN',
+
+  // ── Midcap — IT & Tech ──
+  'HAPPSTMNDS', 'KPITTECH', 'TATAELXSI', 'ZENSAR', 'MASTEK',
+  'SONATA', 'NIITLTD', 'NEWGEN', 'ROUTE', 'INTELLECT',
+
+  // ── Midcap — Pharma & Healthcare ──
+  'LALPATHLAB', 'METROPOLIS', 'SYNGENE', 'GLAND', 'LAURUSLABS',
+  'GRANULES', 'NATCOPHARM', 'AARTIIND', 'ASTRAZEN', 'PFIZER',
+  'AJANTPHARM', 'STAR', 'MEDANTA', 'MAXHEALTH', 'RAINBOW',
+
+  // ── Midcap — FMCG & Consumer ──
+  'GODREJIND', 'EMAMILTD', 'JYOTHYLAB', 'VGUARD', 'CROMPTON',
+  'WHIRLPOOL', 'BATAINDIA', 'RELAXO', 'PAGEIND', 'TTKPRESTIG',
+  'RADICO', 'UBL', 'UNITDSPR', 'DEVYANI', 'JUBLFOOD',
+
+  // ── Midcap — Auto & Auto Ancillary ──
+  'ASHOKLEY', 'ESCORTS', 'TVSMOTORS', 'BALKRISIND', 'CEATLTD',
+  'APOLLOTYRE', 'MRF', 'MOTHERSON', 'ENDURANCE', 'EXIDEIND',
+  'AMARAJABAT', 'TIINDIA', 'SUNDRMFAST', 'BHARATFORG', 'KALYANKJIL',
+
+  // ── Midcap — Banking & Finance ──
+  'MANAPPURAM', 'IIFL', 'LICHSGFIN', 'CANFINHOME', 'HUDCO',
+  'IRCTC', 'INDIANB', 'CENTRALBK', 'RBLBANK', 'UJJIVANSFB',
+  'EQUITASBNK', 'AUBANK', 'CUB', 'CREDITACC', 'AAVAS',
+
+  // ── Midcap — Infra & Construction ──
+  'NBCC', 'IRCON', 'RVNL', 'ENGINERSIN', 'KEC',
+  'KALPATPOWR', 'LTTS', 'JKCEMENT', 'RAMCOCEM', 'DALBHARAT',
+  'SHREECEM', 'AMBUJACEM', 'JKLAKSHMI', 'HEIDELBERG', 'STARCEMENT',
+
+  // ── Midcap — Chemicals & Materials ──
+  'PIDILITIND', 'SRF', 'DEEPAKNTR', 'ATUL', 'NAVINFLUOR',
+  'FINEORG', 'CLEAN', 'GALAXYSURF', 'SUDARSCHEM', 'VINATIORGA',
+
+  // ── Midcap — Energy & Power ──
+  'GAIL', 'IGL', 'MGL', 'PETRONET', 'HINDPETRO',
+  'IOC', 'OIL', 'MRPL', 'CESC', 'TORNTPOWER',
+  'JSL', 'JINDALSTEL', 'SAIL', 'WELCORP', 'RATNAMANI',
+
+  // ── Small Cap — Hidden Gems ──
+  'POLYCAB', 'DIXON', 'KAYNES', 'AFFLE', 'TANLA',
+  'CDSL', 'BSE', 'MCX', 'ANGELONE', 'MOTILALOFS',
+  'EIDPARRY', 'TRIVENI', 'GRINDWELL', 'CARBORUNIV', 'SUPRAJIT',
+  'ELGIEQUIP', 'THERMAX', 'ISGEC', 'GRSE', 'COCHINSHIP',
+  'MAZAGONDOCK', 'GARDENREACH', 'BDL', 'SOLARINDS', 'PRAJIND',
+  'AIAENG', 'KENNAMET', 'SCHAEFFLER', 'TIMKEN', 'SKFINDIA',
+
+  // ── Small Cap — Textiles & Misc ──
+  'RAYMOND', 'ARVIND', 'PGHL', 'RAJESHEXPO', 'CCL',
+  'ZYDUSLIFE', 'JBCHEPHARM', 'HEMIPROP', 'SUNTV', 'PVRINOX',
+];
+
+// ─── In-memory strategy results cache ───────────────────────────────
+const strategyCache: Map<string, { data: any; ts: number }> = new Map();
+const STRATEGY_CACHE_TTL = 20 * 60 * 1000; // 20 min (longer for 250-stock scan)
+
+// ─── Real Fundamental Data from Yahoo Finance ──────────────────────
+// Uses quoteSummary endpoint for ROE, D/E, PE, profit margins, etc.
+
+interface RealFundamentals {
+  roe: number;           // Return on Equity %
+  debtToEquity: number;  // Debt-to-Equity ratio
+  peRatio: number;       // Trailing P/E
+  profitMargin: number;  // Net profit margin %
+  revenueGrowth: number; // YoY revenue growth %
+  currentRatio: number;  // Current assets / Current liabilities
+  source: 'yahoo';
+}
+
+const fundamentalsCache: Map<string, { data: RealFundamentals | null; ts: number }> = new Map();
+const FUNDAMENTALS_CACHE_TTL = 60 * 60 * 1000; // 1 hour (fundamentals don't change intraday)
+
+async function fetchRealFundamentals(symbol: string): Promise<RealFundamentals | null> {
+  const cacheKey = `fund:${symbol}`;
+  const cached = fundamentalsCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < FUNDAMENTALS_CACHE_TTL) return cached.data;
+
+  const yahooTicker = toYahooTicker(symbol);
+  const encodedTicker = encodeURIComponent(yahooTicker);
+  const modules = 'financialData,defaultKeyStatistics';
+
+  const endpoints = [
+    `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodedTicker}?modules=${modules}`,
+    `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodedTicker}?modules=${modules}`,
+  ];
+
+  for (const url of endpoints) {
+    try {
+      const res = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'application/json',
+        },
+      });
+      if (!res.ok) continue;
+
+      const json = await res.json();
+      const result = json?.quoteSummary?.result?.[0];
+      if (!result) continue;
+
+      const fin = result.financialData || {};
+      const stats = result.defaultKeyStatistics || {};
+
+      const fundamentals: RealFundamentals = {
+        roe: parseFloat(((fin.returnOnEquity?.raw ?? 0) * 100).toFixed(1)),
+        debtToEquity: parseFloat(((fin.debtToEquity?.raw ?? 0) / 100).toFixed(2)), // Yahoo returns as %, divide by 100
+        peRatio: parseFloat((stats.trailingPE?.raw ?? stats.forwardPE?.raw ?? 0).toFixed(1)),
+        profitMargin: parseFloat(((fin.profitMargins?.raw ?? 0) * 100).toFixed(1)),
+        revenueGrowth: parseFloat(((fin.revenueGrowth?.raw ?? 0) * 100).toFixed(1)),
+        currentRatio: parseFloat((fin.currentRatio?.raw ?? 0).toFixed(2)),
+        source: 'yahoo',
+      };
+
+      fundamentalsCache.set(cacheKey, { data: fundamentals, ts: Date.now() });
+      return fundamentals;
+    } catch {
+      continue;
+    }
+  }
+
+  fundamentalsCache.set(cacheKey, { data: null, ts: Date.now() });
+  return null;
+}
+
+// ─── Compute extended technicals for strategy screening ─────────────
+interface ScreenData {
+  symbol: string;
+  price: number;
+  ohlcv: OHLCV[];
+  closes: number[];
+  highs: number[];
+  lows: number[];
+  volumes: number[];
+  rsi: number;
+  ema10: number;
+  ema20: number;
+  ema50: number;
+  macdLine: number;
+  signalLine: number;
+  histogram: number;
+  prevHistogram: number;
+  bbUpper: number;
+  bbMiddle: number;
+  bbLower: number;
+  bbWidth: number;
+  volumeRatio: number;
+  avgVolume: number;
+  high52W: number;
+  low52W: number;
+  priceChange1D: number;
+  priceChange5D: number;
+  dayHigh: number;
+  dayLow: number;
+  fundamentals: RealFundamentals | null;
+}
+
+async function computeScreenData(symbol: string): Promise<ScreenData | null> {
+  try {
+    const ohlcv = await fetchHistoricalOHLCV(symbol, 250); // ~1 year for 52W high/low
+    if (ohlcv.length < 30) return null;
+
+    const closes = ohlcv.map(c => c.close);
+    const highs = ohlcv.map(c => c.high);
+    const lows = ohlcv.map(c => c.low);
+    const volumes = ohlcv.map(c => c.volume);
+
+    const price = closes[closes.length - 1];
+    const prevClose = closes.length >= 2 ? closes[closes.length - 2] : price;
+    const close5DAgo = closes.length >= 6 ? closes[closes.length - 6] : price;
+
+    const rsi = calculateRSI(closes, 14);
+    const ema10Arr = calculateEMA(closes, 10);
+    const ema20Arr = calculateEMA(closes, 20);
+    const ema50Arr = calculateEMA(closes, 50);
+
+    const ema10 = ema10Arr.length > 0 ? ema10Arr[ema10Arr.length - 1] : price;
+    const ema20 = ema20Arr.length > 0 ? ema20Arr[ema20Arr.length - 1] : price;
+    const ema50 = ema50Arr.length > 0 ? ema50Arr[ema50Arr.length - 1] : price;
+
+    const macdResult = calculateMACD(closes);
+    const macdLine = macdResult?.macdLine ?? 0;
+    const signalLine = macdResult?.signalLine ?? 0;
+    const histogram = macdResult?.histogram ?? 0;
+
+    // Compute previous histogram for crossover detection
+    let prevHistogram = 0;
+    if (closes.length > 35) {
+      const prevCloses = closes.slice(0, -1);
+      const prevMacd = calculateMACD(prevCloses);
+      prevHistogram = prevMacd?.histogram ?? 0;
+    }
+
+    const bb = calculateBollingerBands(closes, 20, 2);
+    const volProfile = calculateVolumeProfile(volumes);
+
+    return {
+      symbol,
+      price: parseFloat(price.toFixed(2)),
+      ohlcv,
+      closes,
+      highs,
+      lows,
+      volumes,
+      rsi,
+      ema10: parseFloat(ema10.toFixed(2)),
+      ema20: parseFloat(ema20.toFixed(2)),
+      ema50: parseFloat(ema50.toFixed(2)),
+      macdLine,
+      signalLine,
+      histogram,
+      prevHistogram,
+      bbUpper: bb?.upper ?? price * 1.02,
+      bbMiddle: bb?.middle ?? price,
+      bbLower: bb?.lower ?? price * 0.98,
+      bbWidth: bb?.width ?? 4,
+      volumeRatio: volProfile.ratio,
+      avgVolume: volProfile.avgVolume,
+      high52W: Math.max(...highs),
+      low52W: Math.min(...lows),
+      priceChange1D: prevClose > 0 ? parseFloat((((price - prevClose) / prevClose) * 100).toFixed(2)) : 0,
+      priceChange5D: close5DAgo > 0 ? parseFloat((((price - close5DAgo) / close5DAgo) * 100).toFixed(2)) : 0,
+      dayHigh: highs[highs.length - 1],
+      dayLow: lows[lows.length - 1],
+      fundamentals: null, // Will be populated on-demand by strategies that need it
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ─── Strategy Filter Functions ──────────────────────────────────────
+
+interface StrategyMatch {
+  symbol: string;
+  price: number;
+  entry: number;
+  target: number;
+  stopLoss: number;
+  signalStrength: number; // 0-100
+  signals: string[];
+  fundamentals?: RealFundamentals;
+}
+
+// Strategy 1: EMA Crossover Momentum
+function screenEMACrossover(data: ScreenData): StrategyMatch | null {
+  const { symbol, price, ema20, ema50, volumeRatio, rsi, priceChange1D } = data;
+  if (ema20 <= ema50) return null; // EMA20 must be above EMA50 (golden cross)
+  if (price < ema20) return null;  // Price must be above EMA20
+  if (volumeRatio < 1.2) return null; // Volume confirmation
+  if (rsi > 75) return null; // Not overbought
+
+  const signals: string[] = [];
+  let strength = 50;
+  
+  if (ema20 > ema50 * 1.01) { signals.push('EMA20 > EMA50 (Golden Cross)'); strength += 15; }
+  if (price > ema20) { signals.push(`Price ₹${price} above EMA20 ₹${ema20}`); strength += 10; }
+  if (volumeRatio > 1.5) { signals.push(`Volume ${volumeRatio}x avg (strong)`); strength += 15; }
+  if (priceChange1D > 0) { signals.push(`Today +${priceChange1D}%`); strength += 10; }
+
+  const atr = data.dayHigh - data.dayLow;
+  return {
+    symbol, price,
+    entry: price,
+    target: parseFloat((price + atr * 3).toFixed(2)),
+    stopLoss: parseFloat((Math.min(ema20, price - atr * 1.5)).toFixed(2)),
+    signalStrength: Math.min(100, strength),
+    signals,
+  };
+}
+
+// Strategy 2: RSI Reversal Hunter
+function screenRSIReversal(data: ScreenData): StrategyMatch | null {
+  const { symbol, price, rsi, bbLower, bbMiddle, volumeRatio } = data;
+  if (rsi > 35) return null; // Must be oversold zone
+  if (price > bbLower * 1.02) return null; // Must be near or below lower Bollinger
+
+  const signals: string[] = [];
+  let strength = 55;
+  
+  signals.push(`RSI ${rsi} (Oversold)`);
+  if (rsi < 25) strength += 15;
+  
+  if (price <= bbLower) { signals.push('Price at/below Lower Bollinger'); strength += 15; }
+  else { signals.push('Price near Lower Bollinger'); strength += 10; }
+  
+  if (volumeRatio > 1.5) { signals.push(`High volume ${volumeRatio}x (capitulation)`); strength += 10; }
+
+  return {
+    symbol, price,
+    entry: price,
+    target: parseFloat(bbMiddle.toFixed(2)),
+    stopLoss: parseFloat((price * 0.97).toFixed(2)),
+    signalStrength: Math.min(100, strength),
+    signals,
+  };
+}
+
+// Strategy 3: Confluence Pullback
+function screenConfluencePullback(data: ScreenData): StrategyMatch | null {
+  const { symbol, price, ema50, rsi, volumeRatio, ema20 } = data;
+  if (price < ema50) return null; // Must be in uptrend (above EMA50)
+  if (rsi < 38 || rsi > 58) return null; // RSI in pullback zone (40-55ish)
+  if (price > ema20 * 1.02) return null; // Price must have pulled back near EMA20
+
+  const signals: string[] = [];
+  let strength = 50;
+
+  signals.push(`Price above EMA50 ₹${ema50} (uptrend intact)`);
+  strength += 15;
+  
+  signals.push(`RSI ${rsi} (healthy pullback zone)`);
+  if (rsi >= 40 && rsi <= 50) strength += 15;
+  else strength += 10;
+
+  if (Math.abs(price - ema20) / ema20 < 0.015) {
+    signals.push('Price touching EMA20 support');
+    strength += 15;
+  }
+
+  if (volumeRatio < 0.8) {
+    signals.push('Low volume pullback (healthy)');
+    strength += 10;
+  }
+
+  const atr = data.dayHigh - data.dayLow;
+  return {
+    symbol, price,
+    entry: parseFloat(ema20.toFixed(2)),
+    target: parseFloat((price + atr * 3).toFixed(2)),
+    stopLoss: parseFloat((ema50 * 0.99).toFixed(2)),
+    signalStrength: Math.min(100, strength),
+    signals,
+  };
+}
+
+// Strategy 4: Bollinger Squeeze Breakout
+function screenBollingerSqueeze(data: ScreenData): StrategyMatch | null {
+  const { symbol, price, bbWidth, bbUpper, bbMiddle, volumeRatio, rsi } = data;
+  if (bbWidth > 6) return null; // Bandwidth must be tight (squeeze)
+  if (price < bbUpper * 0.99) return null; // Price must be breaking upper band
+  if (volumeRatio < 1.3) return null; // Volume confirmation
+
+  const signals: string[] = [];
+  let strength = 55;
+
+  signals.push(`Bollinger Width ${bbWidth}% (squeeze)`);
+  if (bbWidth < 4) strength += 15;
+  else strength += 10;
+
+  if (price >= bbUpper) { signals.push('Price breaking above Upper Band'); strength += 15; }
+  if (volumeRatio > 1.5) { signals.push(`Volume ${volumeRatio}x (breakout confirmed)`); strength += 15; }
+  else { signals.push(`Volume ${volumeRatio}x avg`); strength += 10; }
+  
+  if (rsi > 55 && rsi < 75) { signals.push(`RSI ${rsi} (momentum)`); strength += 5; }
+
+  const expansion = (bbUpper - bbMiddle) * 2;
+  return {
+    symbol, price,
+    entry: price,
+    target: parseFloat((price + expansion).toFixed(2)),
+    stopLoss: parseFloat(bbMiddle.toFixed(2)),
+    signalStrength: Math.min(100, strength),
+    signals,
+  };
+}
+
+// Strategy 5: Volume Climax Reversal
+function screenVolumeClimax(data: ScreenData): StrategyMatch | null {
+  const { symbol, price, volumeRatio, rsi, dayLow, dayHigh, closes } = data;
+  if (volumeRatio < 2.5) return null; // Must have extreme volume
+  if (rsi > 40) return null; // Must be in weakness zone
+
+  // Check for hammer candle (long lower wick)
+  const bodySize = Math.abs(price - (closes.length >= 2 ? closes[closes.length - 2] : price));
+  const lowerWick = Math.min(price, closes.length >= 2 ? closes[closes.length - 2] : price) - dayLow;
+  const isHammer = lowerWick > bodySize * 1.5;
+
+  if (!isHammer && price >= closes[closes.length - 2]) return null;
+
+  const signals: string[] = [];
+  let strength = 55;
+
+  signals.push(`Volume ${volumeRatio}x avg (climax)`);
+  strength += volumeRatio > 3 ? 20 : 10;
+
+  signals.push(`RSI ${rsi} (oversold zone)`);
+  if (rsi < 30) strength += 10;
+
+  if (isHammer) { signals.push('Hammer candle pattern detected'); strength += 15; }
+
+  const atr = dayHigh - dayLow;
+  return {
+    symbol, price,
+    entry: price,
+    target: parseFloat((price + atr * 2.5).toFixed(2)),
+    stopLoss: parseFloat((dayLow * 0.99).toFixed(2)),
+    signalStrength: Math.min(100, strength),
+    signals,
+  };
+}
+
+// Strategy 6: MACD Zero-Line Crossover
+function screenMACDZeroCross(data: ScreenData): StrategyMatch | null {
+  const { symbol, price, macdLine, histogram, prevHistogram, ema20, volumeRatio } = data;
+  
+  // MACD must be crossing above zero or just crossed
+  if (macdLine < -0.5) return null; // Must be near or above zero line
+  if (histogram <= 0) return null; // Histogram must be positive
+
+  // Check for recent crossover: prev histogram was negative, now positive
+  const justCrossed = prevHistogram <= 0 && histogram > 0;
+  if (!justCrossed && macdLine > 2) return null; // If didn't just cross, must be near zero
+
+  const signals: string[] = [];
+  let strength = 50;
+
+  if (justCrossed) { signals.push('MACD just crossed above zero line'); strength += 20; }
+  else { signals.push(`MACD near zero (${data.macdLine.toFixed(2)})`); strength += 10; }
+
+  signals.push(`Histogram +${histogram.toFixed(3)} (turning positive)`);
+  strength += 10;
+
+  if (price > ema20) { signals.push(`Price above EMA20 ₹${ema20}`); strength += 10; }
+  if (volumeRatio > 1.2) { signals.push(`Volume ${volumeRatio}x avg`); strength += 10; }
+
+  const atr = data.dayHigh - data.dayLow;
+  return {
+    symbol, price,
+    entry: price,
+    target: parseFloat((price + atr * 3).toFixed(2)),
+    stopLoss: parseFloat((price - atr * 2).toFixed(2)),
+    signalStrength: Math.min(100, strength),
+    signals,
+  };
+}
+
+// Strategy 7: 52-Week High Breakout
+function screen52WeekHigh(data: ScreenData): StrategyMatch | null {
+  const { symbol, price, high52W, volumeRatio, rsi } = data;
+  
+  const distFromHigh = ((high52W - price) / high52W) * 100;
+  if (distFromHigh > 5) return null; // Must be within 5% of 52W high
+  if (rsi < 50 || rsi > 80) return null; // RSI in momentum zone but not extreme
+  if (volumeRatio < 1.2) return null;
+
+  const signals: string[] = [];
+  let strength = 55;
+
+  if (distFromHigh < 1) { signals.push(`At 52W High ₹${high52W} 🔥`); strength += 20; }
+  else { signals.push(`${distFromHigh.toFixed(1)}% from 52W High ₹${high52W}`); strength += 10; }
+
+  if (volumeRatio > 1.5) { signals.push(`Volume ${volumeRatio}x (breakout volume)`); strength += 15; }
+  else { signals.push(`Volume ${volumeRatio}x avg`); strength += 5; }
+
+  signals.push(`RSI ${rsi} (strong momentum)`);
+  if (rsi >= 60 && rsi <= 75) strength += 10;
+
+  return {
+    symbol, price,
+    entry: price,
+    target: parseFloat((high52W * 1.08).toFixed(2)),
+    stopLoss: parseFloat((high52W * 0.95).toFixed(2)),
+    signalStrength: Math.min(100, strength),
+    signals,
+  };
+}
+
+// Strategy 8: Moving Average Ribbon Trend
+function screenMARibbon(data: ScreenData): StrategyMatch | null {
+  const { symbol, price, ema10, ema20, ema50, volumeRatio, rsi } = data;
+
+  // Perfect ribbon: EMA10 > EMA20 > EMA50, all rising
+  if (!(ema10 > ema20 && ema20 > ema50)) return null;
+  if (price < ema10) return null; // Price above all EMAs
+  if (rsi < 45 || rsi > 78) return null;
+
+  const signals: string[] = [];
+  let strength = 60;
+
+  signals.push(`EMA Ribbon: ₹${ema10} > ₹${ema20} > ₹${ema50}`);
+  strength += 15;
+
+  signals.push(`Price ₹${price} above all EMAs`);
+  
+  // Check if EMAs are well separated (strong trend)
+  const ema10_20_gap = ((ema10 - ema20) / ema20) * 100;
+  if (ema10_20_gap > 1) { signals.push(`EMAs well-separated (${ema10_20_gap.toFixed(1)}% gap)`); strength += 10; }
+
+  if (volumeRatio > 1.2) { signals.push(`Volume ${volumeRatio}x avg`); strength += 5; }
+  if (rsi >= 55 && rsi <= 70) { signals.push(`RSI ${rsi} (healthy momentum)`); strength += 5; }
+
+  const atr = data.dayHigh - data.dayLow;
+  return {
+    symbol, price,
+    entry: price,
+    target: parseFloat((price + atr * 4).toFixed(2)),
+    stopLoss: parseFloat(ema20.toFixed(2)),
+    signalStrength: Math.min(100, strength),
+    signals,
+  };
+}
+
+// Strategy 9: Oversold Quality Value (REAL Yahoo Finance fundamentals)
+async function screenOversoldQuality(data: ScreenData): Promise<StrategyMatch | null> {
+  const { symbol, price, rsi, priceChange5D } = data;
+  
+  if (rsi > 38) return null; // Must be oversold (fast technical pre-filter)
+  if (priceChange5D > -2) return null; // Must have dropped recently
+
+  // Fetch real fundamentals from Yahoo Finance (only for stocks that pass technical filters)
+  const fundamentals = await fetchRealFundamentals(symbol);
+  if (!fundamentals) return null; // Skip if no fundamental data available
+  if (fundamentals.roe < 14) return null; // Quality filter: ROE > 14%
+  if (fundamentals.debtToEquity > 1.0) return null; // Low debt
+
+  const signals: string[] = [];
+  let strength = 55;
+
+  signals.push(`RSI ${rsi} (oversold quality stock)`);
+  if (rsi < 28) strength += 15;
+  else strength += 10;
+
+  signals.push(`ROE ${fundamentals.roe}% (Yahoo Finance)`);
+  if (fundamentals.roe > 20) strength += 15;
+  else strength += 10;
+
+  signals.push(`D/E ${fundamentals.debtToEquity} (low leverage)`);
+  strength += 5;
+
+  signals.push(`Dropped ${priceChange5D.toFixed(1)}% in 5 days`);
+  if (priceChange5D < -5) strength += 10;
+  else strength += 5;
+
+  if (fundamentals.profitMargin > 10) {
+    signals.push(`Profit Margin ${fundamentals.profitMargin}%`);
+    strength += 5;
+  }
+
+  if (fundamentals.currentRatio > 1.5) {
+    signals.push(`Current Ratio ${fundamentals.currentRatio} (strong)`);
+    strength += 5;
+  }
+
+  return {
+    symbol, price,
+    entry: price,
+    target: parseFloat((price * 1.08).toFixed(2)),
+    stopLoss: parseFloat((price * 0.95).toFixed(2)),
+    signalStrength: Math.min(100, strength),
+    signals,
+    fundamentals,
+  };
+}
+
+// Strategy 10: Institutional Accumulation (Pure volume + price action, NO mock data)
+function screenInstitutionalAccumulation(data: ScreenData): StrategyMatch | null {
+  const { symbol, price, volumeRatio, priceChange1D, ema20, rsi, volumes, closes } = data;
+  
+  if (volumeRatio < 1.8) return null; // Must have significant volume surge
+  if (priceChange1D < 0.3) return null; // Price must be moving up
+  if (price < ema20) return null; // Must be above EMA20
+
+  // ── Multi-day accumulation detection (real volume analysis) ──
+  // Check if volume has been consistently above average for 3+ of last 5 days
+  const recentVolumes = volumes.slice(-5);
+  const avgVol20 = data.avgVolume;
+  const daysAboveAvg = recentVolumes.filter(v => v > avgVol20 * 1.2).length;
+  if (daysAboveAvg < 2) return null; // Need sustained volume, not just 1-day spike
+
+  // ── Price trending up on volume (accumulation signature) ──
+  const recentCloses = closes.slice(-5);
+  const priceGainingDays = recentCloses.filter((c, i) =>
+    i > 0 && c > recentCloses[i - 1]
+  ).length;
+  if (priceGainingDays < 2) return null; // Price must be rising on the volume
+
+  const signals: string[] = [];
+  let strength = 55;
+
+  signals.push(`Volume surge ${volumeRatio}x avg (today)`);
+  if (volumeRatio > 2.5) strength += 20;
+  else strength += 10;
+
+  signals.push(`${daysAboveAvg}/5 days above-avg volume (sustained)`);
+  if (daysAboveAvg >= 4) strength += 15;
+  else strength += 10;
+
+  signals.push(`Price +${priceChange1D}% with ${priceGainingDays}/4 up-days`);
+  strength += 10;
+
+  if (price > ema20) { signals.push(`Above EMA20 ₹${ema20}`); strength += 5; }
+  if (rsi > 50 && rsi < 70) { signals.push(`RSI ${rsi} (momentum without exhaustion)`); strength += 5; }
+
+  const atr = data.dayHigh - data.dayLow;
+  return {
+    symbol, price,
+    entry: price,
+    target: parseFloat((price + atr * 3).toFixed(2)),
+    stopLoss: parseFloat((ema20 * 0.98).toFixed(2)),
+    signalStrength: Math.min(100, strength),
+    signals,
+  };
+}
+
+// ─── Strategy dispatcher ────────────────────────────────────────────
+// Strategy 9 is async (fetches real fundamentals), others are sync
+const SYNC_STRATEGY_FILTERS: Record<number, (data: ScreenData) => StrategyMatch | null> = {
+  1: screenEMACrossover,
+  2: screenRSIReversal,
+  3: screenConfluencePullback,
+  4: screenBollingerSqueeze,
+  5: screenVolumeClimax,
+  6: screenMACDZeroCross,
+  7: screen52WeekHigh,
+  8: screenMARibbon,
+  10: screenInstitutionalAccumulation,
+};
+
+const ASYNC_STRATEGY_FILTERS: Record<number, (data: ScreenData) => Promise<StrategyMatch | null>> = {
+  9: screenOversoldQuality,
+};
+
+function getFilterFn(id: number): ((data: ScreenData) => StrategyMatch | null | Promise<StrategyMatch | null>) | null {
+  return SYNC_STRATEGY_FILTERS[id] ?? ASYNC_STRATEGY_FILTERS[id] ?? null;
+}
+
+// ─── Main API Handler ───────────────────────────────────────────────
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const strategyId = parseInt(searchParams.get('strategy') || '0');
+
+  if (strategyId < 1 || strategyId > 10) {
+    return NextResponse.json(
+      { error: 'Invalid strategy ID. Must be 1-10.' },
+      { status: 400 }
+    );
+  }
+
+  // Check cache
+  const cacheKey = `strategy:${strategyId}`;
+  const cached = strategyCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < STRATEGY_CACHE_TTL) {
+    return NextResponse.json({ ...cached.data, cached: true });
+  }
+
+  const filterFn = getFilterFn(strategyId);
+  if (!filterFn) {
+    return NextResponse.json({ error: 'Strategy filter not found' }, { status: 500 });
+  }
+
+  try {
+    const matches: StrategyMatch[] = [];
+    const errors: string[] = [];
+    const batchSize = 8;
+
+    // Process stocks in batches of 8 to avoid rate limiting
+    for (let i = 0; i < SCREEN_STOCKS.length; i += batchSize) {
+      const batch = SCREEN_STOCKS.slice(i, i + batchSize);
+      const results = await Promise.all(
+        batch.map(async (symbol) => {
+          try {
+            const data = await computeScreenData(symbol);
+            if (!data) return null;
+            // Await in case the filter is async (Strategy 9 fetches real fundamentals)
+            return await filterFn(data);
+          } catch (err: any) {
+            errors.push(`${symbol}: ${err.message}`);
+            return null;
+          }
+        })
+      );
+
+      results.forEach((r) => { if (r) matches.push(r); });
+    }
+
+    // Sort by signal strength descending
+    matches.sort((a, b) => b.signalStrength - a.signalStrength);
+
+    const response = {
+      strategyId,
+      matches,
+      totalScanned: SCREEN_STOCKS.length,
+      matchCount: matches.length,
+      scanTime: new Date().toISOString(),
+      errors: errors.length > 0 ? errors : undefined,
+    };
+
+    // Cache results
+    strategyCache.set(cacheKey, { data: response, ts: Date.now() });
+
+    return NextResponse.json(response);
+  } catch (error: any) {
+    console.error(`[Strategy Screen] Error for strategy ${strategyId}:`, error);
+    return NextResponse.json(
+      { error: error.message || 'Strategy screen failed' },
+      { status: 500 }
+    );
+  }
+}

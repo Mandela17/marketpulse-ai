@@ -20,6 +20,12 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
     '/watchlist': 'Watchlist',
     '/broker': 'Broker API',
     '/search': 'Search',
+    '/strategies': 'Strategy Hub',
+    '/learning': 'Trading Academy',
+    '/screener': 'Screener',
+    '/heatmap': 'Heatmap',
+    '/portfolio': 'Portfolio',
+    '/compare': 'Compare',
   };
   const currentPageName = pageNames[pathname] || 'MarketPulse';
 
@@ -29,6 +35,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
         <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       )}
       <main
+        className="main-content"
         style={{
           flex: 1,
           minHeight: '100vh',
@@ -36,6 +43,9 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
           flexDirection: 'column',
           position: 'relative',
           background: 'var(--bg-primary)',
+          overflow: 'hidden',
+          width: '100%',
+          minWidth: 0,
         }}
       >
         {/* Mobile / Tablet Top Header */}
@@ -78,12 +88,8 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
           </header>
         )}
 
-        {/* Page content */}
-        <div style={{
-          flex: 1,
-          padding: isAuthPage ? '0' : '24px',
-          paddingBottom: isAuthPage ? '0' : '32px',
-        }}>
+        {/* Page content — responsive padding handled via CSS class */}
+        <div className={isAuthPage ? '' : 'page-content-wrapper'}>
           {children}
         </div>
       </main>

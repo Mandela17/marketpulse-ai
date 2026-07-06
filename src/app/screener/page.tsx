@@ -90,7 +90,7 @@ export default function ScreenerPage() {
   ];
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
+    <div style={{ width: '100%' }}>
       {/* Header */}
       <div className="mb-6 animate-fade-in-up">
         <h1 className="text-2xl sm:text-3xl font-bold text-white">🔎 Stock Screener</h1>

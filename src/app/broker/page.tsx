@@ -239,7 +239,7 @@ export default function BrokerPage() {
   const isConnected = serverToken?.connected || config.connected || saveStatus === 'connected';
 
   return (
-    <div className="p-6 max-w-3xl mx-auto animate-fade-in">
+    <div className="max-w-3xl mx-auto animate-fade-in">
       <div className="mb-6">
         <h1 className="text-2xl font-bold mb-1" style={{ color: 'var(--text-primary)' }}>
           🔌 Broker API Integration

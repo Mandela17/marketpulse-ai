@@ -98,7 +98,6 @@ export default function NewsCard({ article, compact = false }: NewsCardProps) {
       style={{
         borderRadius: '12px',
         padding: '16px',
-        marginBottom: '12px',
         background: 'var(--bg-card)',
         border: '1px solid var(--border-color)',
       }}>

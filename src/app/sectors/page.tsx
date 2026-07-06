@@ -8,7 +8,7 @@ export default function SectorsPage() {
   const sorted = [...DEMO_SECTORS].sort((a, b) => b.sentiment - a.sentiment);
 
   return (
-    <div className="p-6">
+    <div style={{ width: '100%' }}>
       <div className="mb-6">
         <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
           All Sectors

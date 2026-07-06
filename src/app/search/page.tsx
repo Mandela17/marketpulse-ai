@@ -7,7 +7,7 @@ export default function SearchPage() {
   const router = useRouter();
 
   return (
-    <div className="p-6 min-h-[80vh] flex flex-col items-center justify-center">
+    <div className="min-h-[80vh] flex flex-col items-center justify-center">
       <div className="text-center mb-8 animate-slide-up">
         <h1 className="text-3xl font-bold mb-2 gradient-text">Search Stocks</h1>
         <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>

@@ -103,7 +103,7 @@ export default function AdminPage() {
   };
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 animate-fade-in">
+    <div className="animate-fade-in" style={{ width: '100%' }}>
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-6">
         <div>

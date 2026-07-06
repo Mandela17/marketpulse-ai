@@ -155,7 +155,7 @@ export default function HeatmapPage() {
   }
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
+    <div style={{ width: '100%' }}>
       {/* Header */}
       <div className="mb-6 animate-fade-in-up">
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">

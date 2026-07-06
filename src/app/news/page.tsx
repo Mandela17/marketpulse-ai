@@ -53,37 +53,70 @@ export default function NewsPage() {
   });
 
   return (
-    <div className="p-6">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold flex items-center gap-3" style={{ color: 'var(--text-primary)' }}>
-          News Feed
+    <div style={{ width: '100%', maxWidth: '100%' }}>
+      {/* Header */}
+      <div style={{ marginBottom: 20 }}>
+        <h1 style={{
+          fontSize: 'clamp(20px, 4vw, 28px)',
+          fontWeight: 700,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          color: 'var(--text-primary)',
+          flexWrap: 'wrap',
+        }}>
+          📰 News Feed
           {isLive && (
-            <span className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-bold"
-              style={{ background: 'var(--accent-green-dim)', color: 'var(--accent-green)' }}>
-              <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: 'var(--accent-green)' }} />
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              fontSize: 10,
+              padding: '2px 8px',
+              borderRadius: 9999,
+              fontWeight: 700,
+              background: 'var(--accent-green-dim)',
+              color: 'var(--accent-green)',
+            }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent-green)', animation: 'pulse 2s infinite' }} />
               LIVE
             </span>
           )}
           {loading && (
-            <span className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-bold"
-              style={{ background: 'var(--accent-yellow-dim)', color: 'var(--accent-yellow)' }}>
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              fontSize: 10,
+              padding: '2px 8px',
+              borderRadius: 9999,
+              fontWeight: 700,
+              background: 'var(--accent-yellow-dim)',
+              color: 'var(--accent-yellow)',
+            }}>
               ⏳ Loading...
             </span>
           )}
         </h1>
-        <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
+        <p style={{ color: 'var(--text-secondary)', fontSize: 13, margin: 0, marginTop: 4 }}>
           {isLive ? 'Real-time news with Gemini AI sentiment analysis' : 'AI-powered sentiment analysis'}
         </p>
       </div>
 
       {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-4 mb-6">
-        <div className="flex gap-1 flex-wrap">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
+        {/* Category filters */}
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {categories.map((cat) => (
             <button key={cat.id}
               onClick={() => setSelectedCategory(cat.id)}
-              className="text-xs px-3 py-1.5 rounded-lg transition-all font-medium cursor-pointer"
               style={{
+                fontSize: 12,
+                padding: '6px 12px',
+                borderRadius: 8,
+                cursor: 'pointer',
+                fontWeight: 500,
+                transition: 'all 0.15s ease',
                 background: selectedCategory === cat.id ? 'var(--accent-blue-dim)' : 'var(--bg-card)',
                 color: selectedCategory === cat.id ? 'var(--accent-blue)' : 'var(--text-secondary)',
                 border: `1px solid ${selectedCategory === cat.id ? 'var(--accent-blue)' : 'var(--border-color)'}`,
@@ -93,12 +126,18 @@ export default function NewsPage() {
           ))}
         </div>
 
-        <div className="flex gap-1">
+        {/* Sentiment filters */}
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {sentimentFilters.map((f) => (
             <button key={f.id}
               onClick={() => setSelectedSentiment(f.id)}
-              className="text-xs px-3 py-1.5 rounded-lg transition-all font-medium cursor-pointer"
               style={{
+                fontSize: 12,
+                padding: '6px 12px',
+                borderRadius: 8,
+                cursor: 'pointer',
+                fontWeight: 500,
+                transition: 'all 0.15s ease',
                 background: selectedSentiment === f.id ? `${f.color}20` : 'var(--bg-card)',
                 color: selectedSentiment === f.id ? f.color : 'var(--text-secondary)',
                 border: `1px solid ${selectedSentiment === f.id ? f.color : 'var(--border-color)'}`,
@@ -109,32 +148,41 @@ export default function NewsPage() {
         </div>
       </div>
 
-      <div className="flex items-center gap-4 mb-4">
-        <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+      {/* Count */}
+      <div style={{ marginBottom: 12 }}>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
           Showing {filteredNews.length} of {news.length} articles
         </span>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {/* News Grid — responsive via CSS */}
+      <div className="news-grid">
         {filteredNews.map((article) => (
           <NewsCard key={article.id} article={article} />
         ))}
       </div>
 
       {filteredNews.length === 0 && !loading && (
-        <div className="text-center py-12">
-          <p className="text-3xl mb-3">🔍</p>
-          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+        <div style={{ textAlign: 'center', padding: '48px 0' }}>
+          <p style={{ fontSize: 28, marginBottom: 8 }}>🔍</p>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
             No articles match your current filters
           </p>
         </div>
       )}
 
       {loading && (
-        <div className="text-center py-12">
-          <div className="w-10 h-10 border-3 rounded-full animate-spin mx-auto mb-3"
-            style={{ borderColor: 'var(--border-color)', borderTopColor: 'var(--accent-blue)' }} />
-          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+        <div style={{ textAlign: 'center', padding: '48px 0' }}>
+          <div style={{
+            width: 40,
+            height: 40,
+            border: '3px solid var(--border-color)',
+            borderTopColor: 'var(--accent-blue)',
+            borderRadius: '50%',
+            animation: 'spin 1s linear infinite',
+            margin: '0 auto 12px',
+          }} />
+          <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
             Fetching live news & running Gemini sentiment analysis...
           </p>
         </div>
