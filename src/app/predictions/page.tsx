@@ -133,11 +133,11 @@ export default function PredictionsDashboard() {
   const isEmpty = !loading && activePredictions.length === 0;
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6 animate-fade-in">
+    <div className="max-w-7xl mx-auto space-y-6 animate-fade-in" style={{ width: '100%', overflow: 'hidden' }}>
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>
             🤖 AI Predictions Center
           </h1>
           <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
@@ -220,7 +220,7 @@ export default function PredictionsDashboard() {
       })()}
 
       {/* Scoreboard */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
         <div className="p-5 rounded-xl border" style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
           <p className="text-[10px] uppercase font-bold tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>Overall Accuracy</p>
           <h2 className="text-3xl font-bold" style={{ color: 'var(--accent-blue)' }}>
@@ -455,8 +455,8 @@ export default function PredictionsDashboard() {
                   </p>
                 </div>
               ) : (
-                <div className="rounded-xl border overflow-hidden" style={{ background: 'var(--bg-card)', borderColor: 'rgba(0,214,143,0.2)' }}>
-                  <table className="w-full text-left">
+                <div className="rounded-xl border" style={{ background: 'var(--bg-card)', borderColor: 'rgba(0,214,143,0.2)', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+                  <table className="w-full text-left" style={{ minWidth: 700 }}>
                     <thead>
                       <tr className="border-b" style={{ background: 'rgba(0,214,143,0.04)', borderColor: 'var(--border-color)' }}>
                         <th className="p-3 text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Grade</th>
@@ -487,8 +487,8 @@ export default function PredictionsDashboard() {
                     Low confluence — no trade recommended
                   </span>
                 </div>
-                <div className="rounded-xl border overflow-hidden" style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)', opacity: 0.7 }}>
-                  <table className="w-full text-left">
+                <div className="rounded-xl border" style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)', opacity: 0.7, overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+                  <table className="w-full text-left" style={{ minWidth: 700 }}>
                     <thead>
                       <tr className="border-b" style={{ background: 'rgba(255,255,255,0.02)', borderColor: 'var(--border-color)' }}>
                         <th className="p-3 text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Grade</th>
