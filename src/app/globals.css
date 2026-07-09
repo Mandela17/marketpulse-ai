@@ -914,3 +914,9 @@ tr:hover {
 .space-y-4 > * + * { margin-top: 16px; }
 .space-y-6 > * + * { margin-top: 24px; }
 
+/* ─── Paper Trading Layout ────────────────────────────── */
+@media (min-width: 1024px) {
+  .paper-trade-layout {
+    grid-template-columns: 380px 1fr !important;
+  }
+}

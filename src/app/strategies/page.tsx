@@ -834,6 +834,38 @@ function ScreenResults({ result, strategy }: { result: ScreenResult; strategy: S
                 <span style={{ fontSize: 9, color: 'var(--accent-teal)', fontStyle: 'italic' }}>via Yahoo Finance</span>
               </div>
             )}
+
+            {/* Paper Trade Button */}
+            <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
+              <a
+                href={`/paper-trading?symbol=${match.symbol}&price=${match.entry}&sl=${match.stopLoss}&target=${match.target}&strategy=${encodeURIComponent(strategy.name)}`}
+                onClick={(e) => { e.stopPropagation(); }}
+                style={{
+                  fontSize: 11,
+                  padding: '6px 14px',
+                  borderRadius: 8,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  textDecoration: 'none',
+                  background: 'rgba(16,185,129,0.12)',
+                  color: '#10b981',
+                  border: '1px solid rgba(16,185,129,0.3)',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                📝 Paper Trade
+              </a>
+              <span style={{
+                fontSize: 11,
+                padding: '6px 14px',
+                borderRadius: 8,
+                fontWeight: 600,
+                background: 'rgba(59,130,246,0.08)',
+                color: '#60a5fa',
+              }}>
+                View Chart →
+              </span>
+            </div>
           </div>
         </Link>
       ))}
