@@ -328,3 +328,277 @@ export function getPaperStats(state: PaperTradingState) {
     openPositionCount: getOpenPositions(state).length,
   };
 }
+
+// ─── Auto Paper Trading ──────────────────────────────────────────────
+// Automatically places paper orders from AI predictions daily
+
+const AUTO_TRADE_KEY = 'marketpulse_auto_paper_trade';
+const AUTO_TRADE_LOG_KEY = 'marketpulse_auto_trade_log';
+
+export interface AutoTradeConfig {
+  enabled: boolean;
+  maxPositions: number;       // max simultaneous positions (default 10)
+  riskPerTrade: number;       // % of capital per trade (default 2)
+  slPercent: number;          // stop-loss % below entry (default 3)
+  targetPercent: number;      // target % above entry (default 6)
+  onlyAGrade: boolean;        // only A-grade signals (default false = A+B)
+  autoCloseOnTarget: boolean; // auto-close when price hits target (default true)
+  autoCloseOnSL: boolean;     // auto-close when price hits stop-loss (default true)
+}
+
+export interface AutoTradeLogEntry {
+  date: string;       // YYYY-MM-DD
+  placed: number;
+  skipped: number;
+  closed: number;
+  symbols: string[];
+  closedSymbols: string[];
+}
+
+export function getAutoTradeConfig(): AutoTradeConfig {
+  if (typeof window === 'undefined') return defaultAutoConfig();
+  try {
+    const raw = localStorage.getItem(AUTO_TRADE_KEY);
+    if (raw) return { ...defaultAutoConfig(), ...JSON.parse(raw) };
+  } catch {}
+  return defaultAutoConfig();
+}
+
+export function saveAutoTradeConfig(config: AutoTradeConfig): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(AUTO_TRADE_KEY, JSON.stringify(config));
+}
+
+function defaultAutoConfig(): AutoTradeConfig {
+  return {
+    enabled: false,
+    maxPositions: 10,
+    riskPerTrade: 2,
+    slPercent: 3,
+    targetPercent: 6,
+    onlyAGrade: false,
+    autoCloseOnTarget: true,
+    autoCloseOnSL: true,
+  };
+}
+
+export function getAutoTradeLog(): AutoTradeLogEntry[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(AUTO_TRADE_LOG_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return [];
+}
+
+function saveAutoTradeLog(log: AutoTradeLogEntry[]): void {
+  if (typeof window === 'undefined') return;
+  // Keep last 30 days only
+  localStorage.setItem(AUTO_TRADE_LOG_KEY, JSON.stringify(log.slice(-30)));
+}
+
+function todayDate(): string {
+  return new Date().toISOString().split('T')[0];
+}
+
+export function hasAutoTradedToday(): boolean {
+  const log = getAutoTradeLog();
+  return log.some(e => e.date === todayDate());
+}
+
+// ─── Auto-close positions that hit SL or Target ──────────────────────
+
+export async function autoClosePositions(): Promise<{ closed: string[] }> {
+  const config = getAutoTradeConfig();
+  if (!config.autoCloseOnSL && !config.autoCloseOnTarget) return { closed: [] };
+
+  const state = loadPaperState();
+  const positions = getOpenPositions(state);
+  const closed: string[] = [];
+
+  for (const pos of positions) {
+    // Get live price
+    try {
+      const res = await fetch(`/api/stock?symbol=${pos.symbol}`);
+      const data = await res.json();
+      const currentPrice = data?.quote?.price || data?.price;
+      if (!currentPrice) continue;
+
+      // Check if any BUY order has SL/target set
+      const buyOrder = pos.orders.find(o => o.stopLoss || o.target);
+      const sl = buyOrder?.stopLoss || pos.avgPrice * (1 - config.slPercent / 100);
+      const tgt = buyOrder?.target || pos.avgPrice * (1 + config.targetPercent / 100);
+
+      let shouldClose = false;
+      let reason = '';
+
+      if (config.autoCloseOnSL && currentPrice <= sl) {
+        shouldClose = true;
+        reason = `SL hit (₹${sl.toFixed(2)})`;
+      } else if (config.autoCloseOnTarget && currentPrice >= tgt) {
+        shouldClose = true;
+        reason = `Target hit (₹${tgt.toFixed(2)})`;
+      }
+
+      if (shouldClose) {
+        placePaperOrder({
+          symbol: pos.symbol,
+          side: 'SELL',
+          orderType: 'MARKET',
+          qty: pos.qty,
+          price: currentPrice,
+          source: 'strategy',
+          strategyName: `Auto-close: ${reason}`,
+        });
+        closed.push(pos.symbol);
+      }
+    } catch {}
+  }
+
+  return { closed };
+}
+
+// ─── Place orders from AI predictions ────────────────────────────────
+
+export interface AutoTradeResult {
+  placed: number;
+  skipped: number;
+  closed: number;
+  details: { symbol: string; action: string; price: number; qty: number }[];
+  closedDetails: string[];
+  alreadyRanToday: boolean;
+}
+
+export async function runAutoPaperTrade(predictions: any[]): Promise<AutoTradeResult> {
+  const config = getAutoTradeConfig();
+  const result: AutoTradeResult = { placed: 0, skipped: 0, closed: 0, details: [], closedDetails: [], alreadyRanToday: false };
+
+  // Check if already ran today
+  if (hasAutoTradedToday()) {
+    result.alreadyRanToday = true;
+    return result;
+  }
+
+  // Step 1: Auto-close positions hitting SL/Target
+  const { closed } = await autoClosePositions();
+  result.closed = closed.length;
+  result.closedDetails = closed;
+
+  // Step 2: Filter tradeable predictions
+  const getGrade = (p: any) => p.features_json?.tradeGrade || p.featuresJson?.tradeGrade || 'C';
+  const getTradeable = (p: any) => p.features_json?.tradeable || p.featuresJson?.tradeable || false;
+  const getConfluence = (p: any) => p.features_json?.confluenceScore ?? p.featuresJson?.confluenceScore ?? 0;
+
+  const tradeableSignals = predictions
+    .filter(p => getTradeable(p))
+    .filter(p => {
+      const grade = getGrade(p);
+      return config.onlyAGrade ? grade === 'A' : (grade === 'A' || grade === 'B');
+    })
+    .sort((a, b) => getConfluence(b) - getConfluence(a));
+
+  if (tradeableSignals.length === 0) {
+    logAutoTrade(result);
+    return result;
+  }
+
+  // Step 3: Check current position count
+  const state = loadPaperState();
+  const currentPositions = getOpenPositions(state);
+  const existingSymbols = new Set(currentPositions.map(p => p.symbol));
+  const availableSlots = Math.max(0, config.maxPositions - currentPositions.length);
+
+  // Step 4: Place orders
+  let slotsUsed = 0;
+  for (const pred of tradeableSignals) {
+    if (slotsUsed >= availableSlots) break;
+
+    const sym = pred.symbol;
+    const direction = pred.predictedDirection || pred.predicted_direction;
+
+    // Skip if already holding this stock
+    if (existingSymbols.has(sym)) {
+      result.skipped++;
+      continue;
+    }
+
+    // Only BUY for bullish signals (no short selling in paper trading)
+    if (direction !== 'up') {
+      result.skipped++;
+      continue;
+    }
+
+    // Get live price
+    try {
+      const res = await fetch(`/api/stock?symbol=${sym}`);
+      const data = await res.json();
+      const price = data?.quote?.price || data?.price;
+      if (!price || price <= 0) {
+        result.skipped++;
+        continue;
+      }
+
+      // Position sizing: risk% of portfolio per trade
+      const latestState = loadPaperState();
+      const stats = getPaperStats(latestState);
+      const riskAmount = (stats.portfolioValue * config.riskPerTrade) / 100;
+      const slPrice = price * (1 - config.slPercent / 100);
+      const riskPerShare = price - slPrice;
+      const qty = Math.max(1, Math.floor(riskAmount / riskPerShare));
+
+      // Check if we can afford it
+      const orderValue = price * qty;
+      if (orderValue > latestState.currentCash) {
+        result.skipped++;
+        continue;
+      }
+
+      const targetPrice = price * (1 + config.targetPercent / 100);
+      const confidence = pred.probability || 50;
+      const grade = getGrade(pred);
+
+      const orderResult = placePaperOrder({
+        symbol: sym,
+        side: 'BUY',
+        orderType: 'MARKET',
+        qty,
+        price,
+        stopLoss: Math.round(slPrice * 100) / 100,
+        target: Math.round(targetPrice * 100) / 100,
+        source: 'strategy',
+        strategyName: `AI Prediction (${grade}-grade, ${confidence}% conf)`,
+        notes: `Auto-trade: ${grade}-grade, ${confidence}% confidence, ${getConfluence(pred)}/6 confluence`,
+      });
+
+      if (orderResult.success) {
+        result.placed++;
+        result.details.push({ symbol: sym, action: 'BUY', price, qty });
+        slotsUsed++;
+        existingSymbols.add(sym);
+      } else {
+        result.skipped++;
+      }
+
+      // Small delay to avoid rate limiting on price fetch
+      await new Promise(r => setTimeout(r, 200));
+    } catch {
+      result.skipped++;
+    }
+  }
+
+  logAutoTrade(result);
+  return result;
+}
+
+function logAutoTrade(result: AutoTradeResult): void {
+  const log = getAutoTradeLog();
+  log.push({
+    date: todayDate(),
+    placed: result.placed,
+    skipped: result.skipped,
+    closed: result.closed,
+    symbols: result.details.map(d => d.symbol),
+    closedSymbols: result.closedDetails,
+  });
+  saveAutoTradeLog(log);
+}

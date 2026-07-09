@@ -4,6 +4,11 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import BacktestCard from '@/components/BacktestCard';
 import AccuracyTrendChart from '@/components/AccuracyTrendChart';
+import {
+  getAutoTradeConfig, saveAutoTradeConfig, runAutoPaperTrade,
+  hasAutoTradedToday, getAutoTradeLog, autoClosePositions,
+  AutoTradeConfig, AutoTradeResult,
+} from '@/lib/paperTradingStore';
 
 // Format prediction timestamp as relative time
 function formatPredictionTime(isoString: string): string {
@@ -41,6 +46,12 @@ export default function PredictionsDashboard() {
   const [seedResult, setSeedResult] = useState<any>(null);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
 
+  // Auto Paper Trading state
+  const [autoTradeConfig, setAutoTradeConfig] = useState<AutoTradeConfig | null>(null);
+  const [autoTrading, setAutoTrading] = useState(false);
+  const [autoTradeResult, setAutoTradeResult] = useState<AutoTradeResult | null>(null);
+  const [showAutoConfig, setShowAutoConfig] = useState(false);
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
@@ -70,6 +81,63 @@ export default function PredictionsDashboard() {
     const interval = setInterval(fetchData, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, [fetchData]);
+
+  // Load auto-trade config
+  useEffect(() => {
+    setAutoTradeConfig(getAutoTradeConfig());
+  }, []);
+
+  // Auto-run paper trades when predictions load (if enabled)
+  useEffect(() => {
+    if (!autoTradeConfig?.enabled || loading || activePredictions.length === 0) return;
+    if (hasAutoTradedToday()) return; // already ran today
+
+    const runAuto = async () => {
+      setAutoTrading(true);
+      try {
+        const result = await runAutoPaperTrade(activePredictions);
+        setAutoTradeResult(result);
+      } catch (err) {
+        console.error('[AutoTrade] Error:', err);
+      }
+      setAutoTrading(false);
+    };
+    runAuto();
+  }, [autoTradeConfig?.enabled, loading, activePredictions]);
+
+  // Auto-close positions every 5 minutes (check SL/Target)
+  useEffect(() => {
+    if (!autoTradeConfig?.enabled) return;
+    const interval = setInterval(async () => {
+      await autoClosePositions();
+    }, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [autoTradeConfig?.enabled]);
+
+  // Manual trigger for auto-trade
+  const handleManualAutoTrade = async () => {
+    setAutoTrading(true);
+    setAutoTradeResult(null);
+    try {
+      const result = await runAutoPaperTrade(activePredictions);
+      setAutoTradeResult(result);
+    } catch (err: any) {
+      console.error('[AutoTrade] Error:', err);
+    }
+    setAutoTrading(false);
+  };
+
+  const toggleAutoTrade = (enabled: boolean) => {
+    const newConfig = { ...(autoTradeConfig || getAutoTradeConfig()), enabled };
+    saveAutoTradeConfig(newConfig);
+    setAutoTradeConfig(newConfig);
+  };
+
+  const updateAutoConfig = (updates: Partial<AutoTradeConfig>) => {
+    const newConfig = { ...(autoTradeConfig || getAutoTradeConfig()), ...updates };
+    saveAutoTradeConfig(newConfig);
+    setAutoTradeConfig(newConfig);
+  };
 
   const handleSeed = async () => {
     setSeeding(true);
@@ -276,7 +344,7 @@ export default function PredictionsDashboard() {
         <AccuracyTrendChart />
         <BacktestCard />
         
-        {/* Generate Button */}
+        {/* Generate Button + Auto Paper Trading */}
         <div className="rounded-xl p-5" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
           <h3 className="text-sm font-bold mb-3" style={{ color: 'var(--text-primary)' }}>⚡ Quick Actions</h3>
           <div className="space-y-3">
@@ -297,6 +365,162 @@ export default function PredictionsDashboard() {
             <p className="text-[10px] text-center" style={{ color: 'var(--text-muted)' }}>
               Generates predictions for top {KEY_STOCKS_COUNT} Nifty stocks. Runs automatically at 8:30 AM IST daily.
             </p>
+          </div>
+
+          {/* Auto Paper Trading Section */}
+          <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border-subtle)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <h4 style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6, margin: 0 }}>
+                📝 Auto Paper Trading
+              </h4>
+              {/* Toggle */}
+              <button
+                onClick={() => toggleAutoTrade(!autoTradeConfig?.enabled)}
+                style={{
+                  width: 44, height: 24, borderRadius: 12, border: 'none', cursor: 'pointer',
+                  position: 'relative', transition: 'all 0.2s ease',
+                  background: autoTradeConfig?.enabled ? 'rgba(16,185,129,0.4)' : 'rgba(255,255,255,0.1)',
+                }}
+              >
+                <span style={{
+                  width: 18, height: 18, borderRadius: '50%', position: 'absolute', top: 3,
+                  left: autoTradeConfig?.enabled ? 23 : 3, transition: 'all 0.2s ease',
+                  background: autoTradeConfig?.enabled ? '#10b981' : 'rgba(255,255,255,0.3)',
+                }} />
+              </button>
+            </div>
+
+            <p style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 10, lineHeight: 1.5 }}>
+              {autoTradeConfig?.enabled
+                ? '✅ Active — Auto-places BUY orders for A/B-grade bullish signals daily with SL & target. Auto-closes when hit.'
+                : 'When enabled, automatically places paper trades from AI predictions daily.'}
+            </p>
+
+            {/* Config Panel */}
+            {autoTradeConfig?.enabled && (
+              <>
+                <button
+                  onClick={() => setShowAutoConfig(!showAutoConfig)}
+                  style={{
+                    fontSize: 10, color: 'var(--accent-blue)', background: 'none',
+                    border: 'none', cursor: 'pointer', fontWeight: 600, marginBottom: 8,
+                    padding: 0,
+                  }}
+                >
+                  {showAutoConfig ? '▼ Hide Settings' : '▶ Show Settings'}
+                </button>
+
+                {showAutoConfig && (
+                  <div style={{
+                    display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12,
+                    padding: 12, borderRadius: 10, background: 'rgba(15,20,42,0.6)',
+                    border: '1px solid var(--border-subtle)',
+                  }}>
+                    {[
+                      { label: 'Stop-Loss %', key: 'slPercent' as const, value: autoTradeConfig.slPercent },
+                      { label: 'Target %', key: 'targetPercent' as const, value: autoTradeConfig.targetPercent },
+                      { label: 'Risk/Trade %', key: 'riskPerTrade' as const, value: autoTradeConfig.riskPerTrade },
+                      { label: 'Max Positions', key: 'maxPositions' as const, value: autoTradeConfig.maxPositions },
+                    ].map(({ label, key, value }) => (
+                      <div key={key}>
+                        <label style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', display: 'block', marginBottom: 3 }}>{label}</label>
+                        <input
+                          type="number" value={value}
+                          onChange={e => updateAutoConfig({ [key]: parseFloat(e.target.value) || 0 })}
+                          style={{
+                            width: '100%', padding: '6px 10px', borderRadius: 8, fontSize: 13, fontWeight: 600,
+                            background: 'var(--bg-primary)', border: '1px solid var(--border-color)',
+                            color: 'var(--text-primary)', outline: 'none',
+                          }}
+                        />
+                      </div>
+                    ))}
+                    <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 10, marginTop: 4 }}>
+                      <label style={{ fontSize: 10, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                        <input type="checkbox" checked={autoTradeConfig.onlyAGrade} onChange={e => updateAutoConfig({ onlyAGrade: e.target.checked })} />
+                        A-grade only
+                      </label>
+                      <label style={{ fontSize: 10, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                        <input type="checkbox" checked={autoTradeConfig.autoCloseOnSL} onChange={e => updateAutoConfig({ autoCloseOnSL: e.target.checked })} />
+                        Auto-close SL
+                      </label>
+                      <label style={{ fontSize: 10, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                        <input type="checkbox" checked={autoTradeConfig.autoCloseOnTarget} onChange={e => updateAutoConfig({ autoCloseOnTarget: e.target.checked })} />
+                        Auto-close Target
+                      </label>
+                    </div>
+                  </div>
+                )}
+
+                {/* Run Now Button */}
+                <button
+                  onClick={handleManualAutoTrade}
+                  disabled={autoTrading || activePredictions.length === 0}
+                  style={{
+                    width: '100%', padding: '10px 0', borderRadius: 10, border: 'none',
+                    fontWeight: 700, fontSize: 12, cursor: autoTrading ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.2s ease',
+                    background: autoTrading ? 'rgba(255,255,255,0.05)' : 'linear-gradient(135deg, #10b981, #059669)',
+                    color: 'white', opacity: autoTrading ? 0.7 : 1,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  }}
+                >
+                  {autoTrading ? (
+                    <><span style={{ width: 14, height: 14, border: '2px solid white', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite', display: 'inline-block' }} /> Placing trades...</>
+                  ) : hasAutoTradedToday() ? (
+                    <>✅ Already ran today — Run again</>
+                  ) : (
+                    <>📝 Run Auto Paper Trade Now</>
+                  )}
+                </button>
+
+                {/* Result Banner */}
+                {autoTradeResult && (
+                  <div style={{
+                    marginTop: 8, padding: '10px 12px', borderRadius: 10, fontSize: 11, lineHeight: 1.6,
+                    background: autoTradeResult.placed > 0 ? 'rgba(16,185,129,0.08)' : 'rgba(255,184,0,0.08)',
+                    border: `1px solid ${autoTradeResult.placed > 0 ? 'rgba(16,185,129,0.2)' : 'rgba(255,184,0,0.2)'}`,
+                    color: 'var(--text-secondary)',
+                  }}>
+                    {autoTradeResult.alreadyRanToday ? (
+                      <span style={{ color: 'var(--text-muted)' }}>Already executed today. Will run again tomorrow.</span>
+                    ) : (
+                      <>
+                        <strong style={{ color: '#10b981' }}>
+                          📝 {autoTradeResult.placed} orders placed
+                        </strong>
+                        {autoTradeResult.closed > 0 && (
+                          <span> · <strong style={{ color: '#f59e0b' }}>{autoTradeResult.closed} positions closed</strong> ({autoTradeResult.closedDetails.join(', ')})</span>
+                        )}
+                        {autoTradeResult.skipped > 0 && (
+                          <span style={{ color: 'var(--text-muted)' }}> · {autoTradeResult.skipped} skipped</span>
+                        )}
+                        {autoTradeResult.details.length > 0 && (
+                          <div style={{ marginTop: 4 }}>
+                            {autoTradeResult.details.map(d => (
+                              <span key={d.symbol} style={{
+                                display: 'inline-block', fontSize: 10, padding: '2px 8px', borderRadius: 6, marginRight: 4, marginTop: 2,
+                                background: 'rgba(16,185,129,0.12)', color: '#10b981', fontWeight: 600,
+                              }}>
+                                {d.symbol} × {d.qty} @ ₹{d.price.toFixed(0)}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* View Trades Link */}
+                <Link href="/paper-trading" style={{
+                  display: 'block', textAlign: 'center', marginTop: 8,
+                  fontSize: 11, fontWeight: 600, color: 'var(--accent-blue)',
+                }}>
+                  View Paper Trading Dashboard →
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </div>
