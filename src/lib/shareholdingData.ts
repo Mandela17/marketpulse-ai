@@ -68,10 +68,10 @@ const SHAREHOLDING_DATA: StockShareholding[] = [
     symbol: 'HDFCBANK',
     companyName: 'HDFC Bank Ltd',
     history: [
-      { quarter: 'Mar 2026', promoter: 25.80, fii: 33.58, dii: 15.42, mutualFund: 10.85, retail: 11.32, others: 3.03 },
-      { quarter: 'Dec 2025', promoter: 25.80, fii: 34.12, dii: 15.18, mutualFund: 10.62, retail: 11.24, others: 3.04 },
-      { quarter: 'Sep 2025', promoter: 25.80, fii: 34.68, dii: 14.85, mutualFund: 10.38, retail: 11.35, others: 2.94 },
-      { quarter: 'Jun 2025', promoter: 25.80, fii: 35.22, dii: 14.52, mutualFund: 10.15, retail: 11.42, others: 2.89 },
+      { quarter: 'Mar 2026', promoter: 0.00, fii: 44.05, dii: 19.32, mutualFund: 21.15, retail: 12.45, others: 3.03 },
+      { quarter: 'Dec 2025', promoter: 0.00, fii: 44.22, dii: 19.18, mutualFund: 20.85, retail: 12.71, others: 3.04 },
+      { quarter: 'Sep 2025', promoter: 0.00, fii: 44.51, dii: 18.95, mutualFund: 20.42, retail: 13.18, others: 2.94 },
+      { quarter: 'Jun 2025', promoter: 0.00, fii: 44.82, dii: 18.62, mutualFund: 20.15, retail: 13.52, others: 2.89 },
     ],
   },
   {
