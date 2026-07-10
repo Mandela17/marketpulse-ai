@@ -4,6 +4,7 @@ import { use, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { getStockBySymbol } from '@/lib/sectorData';
+import { getShareholdingData, SHAREHOLDING_COLORS, SHAREHOLDING_LABELS, type ShareholdingQuarter } from '@/lib/shareholdingData';
 import { getSentimentColor, getSentimentLabel } from '@/lib/types';
 import SentimentGauge from '@/components/SentimentGauge';
 import NewsCard from '@/components/NewsCard';
@@ -144,7 +145,7 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
   const [derivatives, setDerivatives] = useState<DerivativesData | null>(null);
   const [blockDeals, setBlockDeals] = useState<any[]>([]);
   const [mlResult, setMlResult] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<'technicals' | 'derivatives'>('technicals');
+  const [activeTab, setActiveTab] = useState<'technicals' | 'derivatives' | 'shareholding'>('technicals');
   const [lookbackDays, setLookbackDays] = useState<number>(90);
 
   // Server-side AI Prediction state
@@ -552,6 +553,14 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
               }`}
             >
               🔌 Derivatives & Options
+            </button>
+            <button
+              onClick={() => setActiveTab('shareholding')}
+              className={`px-5 py-3 text-sm font-bold border-b-2 transition-all cursor-pointer ${
+                activeTab === 'shareholding' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              🏛️ Shareholding
             </button>
           </div>
 
@@ -1301,6 +1310,201 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
               )}
             </div>
           )}
+
+          {/* Tab 3: Shareholding Pattern */}
+          {activeTab === 'shareholding' && (() => {
+            const shData = getShareholdingData(decodedSymbol);
+            const latest = shData?.history?.[0];
+            const categories = ['promoter', 'fii', 'dii', 'mutualFund', 'retail', 'others'] as const;
+
+            if (!shData || !latest) {
+              return (
+                <div className="p-12 rounded-xl border bg-slate-900 text-center" style={{ borderColor: 'var(--border-color)' }}>
+                  <p className="text-3xl mb-3">🏛️</p>
+                  <p className="text-sm text-slate-400 font-semibold">Shareholding data not available for {decodedSymbol}</p>
+                  <p className="text-xs text-slate-500 mt-1">Data is curated for Nifty 50 stocks and updated quarterly</p>
+                </div>
+              );
+            }
+
+            // Build donut segments
+            const segments = categories
+              .map(key => ({ key, value: latest[key] || 0, color: SHAREHOLDING_COLORS[key], label: SHAREHOLDING_LABELS[key] }))
+              .filter(s => s.value > 0);
+            const total = segments.reduce((sum, s) => sum + s.value, 0);
+
+            // SVG Donut chart math
+            const radius = 80;
+            const circumference = 2 * Math.PI * radius;
+            let cumulativeOffset = 0;
+
+            return (
+              <div className="space-y-6 animate-fade-in">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Donut Chart */}
+                  <div className="rounded-xl p-6 border bg-slate-900" style={{ borderColor: 'var(--border-color)' }}>
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-sm font-bold text-white">📊 Shareholding Pattern</h3>
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: 'rgba(99,102,241,0.15)', color: '#818cf8' }}>{latest.quarter}</span>
+                    </div>
+                    <div className="flex items-center justify-center gap-8">
+                      <div className="relative" style={{ width: 200, height: 200 }}>
+                        <svg viewBox="0 0 200 200" className="w-full h-full" style={{ transform: 'rotate(-90deg)' }}>
+                          {segments.map((seg, i) => {
+                            const dashLength = (seg.value / total) * circumference;
+                            const dashOffset = -cumulativeOffset;
+                            cumulativeOffset += dashLength;
+                            return (
+                              <circle
+                                key={seg.key}
+                                cx="100" cy="100" r={radius}
+                                fill="none"
+                                stroke={seg.color}
+                                strokeWidth="28"
+                                strokeDasharray={`${dashLength} ${circumference - dashLength}`}
+                                strokeDashoffset={dashOffset}
+                                style={{ transition: 'all 0.8s ease', opacity: 0.9 }}
+                              />
+                            );
+                          })}
+                        </svg>
+                        <div className="absolute inset-0 flex flex-col items-center justify-center">
+                          <span className="text-2xl font-black text-white">{latest.promoter.toFixed(1)}%</span>
+                          <span className="text-[9px] text-slate-400 font-semibold">PROMOTER</span>
+                        </div>
+                      </div>
+                      {/* Legend */}
+                      <div className="space-y-2">
+                        {segments.map(seg => (
+                          <div key={seg.key} className="flex items-center gap-2">
+                            <div className="w-3 h-3 rounded-sm flex-shrink-0" style={{ background: seg.color }} />
+                            <div>
+                              <span className="text-[11px] font-semibold text-slate-300">{seg.value.toFixed(1)}%</span>
+                              <span className="text-[9px] text-slate-500 ml-1.5">{seg.key === 'fii' ? 'FII' : seg.key === 'dii' ? 'DII' : seg.key === 'mutualFund' ? 'Mutual Funds' : seg.key.charAt(0).toUpperCase() + seg.key.slice(1)}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Category Detail Cards */}
+                  <div className="rounded-xl p-6 border bg-slate-900" style={{ borderColor: 'var(--border-color)' }}>
+                    <h3 className="text-sm font-bold text-white mb-4">🏦 Holder Categories</h3>
+                    <div className="space-y-3">
+                      {segments.map(seg => {
+                        const prev = shData.history[1]?.[seg.key] || seg.value;
+                        const change = seg.value - (prev as number);
+                        return (
+                          <div key={seg.key} className="flex items-center gap-3">
+                            <div className="w-2 h-8 rounded-full flex-shrink-0" style={{ background: seg.color }} />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-baseline justify-between">
+                                <span className="text-xs font-bold text-slate-200">
+                                  {seg.key === 'fii' ? 'FII' : seg.key === 'dii' ? 'DII' : seg.key === 'mutualFund' ? 'Mutual Funds' : seg.key.charAt(0).toUpperCase() + seg.key.slice(1)}
+                                </span>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-black text-white">{seg.value.toFixed(2)}%</span>
+                                  {change !== 0 && (
+                                    <span className={`text-[10px] font-bold ${change > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                      {change > 0 ? '▲' : '▼'}{Math.abs(change).toFixed(2)}%
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="mt-1 h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.05)' }}>
+                                <div className="h-full rounded-full" style={{ width: `${(seg.value / total) * 100}%`, background: seg.color, transition: 'width 0.8s ease' }} />
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Quarterly Trend */}
+                <div className="rounded-xl p-6 border bg-slate-900" style={{ borderColor: 'var(--border-color)' }}>
+                  <h3 className="text-sm font-bold text-white mb-4">📈 Quarterly Trend</h3>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+                          <th className="text-left py-2 text-slate-500 font-semibold">Quarter</th>
+                          {categories.filter(k => (latest[k] || 0) > 0).map(key => (
+                            <th key={key} className="text-right py-2 font-semibold" style={{ color: SHAREHOLDING_COLORS[key] }}>
+                              {key === 'fii' ? 'FII' : key === 'dii' ? 'DII' : key === 'mutualFund' ? 'MF' : key.charAt(0).toUpperCase() + key.slice(1)}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {shData.history.map((q, qi) => (
+                          <tr key={q.quarter} className="border-b" style={{ borderColor: 'rgba(255,255,255,0.03)', background: qi === 0 ? 'rgba(99,102,241,0.05)' : 'transparent' }}>
+                            <td className="py-2.5 font-bold text-slate-300">
+                              {q.quarter}
+                              {qi === 0 && <span className="text-[8px] ml-1 px-1 py-0.5 rounded bg-indigo-500/20 text-indigo-300">LATEST</span>}
+                            </td>
+                            {categories.filter(k => (latest[k] || 0) > 0).map(key => {
+                              const val = q[key] || 0;
+                              const prevVal = shData.history[qi + 1]?.[key] || val;
+                              const diff = (val as number) - (prevVal as number);
+                              return (
+                                <td key={key} className="text-right py-2.5">
+                                  <span className="font-bold text-slate-200">{(val as number).toFixed(2)}%</span>
+                                  {qi < shData.history.length - 1 && diff !== 0 && (
+                                    <span className={`text-[9px] ml-1 ${diff > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                      {diff > 0 ? '+' : ''}{diff.toFixed(2)}
+                                    </span>
+                                  )}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Stacked Trend Bars */}
+                  <div className="mt-5 space-y-2">
+                    {shData.history.slice().reverse().map(q => (
+                      <div key={q.quarter} className="flex items-center gap-2">
+                        <span className="text-[9px] font-semibold text-slate-500 w-16 flex-shrink-0">{q.quarter.replace('20', "'")}</span>
+                        <div className="flex-1 h-5 rounded-full overflow-hidden flex" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                          {categories.filter(k => (q[k] || 0) > 0).map(key => (
+                            <div
+                              key={key}
+                              title={`${key === 'fii' ? 'FII' : key === 'dii' ? 'DII' : key === 'mutualFund' ? 'MF' : key}: ${(q[key] || 0).toFixed(1)}%`}
+                              style={{
+                                width: `${q[key] || 0}%`,
+                                background: SHAREHOLDING_COLORS[key],
+                                transition: 'width 0.5s ease',
+                                opacity: 0.85,
+                              }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                    {/* Mini legend for bars */}
+                    <div className="flex flex-wrap gap-3 mt-2 justify-center">
+                      {segments.map(s => (
+                        <div key={s.key} className="flex items-center gap-1">
+                          <div className="w-2 h-2 rounded-sm" style={{ background: s.color }} />
+                          <span className="text-[8px] text-slate-500">{s.key === 'fii' ? 'FII' : s.key === 'dii' ? 'DII' : s.key === 'mutualFund' ? 'MF' : s.key.charAt(0).toUpperCase() + s.key.slice(1)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <p className="text-[9px] text-slate-500 text-center mt-4 pt-2 border-t" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+                    📋 Source: SEBI quarterly filings • Data updated every quarter • {shData.companyName}
+                  </p>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Validation & AI Predictor Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4">
