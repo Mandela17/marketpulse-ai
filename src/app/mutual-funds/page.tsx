@@ -570,7 +570,7 @@ export default function MutualFundsPage() {
           )}
 
           {/* Search */}
-          <div style={{ position: 'relative', marginBottom: 16 }}>
+          <div style={{ position: 'relative', marginBottom: 16, zIndex: 50 }}>
             <div style={{
               display: 'flex', alignItems: 'center', gap: 10, padding: '0 16px', borderRadius: 14,
               background: 'var(--bg-card)', border: `1px solid ${searchFocused ? 'rgba(99,102,241,0.4)' : 'var(--border-color)'}`,
@@ -579,7 +579,7 @@ export default function MutualFundsPage() {
               <span style={{ fontSize: 16 }}>🔍</span>
               <input type="text" placeholder="Search by fund name, house, or category..." value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                onFocus={() => setSearchFocused(true)} onBlur={() => setTimeout(() => setSearchFocused(false), 200)}
+                onFocus={() => setSearchFocused(true)} onBlur={() => setTimeout(() => setSearchFocused(false), 300)}
                 style={{ flex: 1, padding: '14px 0', fontSize: 14, fontWeight: 500, background: 'transparent', border: 'none', color: 'var(--text-primary)', outline: 'none' }}
               />
               {searchQuery && (
@@ -592,16 +592,19 @@ export default function MutualFundsPage() {
             </div>
             {searchFocused && searchResults.length > 0 && (
               <div style={{
-                position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 100,
-                background: 'var(--bg-card)', border: '1px solid var(--border-color)',
-                borderRadius: 14, maxHeight: 240, overflowY: 'auto',
-                boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+                position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0, zIndex: 9999,
+                background: '#0f1729', border: '1px solid rgba(99,102,241,0.3)',
+                borderRadius: 14, maxHeight: 280, overflowY: 'auto',
+                boxShadow: '0 24px 80px rgba(0,0,0,0.8)',
               }}>
-                <div style={{ padding: '8px 14px', fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', borderBottom: '1px solid var(--border-subtle)' }}>
+                <div style={{ padding: '10px 16px', fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(99,102,241,0.05)' }}>
                   More from AMFI ({searchResults.length})
                 </div>
                 {searchResults.map((r: any) => (
-                  <div key={r.schemeCode} style={{ padding: '10px 14px', borderBottom: '1px solid var(--border-subtle)', fontSize: 12 }}>
+                  <div key={r.schemeCode} style={{ padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.04)', fontSize: 12, cursor: 'pointer' }}
+                    onMouseEnter={e => (e.currentTarget.style.background = 'rgba(99,102,241,0.06)')}
+                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                  >
                     <div style={{ fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.4 }}>{r.schemeName}</div>
                     <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>Code: {r.schemeCode}</div>
                   </div>
