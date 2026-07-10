@@ -509,6 +509,7 @@ export default function MutualFundsPage() {
         planType: 'Direct',
         risk: riskMap[category] || 'High',
         nav: data?.nav || null,
+        topHoldings: data?.holdings || undefined,
         officialCategory: officialCategory,
         isin: apiMeta?.isin_growth || null,
       };
