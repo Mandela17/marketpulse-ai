@@ -88,16 +88,28 @@ const cache: Map<string, { data: any; timestamp: number }> = new Map();
 const CACHE_TTL = 5 * 60 * 1000;
 const HOLDINGS_CACHE_TTL = 60 * 60 * 1000; // 1 hour
 
-// Fetch holdings from Groww's public API
-async function fetchHoldingsFromGroww(schemeName: string): Promise<{ name: string; weight: number }[] | null> {
-  const cacheKey = `holdings_${schemeName.substring(0, 30)}`;
+// Fetch fund details + holdings from Groww's public API
+interface GrowwFundData {
+  holdings: { name: string; weight: number; sector?: string }[];
+  aum?: number;
+  expenseRatio?: number;
+  fundManager?: string;
+  rating?: number;
+  exitLoad?: string;
+  benchmark?: string;
+  category?: string;
+  logoUrl?: string;
+}
+
+async function fetchFromGroww(schemeName: string): Promise<GrowwFundData | null> {
+  const cacheKey = `groww_${schemeName.substring(0, 30)}`;
   const cached = cache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < HOLDINGS_CACHE_TTL) {
     return cached.data;
   }
 
   try {
-    // Step 1: Search Groww for the fund to get its slug/search_id
+    // Step 1: Search Groww for the fund to get its slug
     const cleanName = schemeName
       .replace(/\s*-\s*direct\s*plan\s*/i, ' ')
       .replace(/\s*-\s*growth\s*/i, '')
@@ -109,43 +121,55 @@ async function fetchHoldingsFromGroww(schemeName: string): Promise<{ name: strin
     const t1 = setTimeout(() => controller1.abort(), 5000);
     const searchRes = await fetch(
       `https://groww.in/v1/api/search/v1/entity?app=false&entity_type=scheme&page=0&q=${encodeURIComponent(cleanName)}&size=3`,
-      { signal: controller1.signal, headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' } }
+      { signal: controller1.signal, headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' } }
     );
     clearTimeout(t1);
 
     if (!searchRes.ok) { cache.set(cacheKey, { data: null, timestamp: Date.now() }); return null; }
     const searchData = await searchRes.json();
-    const searchId = searchData?.content?.[0]?.id;
+    const searchId = searchData?.content?.[0]?.id || searchData?.content?.[0]?.search_id;
     if (!searchId) { cache.set(cacheKey, { data: null, timestamp: Date.now() }); return null; }
 
-    // Step 2: Fetch portfolio/holdings
+    // Step 2: Fetch full scheme detail (includes holdings, AUM, expense ratio, etc.)
     const controller2 = new AbortController();
-    const t2 = setTimeout(() => controller2.abort(), 5000);
-    const portfolioRes = await fetch(
-      `https://groww.in/v1/api/data/mf/web/v1/scheme/portfolio/${searchId}?intervalInMonths=3`,
-      { signal: controller2.signal, headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' } }
+    const t2 = setTimeout(() => controller2.abort(), 8000);
+    const detailRes = await fetch(
+      `https://groww.in/v1/api/data/mf/web/v4/scheme/search/${searchId}`,
+      { signal: controller2.signal, headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' } }
     );
     clearTimeout(t2);
 
-    if (!portfolioRes.ok) { cache.set(cacheKey, { data: null, timestamp: Date.now() }); return null; }
-    const portfolioData = await portfolioRes.json();
+    if (!detailRes.ok) { cache.set(cacheKey, { data: null, timestamp: Date.now() }); return null; }
+    const detail = await detailRes.json();
 
-    // Extract equity holdings
-    const equityHoldings = portfolioData?.equity_holdings || portfolioData?.equityHoldings || [];
-    const holdings = equityHoldings
+    // Extract equity holdings (filter out CASH/Repo entries)
+    const rawHoldings = detail?.holdings || [];
+    const holdings = rawHoldings
+      .filter((h: any) => (h.nature_name === 'EQUITY' || h.instrument_name === 'Equity') && h.company_name)
       .map((h: any) => ({
-        name: h.company_name || h.companyName || h.name || '',
-        weight: parseFloat(h.corpus_per || h.corpusPer || h.percentage || h.weight || 0),
+        name: h.company_name,
+        weight: parseFloat(h.corpus_per || 0),
+        sector: h.sector_name || undefined,
       }))
-      .filter((h: { name: string; weight: number }) => h.name && h.weight > 0)
       .sort((a: { weight: number }, b: { weight: number }) => b.weight - a.weight)
       .slice(0, 10);
 
-    const result = holdings.length > 0 ? holdings : null;
+    const result: GrowwFundData = {
+      holdings: holdings.length > 0 ? holdings : [],
+      aum: detail?.aum || undefined,
+      expenseRatio: detail?.expense_ratio || undefined,
+      fundManager: detail?.fund_manager || undefined,
+      rating: detail?.groww_rating || detail?.crisil_rating || undefined,
+      exitLoad: detail?.exit_load || undefined,
+      benchmark: detail?.benchmark_name || undefined,
+      category: detail?.sub_category || detail?.category || undefined,
+      logoUrl: detail?.logo_url || undefined,
+    };
+
     cache.set(cacheKey, { data: result, timestamp: Date.now() });
     return result;
   } catch (err) {
-    console.error('[MF] Holdings fetch failed:', err);
+    console.error('[MF] Groww fetch failed:', err);
     cache.set(cacheKey, { data: null, timestamp: Date.now() });
     return null;
   }
@@ -166,17 +190,26 @@ export async function GET(req: NextRequest) {
       const fullData = await fetchFundFull(code);
       const schemeName = fullData?.apiMeta?.scheme_name || fundMeta?.name || '';
 
-      // Fetch holdings: use curated data if available, otherwise try Groww
-      let holdings = fundMeta?.topHoldings || null;
-      if (!holdings && schemeName) {
-        holdings = await fetchHoldingsFromGroww(schemeName);
-      }
+      // Fetch rich data from Groww (holdings, AUM, expense ratio, etc.)
+      const growwData = schemeName ? await fetchFromGroww(schemeName) : null;
+
+      // Use curated holdings if available, otherwise Groww
+      const holdings = fundMeta?.topHoldings || growwData?.holdings || null;
 
       return NextResponse.json({
         meta: fundMeta || null,
         apiMeta: fullData?.apiMeta || null,
         nav: fullData?.nav || null,
         holdings: holdings,
+        groww: growwData ? {
+          aum: growwData.aum,
+          expenseRatio: growwData.expenseRatio,
+          fundManager: growwData.fundManager,
+          rating: growwData.rating,
+          exitLoad: growwData.exitLoad,
+          benchmark: growwData.benchmark,
+          category: growwData.category,
+        } : null,
       });
     }
 

@@ -11,9 +11,16 @@ interface FundData {
   category: string;
   planType: string;
   risk: string;
-  topHoldings?: { name: string; weight: number }[];
+  topHoldings?: { name: string; weight: number; sector?: string }[];
   officialCategory?: string; // from AMFI scheme_category
   isin?: string | null; // ISIN growth code
+  // Groww enriched data
+  aum?: number;
+  expenseRatio?: number;
+  fundManager?: string;
+  rating?: number;
+  exitLoad?: string;
+  benchmark?: string;
   nav: {
     currentNAV: number;
     navDate: string;
@@ -512,6 +519,12 @@ export default function MutualFundsPage() {
         topHoldings: data?.holdings || undefined,
         officialCategory: officialCategory,
         isin: apiMeta?.isin_growth || null,
+        aum: data?.groww?.aum || undefined,
+        expenseRatio: data?.groww?.expenseRatio || undefined,
+        fundManager: data?.groww?.fundManager || undefined,
+        rating: data?.groww?.rating || undefined,
+        exitLoad: data?.groww?.exitLoad || undefined,
+        benchmark: data?.groww?.benchmark || undefined,
       };
 
       setFunds(prev => [newFund, ...prev]);
@@ -872,6 +885,12 @@ export default function MutualFundsPage() {
                             { label: 'Category', value: fund.officialCategory || fund.category, icon: '📂' },
                             { label: 'Plan', value: `${fund.planType} · Growth`, icon: '📋' },
                             { label: 'NAV', value: fund.nav ? `₹${fund.nav.currentNAV.toFixed(2)}` : '—', icon: '💰' },
+                            ...(fund.aum ? [{ label: 'AUM', value: `₹${(fund.aum / 100).toFixed(0)} Cr`, icon: '📊' }] : []),
+                            ...(fund.expenseRatio ? [{ label: 'Expense Ratio', value: `${fund.expenseRatio.toFixed(2)}%`, icon: '💸' }] : []),
+                            ...(fund.fundManager ? [{ label: 'Fund Manager', value: fund.fundManager, icon: '👤' }] : []),
+                            ...(fund.rating ? [{ label: 'Rating', value: '⭐'.repeat(Math.min(5, Math.round(fund.rating))), icon: '🏆' }] : []),
+                            ...(fund.benchmark ? [{ label: 'Benchmark', value: fund.benchmark, icon: '📈' }] : []),
+                            ...(fund.exitLoad ? [{ label: 'Exit Load', value: fund.exitLoad.length > 40 ? fund.exitLoad.substring(0, 38) + '…' : fund.exitLoad, icon: '🚪' }] : []),
                             { label: 'Scheme Code', value: `${fund.schemeCode}`, icon: '🔢' },
                             ...(fund.isin ? [{ label: 'ISIN', value: fund.isin, icon: '🏷️' }] : []),
                           ].map(item => (
@@ -898,15 +917,18 @@ export default function MutualFundsPage() {
                           {/* Holdings */}
                           {fund.topHoldings ? (
                             <div>
-                              <h4 style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-primary)', margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: 0.5 }}>📊 Top Holdings</h4>
-                              {fund.topHoldings.slice(0, 7).map((h, i) => (
-                                <div key={h.name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', fontSize: 11 }}>
+                              <h4 style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-primary)', margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: 0.5 }}>📊 Top Holdings ({fund.topHoldings.length})</h4>
+                              {fund.topHoldings.slice(0, 10).map((h, i) => (
+                                <div key={h.name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', fontSize: 11, borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
                                   <span style={{ color: 'var(--text-muted)', width: 14, fontWeight: 700, fontSize: 10 }}>{i + 1}</span>
-                                  <span style={{ flex: 1, color: 'var(--text-secondary)', fontWeight: 600 }}>{h.name}</span>
-                                  <div style={{ width: 40, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.04)', overflow: 'hidden' }}>
-                                    <div style={{ height: '100%', width: `${Math.min(100, (h.weight / 20) * 100)}%`, background: colors.text, borderRadius: 2 }} />
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ color: 'var(--text-secondary)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{h.name}</div>
+                                    {h.sector && <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 1 }}>{h.sector}</div>}
                                   </div>
-                                  <span style={{ fontWeight: 700, color: colors.text, width: 32, textAlign: 'right', fontSize: 10 }}>{h.weight.toFixed(1)}%</span>
+                                  <div style={{ width: 50, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.04)', overflow: 'hidden', flexShrink: 0 }}>
+                                    <div style={{ height: '100%', width: `${Math.min(100, (h.weight / 10) * 100)}%`, background: colors.text, borderRadius: 2 }} />
+                                  </div>
+                                  <span style={{ fontWeight: 700, color: colors.text, width: 36, textAlign: 'right', fontSize: 10, flexShrink: 0 }}>{h.weight.toFixed(1)}%</span>
                                 </div>
                               ))}
                             </div>
