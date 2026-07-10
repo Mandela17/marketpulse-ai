@@ -141,15 +141,29 @@ export default function BrokerPage() {
 
   const checkServerToken = async () => {
     try {
-      const res = await fetch('/api/broker/token');
+      // Use the upstox-status endpoint for accurate diagnostics
+      const res = await fetch('/api/upstox-status');
       const data = await res.json();
-      setServerToken(data);
+      setServerToken({
+        connected: data.connected,
+        userId: data.userId,
+        expiresAt: data.expiresAt,
+        reason: data.connected ? undefined : data.message,
+      });
       if (data.connected) {
         setSaveStatus('connected');
         setConfig(prev => ({ ...prev, provider: 'upstox', connected: true }));
+      } else {
+        // Server says NOT connected — update localStorage to match reality
+        setSaveStatus('idle');
+        setConfig(prev => {
+          const updated = { ...prev, connected: false };
+          saveBrokerConfig(updated);
+          return updated;
+        });
       }
     } catch {
-      setServerToken({ connected: false, reason: 'Failed to check' });
+      setServerToken({ connected: false, reason: 'Failed to check server status' });
     }
   };
 
@@ -236,7 +250,11 @@ export default function BrokerPage() {
   };
 
   const hasEnvCredentials = !!process.env.NEXT_PUBLIC_UPSTOX_CLIENT_ID;
-  const isConnected = serverToken?.connected || config.connected || saveStatus === 'connected';
+  // Server-side check is authoritative — if server has responded, trust it over localStorage
+  const isConnected = serverToken !== null
+    ? serverToken.connected  // Server responded: use its answer
+    : (config.connected || saveStatus === 'connected');  // Server hasn't responded yet: use local state
+  const isTokenExpired = serverToken !== null && !serverToken.connected && serverToken.reason?.includes('expired');
 
   return (
     <div className="max-w-3xl mx-auto animate-fade-in">
@@ -250,6 +268,7 @@ export default function BrokerPage() {
       </div>
 
       {/* ─── Server Connection Status ─── */}
+      {/* Connected banner */}
       {isConnected && (
         <div className="mb-6 p-5 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4"
           style={{
@@ -271,6 +290,32 @@ export default function BrokerPage() {
             className="px-4 py-2 text-xs font-bold rounded-lg border cursor-pointer transition-colors hover:bg-red-500/10 shrink-0"
             style={{ borderColor: 'rgba(255,77,106,0.3)', color: '#ff4d6a' }}>
             Disconnect
+          </button>
+        </div>
+      )}
+
+      {/* Token expired warning banner */}
+      {isTokenExpired && (
+        <div className="mb-6 p-5 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4"
+          style={{
+            background: 'linear-gradient(135deg, rgba(245,158,11,0.06), rgba(239,68,68,0.04))',
+            border: '1px solid rgba(245,158,11,0.25)',
+          }}>
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl"
+              style={{ background: 'rgba(245,158,11,0.12)' }}>⚠️</div>
+            <div>
+              <p className="text-sm font-bold" style={{ color: '#f59e0b' }}>Upstox Token Expired</p>
+              <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                {serverToken?.reason || 'Your session has expired.'} Re-authenticate to resume live data.
+                {serverToken?.expiresAt && ` (Expired: ${new Date(serverToken.expiresAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })})`}
+              </p>
+            </div>
+          </div>
+          <button onClick={handleAuthorize}
+            className="px-4 py-2 text-xs font-bold rounded-lg text-white cursor-pointer transition-all hover:brightness-110 shrink-0"
+            style={{ background: 'linear-gradient(135deg, #8b5cf6, #6366f1)', boxShadow: '0 4px 12px rgba(139,92,246,0.25)' }}>
+            🔐 Re-authenticate
           </button>
         </div>
       )}

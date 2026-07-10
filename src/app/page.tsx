@@ -5,7 +5,7 @@ import { getSentimentColor, getSentimentLabel, SectorData, NewsArticle } from '@
 import SectorCard from '@/components/SectorCard';
 import SentimentGauge from '@/components/SentimentGauge';
 import NewsCard from '@/components/NewsCard';
-import { getBrokerConfig } from '@/lib/brokerApi';
+import { getBrokerConfig, saveBrokerConfig } from '@/lib/brokerApi';
 import { Calendar } from 'lucide-react';
 import FIIDIIWidget from '@/components/FIIDIIWidget';
 import MarketRegimeWidget from '@/components/MarketRegimeWidget';
@@ -73,10 +73,22 @@ export default function Dashboard() {
   const [aiAccuracy, setAiAccuracy] = useState<{ overallAccuracy: number; totalResolved: number } | null>(cached?.aiAccuracy ?? null);
 
   useEffect(() => {
-    // Check broker connection status
+    // Check broker connection status — verify with server, not just localStorage
     const brokerConfig = getBrokerConfig();
-    const isUpstoxConnected = brokerConfig.provider === 'upstox' && brokerConfig.connected && !!brokerConfig.accessToken;
-    setBrokerConnected(isUpstoxConnected);
+    const localConnected = brokerConfig.provider === 'upstox' && brokerConfig.connected && !!brokerConfig.accessToken;
+    setBrokerConnected(localConnected); // optimistic from localStorage
+
+    // Verify with server (authoritative)
+    fetch('/api/upstox-status')
+      .then(r => r.json())
+      .then(status => {
+        setBrokerConnected(status.connected);
+        // If server says disconnected but localStorage says connected, fix localStorage
+        if (!status.connected && localConnected) {
+          saveBrokerConfig({ ...brokerConfig, connected: false });
+        }
+      })
+      .catch(() => {}); // keep localStorage state on network error
 
     async function fetchData() {
       try {
@@ -126,7 +138,7 @@ export default function Dashboard() {
         }
 
         // If Upstox is connected, try to enrich NIFTY 50 with Upstox real-time data
-        if (isUpstoxConnected && brokerConfig.accessToken) {
+        if (localConnected && brokerConfig.accessToken) {
           try {
             const niftyRes = await fetch('/api/broker/quote?symbol=NIFTY', {
               headers: { 'X-Upstox-Token': brokerConfig.accessToken },
