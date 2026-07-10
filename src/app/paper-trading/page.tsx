@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import {
   PaperTradingState, PaperPosition, ClosedTrade,
-  loadPaperState, resetPaperAccount, placePaperOrder,
+  loadPaperState, loadPaperStateFromDB, resetPaperAccount, placePaperOrder,
   getOpenPositions, getPaperStats, PlaceOrderParams,
 } from '@/lib/paperTradingStore';
 import { searchStocks, getStockBySymbol } from '@/lib/sectorData';
@@ -68,29 +68,32 @@ export default function PaperTradingPage() {
   // Read URL params from Strategy Hub
   const searchParams = useSearchParams();
 
-  // Load state + prefill from URL
+  // Load state from Supabase (with localStorage fallback) + prefill from URL
   useEffect(() => {
-    const s = loadPaperState();
-    setState(s);
-    setStats(getPaperStats(s));
-    refreshPositions(s);
+    const init = async () => {
+      const s = await loadPaperStateFromDB();
+      setState(s);
+      setStats(getPaperStats(s));
+      refreshPositions(s);
 
-    // Pre-fill from strategy link: ?symbol=X&price=Y&sl=Z&target=T&strategy=Name
-    const urlSymbol = searchParams.get('symbol');
-    const urlPrice = searchParams.get('price');
-    const urlSl = searchParams.get('sl');
-    const urlTarget = searchParams.get('target');
-    const urlStrategy = searchParams.get('strategy');
+      // Pre-fill from strategy link: ?symbol=X&price=Y&sl=Z&target=T&strategy=Name
+      const urlSymbol = searchParams.get('symbol');
+      const urlPrice = searchParams.get('price');
+      const urlSl = searchParams.get('sl');
+      const urlTarget = searchParams.get('target');
+      const urlStrategy = searchParams.get('strategy');
 
-    if (urlSymbol) {
-      setSymbol(urlSymbol.toUpperCase());
-      if (urlPrice) setLivePrice(parseFloat(urlPrice));
-      if (urlSl) setStopLoss(urlSl);
-      if (urlTarget) setTarget(urlTarget);
-      setSide('BUY');
-      // Clear URL params without reload
-      window.history.replaceState({}, '', '/paper-trading');
-    }
+      if (urlSymbol) {
+        setSymbol(urlSymbol.toUpperCase());
+        if (urlPrice) setLivePrice(parseFloat(urlPrice));
+        if (urlSl) setStopLoss(urlSl);
+        if (urlTarget) setTarget(urlTarget);
+        setSide('BUY');
+        // Clear URL params without reload
+        window.history.replaceState({}, '', '/paper-trading');
+      }
+    };
+    init();
   }, [searchParams]);
 
   // Refresh positions with live prices

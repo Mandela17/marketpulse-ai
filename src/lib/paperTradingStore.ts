@@ -80,13 +80,66 @@ export function loadPaperState(): PaperTradingState {
   return createFreshState();
 }
 
-function savePaperState(state: PaperTradingState): void {
-  if (typeof window === 'undefined') return;
+// Load from Supabase (async) — use on initial page load
+export async function loadPaperStateFromDB(): Promise<PaperTradingState> {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    const res = await fetch('/api/paper-trading');
+    const data = await res.json();
+    if (data?.state) {
+      if (typeof window !== 'undefined') {
+        // Cache state in localStorage
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data.state));
+        // Restore auto-trade config and log
+        if (data.autoConfig) {
+          localStorage.setItem(AUTO_TRADE_KEY, JSON.stringify(data.autoConfig));
+        }
+        if (data.autoLog) {
+          localStorage.setItem(AUTO_TRADE_LOG_KEY, JSON.stringify(data.autoLog));
+        }
+      }
+      return data.state as PaperTradingState;
+    }
   } catch (e) {
-    console.error('[PaperTrading] Failed to save state:', e);
+    console.error('[PaperTrading] Failed to load from DB:', e);
   }
+  // Fallback to localStorage
+  return loadPaperState();
+}
+
+function savePaperState(state: PaperTradingState): void {
+  // Save to localStorage (instant)
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (e) {
+      console.error('[PaperTrading] Failed to save to localStorage:', e);
+    }
+  }
+
+  // Save to Supabase (async, non-blocking)
+  syncToSupabase(state);
+}
+
+// Debounced Supabase sync — avoids hammering DB on rapid trades
+let _syncTimeout: ReturnType<typeof setTimeout> | null = null;
+
+function syncToSupabase(state: PaperTradingState): void {
+  if (typeof window === 'undefined') return;
+
+  if (_syncTimeout) clearTimeout(_syncTimeout);
+  _syncTimeout = setTimeout(async () => {
+    try {
+      const autoConfig = getAutoTradeConfig();
+      const autoLog = getAutoTradeLog();
+      await fetch('/api/paper-trading', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state, autoConfig, autoLog }),
+      });
+    } catch (e) {
+      console.error('[PaperTrading] Supabase sync failed:', e);
+    }
+  }, 1000); // 1 second debounce
 }
 
 export function createFreshState(): PaperTradingState {
@@ -367,6 +420,8 @@ export function getAutoTradeConfig(): AutoTradeConfig {
 export function saveAutoTradeConfig(config: AutoTradeConfig): void {
   if (typeof window === 'undefined') return;
   localStorage.setItem(AUTO_TRADE_KEY, JSON.stringify(config));
+  // Trigger Supabase sync with current state
+  syncToSupabase(loadPaperState());
 }
 
 function defaultAutoConfig(): AutoTradeConfig {
@@ -394,7 +449,10 @@ export function getAutoTradeLog(): AutoTradeLogEntry[] {
 function saveAutoTradeLog(log: AutoTradeLogEntry[]): void {
   if (typeof window === 'undefined') return;
   // Keep last 30 days only
-  localStorage.setItem(AUTO_TRADE_LOG_KEY, JSON.stringify(log.slice(-30)));
+  const trimmed = log.slice(-30);
+  localStorage.setItem(AUTO_TRADE_LOG_KEY, JSON.stringify(trimmed));
+  // Trigger Supabase sync
+  syncToSupabase(loadPaperState());
 }
 
 function todayDate(): string {
