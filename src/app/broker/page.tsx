@@ -12,7 +12,7 @@ export default function BrokerPage() {
   });
 
   const [accessTokenInput, setAccessTokenInput] = useState('');
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'connected' | 'error' | 'checking'>('idle');
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'connected' | 'error' | 'checking'>('checking');
   const [errorMessage, setErrorMessage] = useState('');
   const [redirectUri, setRedirectUri] = useState('http://localhost:3000/broker');
   const [serverToken, setServerToken] = useState<{
@@ -133,7 +133,7 @@ export default function BrokerPage() {
       currentConfig.provider = 'upstox';
     }
     setConfig(currentConfig.connected ? currentConfig : { ...currentConfig });
-    if (currentConfig.connected) setSaveStatus('connected');
+    // Don't set saveStatus from localStorage — wait for server check
 
     // Check server-side token
     checkServerToken();
@@ -250,11 +250,11 @@ export default function BrokerPage() {
   };
 
   const hasEnvCredentials = !!process.env.NEXT_PUBLIC_UPSTOX_CLIENT_ID;
-  // Server-side check is authoritative — if server has responded, trust it over localStorage
-  const isConnected = serverToken !== null
-    ? serverToken.connected  // Server responded: use its answer
-    : (config.connected || saveStatus === 'connected');  // Server hasn't responded yet: use local state
-  const isTokenExpired = serverToken !== null && !serverToken.connected && serverToken.reason?.includes('expired');
+  // Server-side check is the ONLY source of truth — never trust stale localStorage
+  const serverChecked = serverToken !== null;
+  const isConnected = serverChecked ? serverToken.connected : false;  // Show disconnected until server confirms
+  const isTokenExpired = serverChecked && !serverToken.connected && serverToken.reason?.includes('expired');
+  const isChecking = !serverChecked && saveStatus === 'checking';
 
   return (
     <div className="max-w-3xl mx-auto animate-fade-in">
@@ -443,9 +443,18 @@ export default function BrokerPage() {
           {/* Status Bar */}
           <div className="flex items-center justify-between pt-3 border-t" style={{ borderColor: 'var(--border-color)' }}>
             <div>
-              {isConnected ? (
+              {isChecking ? (
+                <span className="text-xs px-2.5 py-1 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 font-bold flex items-center gap-1.5">
+                  <span className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                  Checking...
+                </span>
+              ) : isConnected ? (
                 <span className="text-xs px-2.5 py-1 rounded bg-green-500/10 text-green-400 border border-green-500/20 font-bold">
                   🟢 CONNECTED
+                </span>
+              ) : isTokenExpired ? (
+                <span className="text-xs px-2.5 py-1 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 font-bold">
+                  ⚠️ TOKEN EXPIRED
                 </span>
               ) : (
                 <span className="text-xs px-2.5 py-1 rounded bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 font-bold">
@@ -459,9 +468,16 @@ export default function BrokerPage() {
                 Disconnect
               </button>
             )}
+            {isTokenExpired && (
+              <button onClick={handleAuthorize}
+                className="px-3 py-1.5 text-[10px] font-bold rounded-lg text-white cursor-pointer"
+                style={{ background: 'linear-gradient(135deg, #8b5cf6, #6366f1)' }}>
+                🔐 Re-authenticate
+              </button>
+            )}
           </div>
 
-          {saveStatus === 'connected' && (
+          {isConnected && saveStatus === 'connected' && (
             <p className="text-xs text-green-400 text-center font-semibold animate-pulse">
               ✓ Connected! Real-time Upstox data is now active across all pages.
             </p>
