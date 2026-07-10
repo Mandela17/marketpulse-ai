@@ -93,15 +93,18 @@ export async function GET(req: NextRequest) {
   const action = searchParams.get('action') || 'all';
 
   try {
-    // Single fund detail
+    // Single fund detail — returns meta + nav for ANY fund (curated or external)
     if (action === 'detail' && schemeCode) {
       const code = parseInt(schemeCode);
       const fundMeta = CURATED_FUNDS.find(f => f.schemeCode === code);
-      const navResult = await fetchFundNAV(code);
+
+      // Fetch full data from mfapi.in (includes meta + NAV)
+      const fullData = await fetchFundFull(code);
 
       return NextResponse.json({
         meta: fundMeta || null,
-        nav: navResult,
+        apiMeta: fullData?.apiMeta || null, // mfapi.in meta (fund_house, scheme_category, etc.)
+        nav: fullData?.nav || null,
       });
     }
 
@@ -110,21 +113,35 @@ export async function GET(req: NextRequest) {
       const query = searchParams.get('q');
       if (!query) return NextResponse.json({ results: [] });
 
-      const cacheKey = `search_${query}`;
+      const cacheKey = `search_${query.toLowerCase().trim()}`;
       const cached = cache.get(cacheKey);
       if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
         return NextResponse.json(cached.data);
       }
 
-      const res = await fetch(`${MF_API_BASE}/search?q=${encodeURIComponent(query)}`);
-      const data = await res.json();
-      const results = (data || [])
-        .filter((d: any) => d.schemeName?.toLowerCase().includes('direct') && d.schemeName?.toLowerCase().includes('growth'))
-        .slice(0, 20);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000); // 8s timeout
 
-      const response = { results };
-      cache.set(cacheKey, { data: response, timestamp: Date.now() });
-      return NextResponse.json(response);
+      try {
+        const res = await fetch(`${MF_API_BASE}/search?q=${encodeURIComponent(query)}`, {
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+        const data = await res.json();
+        const results = (data || [])
+          .filter((d: any) => d.schemeName?.toLowerCase().includes('direct') && d.schemeName?.toLowerCase().includes('growth'))
+          .slice(0, 15);
+
+        const response = { results };
+        cache.set(cacheKey, { data: response, timestamp: Date.now() });
+        return NextResponse.json(response);
+      } catch (err: any) {
+        clearTimeout(timeout);
+        if (err.name === 'AbortError') {
+          return NextResponse.json({ results: [], timeout: true });
+        }
+        throw err;
+      }
     }
 
     // Default: all curated funds with returns
@@ -134,13 +151,12 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(cached.data);
     }
 
-    // Fetch NAV for all curated funds in parallel (with concurrency limit)
     const results = await Promise.all(
       CURATED_FUNDS.map(async (fund) => {
-        const navResult = await fetchFundNAV(fund.schemeCode);
+        const fullData = await fetchFundFull(fund.schemeCode);
         return {
           ...fund,
-          nav: navResult,
+          nav: fullData?.nav || null,
         };
       })
     );
@@ -154,23 +170,33 @@ export async function GET(req: NextRequest) {
   }
 }
 
-async function fetchFundNAV(schemeCode: number) {
-  const cacheKey = `nav_${schemeCode}`;
+// Fetch full fund data (meta + nav) with caching
+async function fetchFundFull(schemeCode: number): Promise<{ apiMeta: any; nav: any } | null> {
+  const cacheKey = `full_${schemeCode}`;
   const cached = cache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
     return cached.data;
   }
 
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
     const res = await fetch(`${MF_API_BASE}/${schemeCode}`, {
-      next: { revalidate: 300 },
+      signal: controller.signal,
     });
+    clearTimeout(timeout);
+
     const data: MFAPIResponse = await res.json();
-    const result = calculateReturns(data.data);
+    const nav = calculateReturns(data.data);
+    const result = {
+      apiMeta: data.meta || null,
+      nav,
+    };
     cache.set(cacheKey, { data: result, timestamp: Date.now() });
     return result;
   } catch (err) {
-    console.error(`[MF] Failed to fetch NAV for ${schemeCode}:`, err);
+    console.error(`[MF] Failed to fetch for ${schemeCode}:`, err);
     return null;
   }
 }

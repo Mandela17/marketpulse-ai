@@ -12,6 +12,8 @@ interface FundData {
   planType: string;
   risk: string;
   topHoldings?: { name: string; weight: number }[];
+  officialCategory?: string; // from AMFI scheme_category
+  isin?: string | null; // ISIN growth code
   nav: {
     currentNAV: number;
     navDate: string;
@@ -425,16 +427,20 @@ export default function MutualFundsPage() {
 
   useEffect(() => { fetchFunds(); }, [fetchFunds]);
 
+  const [searching, setSearching] = useState(false);
+
   // External search (debounced)
   useEffect(() => {
-    if (searchQuery.length < 3) { setSearchResults([]); return; }
+    if (searchQuery.length < 3) { setSearchResults([]); setSearching(false); return; }
+    setSearching(true);
     const t = setTimeout(async () => {
       try {
         const res = await fetch(`/api/mutual-funds?action=search&q=${encodeURIComponent(searchQuery)}`);
         const d = await res.json();
         setSearchResults(d?.results || []);
       } catch {}
-    }, 400);
+      setSearching(false);
+    }, 300);
     return () => clearTimeout(t);
   }, [searchQuery]);
 
@@ -460,41 +466,51 @@ export default function MutualFundsPage() {
       const res = await fetch(`/api/mutual-funds?action=detail&code=${schemeCode}`);
       const data = await res.json();
 
-      // Parse category from scheme name
-      const nameLower = schemeName.toLowerCase();
-      let category = 'Flexi Cap';
-      if (nameLower.includes('large cap') || nameLower.includes('bluechip')) category = 'Large Cap';
-      else if (nameLower.includes('small cap')) category = 'Small Cap';
-      else if (nameLower.includes('mid cap') || nameLower.includes('midcap')) category = 'Mid Cap';
-      else if (nameLower.includes('elss') || nameLower.includes('tax')) category = 'ELSS';
-      else if (nameLower.includes('index') || nameLower.includes('nifty') || nameLower.includes('sensex')) category = 'Index';
-      else if (nameLower.includes('hybrid') || nameLower.includes('balanced') || nameLower.includes('equity & debt')) category = 'Hybrid';
-      else if (nameLower.includes('debt') || nameLower.includes('liquid') || nameLower.includes('bond')) category = 'Debt';
-      else if (nameLower.includes('pharma') || nameLower.includes('banking') || nameLower.includes('technology') || nameLower.includes('infra')) category = 'Sectoral';
+      const apiMeta = data?.apiMeta;
 
-      // Infer risk from category
+      // Use AMFI's official scheme_category if available
+      let category = 'Flexi Cap';
+      const schemeCategory = (apiMeta?.scheme_category || '').toLowerCase();
+      const nameLower = schemeName.toLowerCase();
+
+      if (schemeCategory.includes('large cap') || nameLower.includes('large cap') || nameLower.includes('bluechip')) category = 'Large Cap';
+      else if (schemeCategory.includes('small cap') || nameLower.includes('small cap')) category = 'Small Cap';
+      else if (schemeCategory.includes('mid cap') || nameLower.includes('mid cap') || nameLower.includes('midcap')) category = 'Mid Cap';
+      else if (schemeCategory.includes('elss') || nameLower.includes('elss') || nameLower.includes('tax saver')) category = 'ELSS';
+      else if (schemeCategory.includes('index') || nameLower.includes('index') || nameLower.includes('nifty') || nameLower.includes('sensex')) category = 'Index';
+      else if (schemeCategory.includes('hybrid') || schemeCategory.includes('balanced') || nameLower.includes('hybrid') || nameLower.includes('balanced')) category = 'Hybrid';
+      else if (schemeCategory.includes('debt') || schemeCategory.includes('liquid') || schemeCategory.includes('money market') || nameLower.includes('liquid') || nameLower.includes('bond')) category = 'Debt';
+      else if (schemeCategory.includes('sectoral') || schemeCategory.includes('thematic') || nameLower.includes('pharma') || nameLower.includes('banking') || nameLower.includes('technology') || nameLower.includes('infra')) category = 'Sectoral';
+      else if (schemeCategory.includes('flexi') || schemeCategory.includes('multi')) category = 'Flexi Cap';
+
       const riskMap: Record<string, string> = { 'Large Cap': 'Moderate', 'Mid Cap': 'High', 'Small Cap': 'Very High', 'Flexi Cap': 'High', 'ELSS': 'High', 'Index': 'Moderate', 'Hybrid': 'Moderate', 'Debt': 'Low', 'Sectoral': 'Very High' };
 
-      // Extract short name: remove "- Direct Plan - Growth" etc.
+      // Clean short name
       const shortName = schemeName
-        .replace(/\s*-\s*Direct\s*Plan\s*/i, ' ')
-        .replace(/\s*-\s*Growth\s*/i, '')
+        .replace(/\s*-\s*Direct\s*(Plan)?\s*/i, ' ')
+        .replace(/\s*-\s*Growth\s*(Option)?\s*/i, '')
         .replace(/\s*-\s*IDCW\s*/i, '')
+        .replace(/\s*(Mutual\s*Fund)\s*/i, ' ')
         .replace(/\s+/g, ' ')
         .trim();
 
-      // Extract fund house from scheme name (first word(s) before 'Fund' or 'Mutual')
-      const fundHouse = data?.meta?.fundHouse || schemeName.split(/\s+(Fund|Mutual|Small|Large|Mid|Flexi|ELSS)/i)[0] + ' Mutual Fund';
+      // Use fund_house from AMFI meta
+      const fundHouse = apiMeta?.fund_house || schemeName.split(/\s+(Fund|Mutual|Small|Large|Mid|Flexi|ELSS)/i)[0] + ' Mutual Fund';
+
+      // Official category from AMFI
+      const officialCategory = apiMeta?.scheme_category || category;
 
       const newFund: FundData = {
         schemeCode,
         name: schemeName,
-        shortName: shortName.length > 30 ? shortName.substring(0, 30) + '…' : shortName,
+        shortName: shortName.length > 40 ? shortName.substring(0, 38) + '…' : shortName,
         fundHouse,
         category,
         planType: 'Direct',
         risk: riskMap[category] || 'High',
         nav: data?.nav || null,
+        officialCategory: officialCategory,
+        isin: apiMeta?.isin_growth || null,
       };
 
       setFunds(prev => [newFund, ...prev]);
@@ -650,6 +666,9 @@ export default function MutualFundsPage() {
                 onFocus={() => setSearchFocused(true)} onBlur={() => setTimeout(() => setSearchFocused(false), 300)}
                 style={{ flex: 1, padding: '14px 0', fontSize: 14, fontWeight: 500, background: 'transparent', border: 'none', color: 'var(--text-primary)', outline: 'none' }}
               />
+              {searching && (
+                <div style={{ width: 18, height: 18, border: '2px solid rgba(255,255,255,0.06)', borderTopColor: '#6366f1', borderRadius: '50%', animation: 'spin 0.8s linear infinite', flexShrink: 0 }} />
+              )}
               {searchQuery && (
                 <button onClick={() => { setSearchQuery(''); setSearchResults([]); }} style={{
                   background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: '50%',
@@ -845,6 +864,30 @@ export default function MutualFundsPage() {
                         background: 'rgba(15,20,42,0.5)', border: '1px solid rgba(99,102,241,0.15)', borderTop: 'none',
                         animation: 'fadeIn 0.2s ease',
                       }}>
+                        {/* Fund Info Cards */}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10, marginBottom: 16 }}>
+                          {[
+                            { label: 'Fund House', value: fund.fundHouse, icon: '🏦' },
+                            { label: 'Category', value: fund.officialCategory || fund.category, icon: '📂' },
+                            { label: 'Plan', value: `${fund.planType} · Growth`, icon: '📋' },
+                            { label: 'NAV', value: fund.nav ? `₹${fund.nav.currentNAV.toFixed(2)}` : '—', icon: '💰' },
+                            { label: 'Scheme Code', value: `${fund.schemeCode}`, icon: '🔢' },
+                            ...(fund.isin ? [{ label: 'ISIN', value: fund.isin, icon: '🏷️' }] : []),
+                          ].map(item => (
+                            <div key={item.label} style={{
+                              padding: '10px 12px', borderRadius: 10,
+                              background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)',
+                            }}>
+                              <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 4 }}>
+                                {item.icon} {item.label}
+                              </div>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', wordBreak: 'break-all' }}>
+                                {item.value}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 20 }}>
                           {/* Risk-o-Meter */}
                           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '10px 0' }}>
@@ -852,7 +895,7 @@ export default function MutualFundsPage() {
                           </div>
 
                           {/* Holdings */}
-                          {fund.topHoldings && (
+                          {fund.topHoldings ? (
                             <div>
                               <h4 style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-primary)', margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: 0.5 }}>📊 Top Holdings</h4>
                               {fund.topHoldings.slice(0, 7).map((h, i) => (
@@ -865,6 +908,12 @@ export default function MutualFundsPage() {
                                   <span style={{ fontWeight: 700, color: colors.text, width: 32, textAlign: 'right', fontSize: 10 }}>{h.weight.toFixed(1)}%</span>
                                 </div>
                               ))}
+                            </div>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '10px 0', gap: 8 }}>
+                              <div style={{ fontSize: 28 }}>📊</div>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textAlign: 'center' }}>Holdings data not available via API</div>
+                              <div style={{ fontSize: 10, color: 'var(--text-muted)', textAlign: 'center' }}>Check the fund factsheet on<br/><span style={{ color: '#818cf8', fontWeight: 600 }}>{fund.fundHouse}</span> website</div>
                             </div>
                           )}
                         </div>
