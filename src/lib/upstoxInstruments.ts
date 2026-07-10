@@ -64,7 +64,16 @@ export const SYMBOL_TO_INSTRUMENT_KEY: Record<string, string> = {
   'FINNIFTY':    'NSE_INDEX|Nifty Fin Service',
 };
 
-// Get the Upstox instrument key for a symbol, returns null if not mapped
+import upstoxMap from './upstoxInstrumentsMap.json';
+
+// Get the Upstox instrument key for a symbol, checking the full NSE map first
 export function getInstrumentKey(symbol: string): string | null {
-  return SYMBOL_TO_INSTRUMENT_KEY[symbol.toUpperCase()] || null;
+  const clean = symbol.toUpperCase().trim();
+  
+  // 1. Try full equity / ETF map (9400+ entries)
+  const fullMapVal = (upstoxMap as Record<string, string>)[clean];
+  if (fullMapVal) return fullMapVal;
+
+  // 2. Fall back to hardcoded map (indices, etc.)
+  return SYMBOL_TO_INSTRUMENT_KEY[clean] || null;
 }

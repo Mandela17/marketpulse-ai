@@ -154,12 +154,25 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
   const [shareholdingSource, setShareholdingSource] = useState<string>('');
   const shFetchedRef = useRef<string>('');
 
+  // Upstox connectivity status
+  const [upstoxStatus, setUpstoxStatus] = useState<{
+    connected: boolean; status: string; message: string;
+  } | null>(null);
+
   // Server-side AI Prediction state
   const [aiPrediction, setAiPrediction] = useState<any>(null);
   const [loadingPrediction, setLoadingPrediction] = useState(true);
 
   // Track if ML has been computed for current chart data to prevent double-compute
   const mlComputedRef = useRef<string>('');
+
+  // ── Upstox connectivity check (runs once on mount) ──
+  useEffect(() => {
+    fetch('/api/upstox-status')
+      .then(r => r.json())
+      .then(data => setUpstoxStatus(data))
+      .catch(() => setUpstoxStatus({ connected: false, status: 'error', message: 'Could not check Upstox status' }));
+  }, []);
 
   // ── PARALLELIZED DATA FETCH ──
   // Fetch live quote + news in parallel (independent of lookback)
@@ -461,6 +474,30 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
         <span style={{ color: 'var(--text-primary)' }}>{stock.symbol}</span>
       </div>
 
+      {/* Upstox connectivity banner — only shown when NOT connected */}
+      {upstoxStatus && !upstoxStatus.connected && (
+        <div className="mb-4 px-4 py-2.5 rounded-lg flex items-center gap-3 text-xs"
+          style={{
+            background: upstoxStatus.status === 'token_expired'
+              ? 'rgba(245,158,11,0.06)' : 'rgba(100,116,139,0.08)',
+            border: `1px solid ${upstoxStatus.status === 'token_expired'
+              ? 'rgba(245,158,11,0.2)' : 'rgba(100,116,139,0.15)'}`,
+          }}>
+          <span>{upstoxStatus.status === 'token_expired' ? '⚠️' : 'ℹ️'}</span>
+          <span style={{ color: upstoxStatus.status === 'token_expired' ? '#f59e0b' : '#94a3b8' }}>
+            {upstoxStatus.status === 'token_expired'
+              ? 'Upstox token expired — stock quotes fall back to Yahoo Finance, shareholding to local cache.'
+              : upstoxStatus.status === 'not_configured'
+                ? 'Upstox not linked — connect via Settings → Broker for live exchange data.'
+                : 'Upstox unavailable — using fallback data sources.'}
+          </span>
+          <Link href="/portfolio" className="ml-auto text-[10px] font-bold px-2 py-1 rounded"
+            style={{ background: 'rgba(139,92,246,0.15)', color: '#a78bfa' }}>
+            Reconnect
+          </Link>
+        </div>
+      )}
+
       {/* Stock Header */}
       <div className="flex items-start justify-between mb-6">
         <div>
@@ -502,11 +539,11 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
               {/* Data source badge */}
               <span className="text-[10px] px-2 py-0.5 rounded-full font-bold"
                 style={{
-                  background: liveData.dataSource === 'Upstox Real-Time' ? 'rgba(139,92,246,0.15)' : 'rgba(255,255,255,0.05)',
-                  color: liveData.dataSource === 'Upstox Real-Time' ? '#a78bfa' : 'var(--text-muted)',
-                  border: liveData.dataSource === 'Upstox Real-Time' ? '1px solid rgba(139,92,246,0.3)' : '1px solid transparent',
+                  background: liveData.dataSource?.startsWith('Upstox') ? 'rgba(139,92,246,0.15)' : 'rgba(255,255,255,0.05)',
+                  color: liveData.dataSource?.startsWith('Upstox') ? '#a78bfa' : 'var(--text-muted)',
+                  border: liveData.dataSource?.startsWith('Upstox') ? '1px solid rgba(139,92,246,0.3)' : '1px solid transparent',
                 }}>
-                {liveData.dataSource === 'Upstox Real-Time' ? '🟢 UPSTOX LIVE' : '📊 Yahoo Finance'}
+                {liveData.dataSource?.startsWith('Upstox') ? '🟢 UPSTOX LIVE' : '📊 Yahoo Finance'}
               </span>
             </div>
           ) : (
@@ -1356,7 +1393,15 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
                 <div className="p-12 rounded-xl border bg-slate-900 text-center" style={{ borderColor: 'var(--border-color)' }}>
                   <p className="text-3xl mb-3">🏛️</p>
                   <p className="text-sm text-slate-400 font-semibold">Shareholding data not available for {decodedSymbol}</p>
-                  <p className="text-xs text-slate-500 mt-1">Connect Upstox for live data, or this stock may not have data available</p>
+                  {upstoxStatus && !upstoxStatus.connected ? (
+                    <div className="mt-3 p-3 rounded-lg text-left" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)' }}>
+                      <p className="text-xs font-bold" style={{ color: '#f59e0b' }}>⚠️ Upstox Not Connected</p>
+                      <p className="text-[11px] text-slate-400 mt-1">{upstoxStatus.message}</p>
+                      <p className="text-[10px] text-slate-500 mt-2">Without Upstox, shareholding data is only available for Nifty 50 stocks from local cache.</p>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-500 mt-1">This stock may not have shareholding data available from the exchange.</p>
+                  )}
                 </div>
               );
             }
