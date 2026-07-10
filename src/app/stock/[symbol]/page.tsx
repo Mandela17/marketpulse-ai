@@ -4,7 +4,7 @@ import { use, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { getStockBySymbol } from '@/lib/sectorData';
-import { getShareholdingData, SHAREHOLDING_COLORS, SHAREHOLDING_LABELS, type ShareholdingQuarter } from '@/lib/shareholdingData';
+import { SHAREHOLDING_COLORS, SHAREHOLDING_LABELS, type ShareholdingQuarter, type StockShareholding } from '@/lib/shareholdingData';
 import { getSentimentColor, getSentimentLabel } from '@/lib/types';
 import SentimentGauge from '@/components/SentimentGauge';
 import NewsCard from '@/components/NewsCard';
@@ -147,6 +147,12 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
   const [mlResult, setMlResult] = useState<any>(null);
   const [activeTab, setActiveTab] = useState<'technicals' | 'derivatives' | 'shareholding'>('technicals');
   const [lookbackDays, setLookbackDays] = useState<number>(90);
+
+  // Shareholding state (fetched from Upstox API → local fallback)
+  const [shareholdingData, setShareholdingData] = useState<StockShareholding | null>(null);
+  const [loadingShareholding, setLoadingShareholding] = useState(false);
+  const [shareholdingSource, setShareholdingSource] = useState<string>('');
+  const shFetchedRef = useRef<string>('');
 
   // Server-side AI Prediction state
   const [aiPrediction, setAiPrediction] = useState<any>(null);
@@ -340,6 +346,25 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
 
   // Sentiment prediction validation loop analysis
   const validationLoop = useMemo(() => calculateValidationAccuracy(sentimentHistory), [sentimentHistory]);
+
+  // ── Fetch shareholding from Upstox API (lazy — only when tab is active) ──
+  useEffect(() => {
+    if (activeTab !== 'shareholding') return;
+    if (shFetchedRef.current === decodedSymbol) return; // Already fetched for this symbol
+    shFetchedRef.current = decodedSymbol;
+    setLoadingShareholding(true);
+
+    fetch(`/api/shareholding?symbol=${encodeURIComponent(decodedSymbol)}`)
+      .then(r => r.json())
+      .then(json => {
+        if (json.data) {
+          setShareholdingData(json.data);
+          setShareholdingSource(json.source || 'unknown');
+        }
+      })
+      .catch(err => console.warn('[Shareholding] fetch failed:', err))
+      .finally(() => setLoadingShareholding(false));
+  }, [activeTab, decodedSymbol]);
 
   // Dynamic risk factors from real data
   const risks = useMemo(() => {
@@ -1313,16 +1338,25 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
 
           {/* Tab 3: Shareholding Pattern */}
           {activeTab === 'shareholding' && (() => {
-            const shData = getShareholdingData(decodedSymbol);
+            const shData = shareholdingData;
             const latest = shData?.history?.[0];
             const categories = ['promoter', 'fii', 'dii', 'mutualFund', 'retail', 'others'] as const;
+
+            if (loadingShareholding) {
+              return (
+                <div className="p-12 rounded-xl border bg-slate-900 text-center" style={{ borderColor: 'var(--border-color)' }}>
+                  <div className="animate-spin w-8 h-8 border-2 border-indigo-400 border-t-transparent rounded-full mx-auto mb-3" />
+                  <p className="text-sm text-slate-400 font-semibold">Loading shareholding data from Upstox...</p>
+                </div>
+              );
+            }
 
             if (!shData || !latest) {
               return (
                 <div className="p-12 rounded-xl border bg-slate-900 text-center" style={{ borderColor: 'var(--border-color)' }}>
                   <p className="text-3xl mb-3">🏛️</p>
                   <p className="text-sm text-slate-400 font-semibold">Shareholding data not available for {decodedSymbol}</p>
-                  <p className="text-xs text-slate-500 mt-1">Data is curated for Nifty 50 stocks and updated quarterly</p>
+                  <p className="text-xs text-slate-500 mt-1">Connect Upstox for live data, or this stock may not have data available</p>
                 </div>
               );
             }
@@ -1340,6 +1374,17 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
 
             return (
               <div className="space-y-6 animate-fade-in">
+                {/* Data source badge */}
+                <div className="flex items-center justify-end gap-2">
+                  <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
+                    shareholdingSource === 'upstox'
+                      ? 'bg-purple-500/15 text-purple-300 border border-purple-500/30'
+                      : 'bg-slate-700/50 text-slate-400 border border-slate-600/30'
+                  }`}>
+                    {shareholdingSource === 'upstox' ? '🟢 UPSTOX LIVE' : '📋 LOCAL DATA'}
+                  </span>
+                </div>
+
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {/* Donut Chart */}
                   <div className="rounded-xl p-6 border bg-slate-900" style={{ borderColor: 'var(--border-color)' }}>
@@ -1499,7 +1544,10 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
                   </div>
 
                   <p className="text-[9px] text-slate-500 text-center mt-4 pt-2 border-t" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
-                    📋 Source: SEBI quarterly filings • Data updated every quarter • {shData.companyName}
+                    {shareholdingSource === 'upstox'
+                      ? `🟢 Live data from Upstox Fundamentals API • ${shData.companyName}`
+                      : `📋 Source: SEBI quarterly filings • Data updated every quarter • ${shData.companyName}`
+                    }
                   </p>
                 </div>
               </div>
