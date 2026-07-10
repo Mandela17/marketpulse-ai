@@ -411,6 +411,7 @@ export default function MutualFundsPage() {
   const [activeTab, setActiveTab] = useState<'explore' | 'sip' | 'lumpsum'>('explore');
   const [compareList, setCompareList] = useState<number[]>([]);
   const [showCompare, setShowCompare] = useState(false);
+  const [loadingSearch, setLoadingSearch] = useState<number | null>(null);
 
   const fetchFunds = useCallback(async () => {
     setLoading(true);
@@ -436,6 +437,73 @@ export default function MutualFundsPage() {
     }, 400);
     return () => clearTimeout(t);
   }, [searchQuery]);
+
+  // Add fund from external search result
+  const addFundFromSearch = async (schemeCode: number, schemeName: string) => {
+    // Check if already in list
+    if (funds.find(f => f.schemeCode === schemeCode)) {
+      setSearchQuery('');
+      setSearchResults([]);
+      setSearchFocused(false);
+      setExpandedFund(schemeCode);
+      setSelectedCategory('All');
+      return;
+    }
+
+    setLoadingSearch(schemeCode);
+    setSearchResults([]);
+    setSearchFocused(false);
+    setSearchQuery('');
+    setSelectedCategory('All');
+
+    try {
+      const res = await fetch(`/api/mutual-funds?action=detail&code=${schemeCode}`);
+      const data = await res.json();
+
+      // Parse category from scheme name
+      const nameLower = schemeName.toLowerCase();
+      let category = 'Flexi Cap';
+      if (nameLower.includes('large cap') || nameLower.includes('bluechip')) category = 'Large Cap';
+      else if (nameLower.includes('small cap')) category = 'Small Cap';
+      else if (nameLower.includes('mid cap') || nameLower.includes('midcap')) category = 'Mid Cap';
+      else if (nameLower.includes('elss') || nameLower.includes('tax')) category = 'ELSS';
+      else if (nameLower.includes('index') || nameLower.includes('nifty') || nameLower.includes('sensex')) category = 'Index';
+      else if (nameLower.includes('hybrid') || nameLower.includes('balanced') || nameLower.includes('equity & debt')) category = 'Hybrid';
+      else if (nameLower.includes('debt') || nameLower.includes('liquid') || nameLower.includes('bond')) category = 'Debt';
+      else if (nameLower.includes('pharma') || nameLower.includes('banking') || nameLower.includes('technology') || nameLower.includes('infra')) category = 'Sectoral';
+
+      // Infer risk from category
+      const riskMap: Record<string, string> = { 'Large Cap': 'Moderate', 'Mid Cap': 'High', 'Small Cap': 'Very High', 'Flexi Cap': 'High', 'ELSS': 'High', 'Index': 'Moderate', 'Hybrid': 'Moderate', 'Debt': 'Low', 'Sectoral': 'Very High' };
+
+      // Extract short name: remove "- Direct Plan - Growth" etc.
+      const shortName = schemeName
+        .replace(/\s*-\s*Direct\s*Plan\s*/i, ' ')
+        .replace(/\s*-\s*Growth\s*/i, '')
+        .replace(/\s*-\s*IDCW\s*/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      // Extract fund house from scheme name (first word(s) before 'Fund' or 'Mutual')
+      const fundHouse = data?.meta?.fundHouse || schemeName.split(/\s+(Fund|Mutual|Small|Large|Mid|Flexi|ELSS)/i)[0] + ' Mutual Fund';
+
+      const newFund: FundData = {
+        schemeCode,
+        name: schemeName,
+        shortName: shortName.length > 30 ? shortName.substring(0, 30) + '…' : shortName,
+        fundHouse,
+        category,
+        planType: 'Direct',
+        risk: riskMap[category] || 'High',
+        nav: data?.nav || null,
+      };
+
+      setFunds(prev => [newFund, ...prev]);
+      setExpandedFund(schemeCode);
+    } catch (err) {
+      console.error('Failed to load fund:', err);
+    }
+    setLoadingSearch(null);
+  };
 
   const filtered = useMemo(() => {
     let r = funds;
@@ -598,15 +666,22 @@ export default function MutualFundsPage() {
                 boxShadow: '0 24px 80px rgba(0,0,0,0.8)',
               }}>
                 <div style={{ padding: '10px 16px', fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(99,102,241,0.05)' }}>
-                  More from AMFI ({searchResults.length})
+                  Click to load fund data ({searchResults.length} results)
                 </div>
                 {searchResults.map((r: any) => (
-                  <div key={r.schemeCode} style={{ padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.04)', fontSize: 12, cursor: 'pointer' }}
-                    onMouseEnter={e => (e.currentTarget.style.background = 'rgba(99,102,241,0.06)')}
+                  <div key={r.schemeCode}
+                    onClick={() => addFundFromSearch(r.schemeCode, r.schemeName)}
+                    style={{ padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.04)', fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10 }}
+                    onMouseEnter={e => (e.currentTarget.style.background = 'rgba(99,102,241,0.08)')}
                     onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                   >
-                    <div style={{ fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.4 }}>{r.schemeName}</div>
-                    <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>Code: {r.schemeCode}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.4 }}>{r.schemeName}</div>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>Code: {r.schemeCode}</div>
+                    </div>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: '#818cf8', flexShrink: 0, padding: '4px 10px', borderRadius: 6, background: 'rgba(99,102,241,0.1)' }}>
+                      {loadingSearch === r.schemeCode ? '⏳ Loading...' : '+ Add'}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -664,6 +739,25 @@ export default function MutualFundsPage() {
                 animation: 'spin 0.8s linear infinite', margin: '0 auto 16px',
               }} />
               <p style={{ color: 'var(--text-muted)', fontSize: 14, fontWeight: 600 }}>Loading live NAV data...</p>
+            </div>
+          )}
+          {/* Loading search fund */}
+          {loadingSearch && (
+            <div style={{
+              padding: '14px 20px', borderRadius: 14, marginBottom: 10,
+              background: 'linear-gradient(135deg, rgba(99,102,241,0.06), rgba(139,92,246,0.04))',
+              border: '1px solid rgba(99,102,241,0.2)',
+              display: 'flex', alignItems: 'center', gap: 12,
+              animation: 'fadeIn 0.2s ease',
+            }}>
+              <div style={{
+                width: 20, height: 20, border: '2px solid rgba(255,255,255,0.06)',
+                borderTopColor: '#6366f1', borderRadius: '50%',
+                animation: 'spin 0.8s linear infinite',
+              }} />
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>
+                Loading fund data from AMFI...
+              </span>
             </div>
           )}
 
