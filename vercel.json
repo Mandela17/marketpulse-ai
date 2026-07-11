@@ -1,4 +1,9 @@
 {
+  "functions": {
+    "src/app/api/strategies/screen/route.ts": {
+      "maxDuration": 120
+    }
+  },
   "crons": [
     {
       "path": "/api/cron/collect",

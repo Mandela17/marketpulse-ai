@@ -19,6 +19,7 @@ import { getUpstoxToken } from '@/lib/upstoxTokenStore';
 import { getServiceClient } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 120; // Allow up to 120s for 500-stock scans
 
 // ─── Stock Universe: ~500 NSE Stocks ────────────────────────────────
 // Covers Nifty 50, Next 50, Midcap 150, Smallcap 250, PSU Banks, Defence, etc.
@@ -255,21 +256,36 @@ function mapUpstoxCat(cat: string): keyof ShareholdingSnapshot | null {
   return null;
 }
 
+// Cache Upstox token to avoid hitting Supabase per-stock
+let cachedUpstoxToken: { token: string | null; ts: number } = { token: null, ts: 0 };
+const TOKEN_CACHE_TTL = 10 * 60 * 1000; // 10 min
+
+async function getCachedUpstoxToken(): Promise<string | null> {
+  if (Date.now() - cachedUpstoxToken.ts < TOKEN_CACHE_TTL) return cachedUpstoxToken.token;
+  try {
+    const stored = await getUpstoxToken();
+    cachedUpstoxToken = { token: stored?.accessToken || null, ts: Date.now() };
+  } catch {
+    cachedUpstoxToken = { token: null, ts: Date.now() };
+  }
+  return cachedUpstoxToken.token;
+}
+
 async function fetchDynamicShareholding(symbol: string): Promise<ShareholdingSnapshot | null> {
   const cacheKey = `sh:${symbol}`;
   const cached = shareholdingCache.get(cacheKey);
   if (cached && Date.now() - cached.ts < SHAREHOLDING_CACHE_TTL) return cached.data;
 
-  // Try Upstox API first
+  // Try Upstox API (token is cached, checked once)
   try {
-    const storedToken = await getUpstoxToken();
-    if (storedToken) {
+    const token = await getCachedUpstoxToken();
+    if (token && token !== 'sandbox' && token !== 'mock') {
       const instrumentKey = getInstrumentKey(symbol);
       if (instrumentKey) {
         const isin = instrumentKey.split('|')[1];
         if (isin) {
           const res = await fetch(`https://api.upstox.com/v2/fundamentals/${isin}/share-holdings`, {
-            headers: { Accept: 'application/json', Authorization: `Bearer ${storedToken.accessToken}` },
+            headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
           });
           if (res.ok) {
             const json = await res.json();
@@ -278,7 +294,6 @@ async function fetchDynamicShareholding(symbol: string): Promise<ShareholdingSna
               for (const cat of json.data) {
                 const field = mapUpstoxCat(cat.category);
                 if (field && Array.isArray(cat.history) && cat.history.length > 0) {
-                  // Latest period's value
                   const latest = cat.history.sort((a: any, b: any) =>
                     new Date(b.period).getTime() - new Date(a.period).getTime()
                   )[0];
@@ -298,7 +313,7 @@ async function fetchDynamicShareholding(symbol: string): Promise<ShareholdingSna
     // Fall through to local data
   }
 
-  // Fallback: local static data
+  // Fallback: local static data (instant, no network)
   const local = getLatestShareholding(symbol);
   if (local) {
     const snapshot: ShareholdingSnapshot = {
@@ -1001,20 +1016,27 @@ async function screenEvergreenCompounder(data: ScreenData): Promise<StrategyMatc
     return null;
   }
 
-  // Rule 6: All-Time return positive (fetch max data)
+  // Rule 6: 10-Year return positive (fetch 10-year data)
   try {
-    const ohlcvMax = await fetchHistoricalOHLCV(symbol, 9999); // range=max
-    if (ohlcvMax.length >= 1260) {
-      const ipo = ohlcvMax[0].close;
-      const retAllTime = ((price - ipo) / ipo) * 100;
-      if (retAllTime > 0) { score += 20; signals.push(`All-Time Return: +${retAllTime.toFixed(0)}% (since ${ohlcvMax[0].date})`); }
+    const ohlcv10Y = await fetchHistoricalOHLCV(symbol, 2520); // ~10 years
+    if (ohlcv10Y.length >= 2000) {
+      const oldPrice10Y = ohlcv10Y[0].close;
+      const ret10Y = ((price - oldPrice10Y) / oldPrice10Y) * 100;
+      if (ret10Y > 0) { score += 20; signals.push(`10Y Return: +${ret10Y.toFixed(0)}% (since ${ohlcv10Y[0].date})`); }
+      else return null;
+    } else if (ohlcv10Y.length >= 1260) {
+      // Less than 10Y but at least ~5Y — use what we have
+      const oldPrice = ohlcv10Y[0].close;
+      const retAvail = ((price - oldPrice) / oldPrice) * 100;
+      const years = (ohlcv10Y.length / 252).toFixed(0);
+      if (retAvail > 0) { score += 15; signals.push(`${years}Y Return: +${retAvail.toFixed(0)}%`); }
       else return null;
     } else {
-      // If max data is same as 5Y data, skip duplicate check
-      score += 10; signals.push(`All-Time: limited history available`);
+      // Not enough for 10Y, but 5Y already checked — give partial credit
+      score += 10; signals.push(`10Y: limited history (${(ohlcv10Y.length / 252).toFixed(1)}Y available)`);
     }
   } catch {
-    score += 5; signals.push(`All-Time: data unavailable`);
+    score += 5; signals.push(`10Y: data unavailable`);
   }
 
   return {
@@ -1113,11 +1135,28 @@ export async function GET(request: Request) {
   try {
     const matches: StrategyMatch[] = [];
     const errors: string[] = [];
-    const batchSize = 8;
+    const batchSize = 15; // Higher parallelism
 
-    // Process stocks in batches of 8 to avoid rate limiting
-    for (let i = 0; i < SCREEN_STOCKS.length; i += batchSize) {
-      const batch = SCREEN_STOCKS.slice(i, i + batchSize);
+    // For shareholding strategies (11-14), pre-filter to stocks with shareholding data
+    // This avoids fetching OHLCV for ~450 stocks that will be rejected anyway
+    const SHAREHOLDING_STRATEGIES = [11, 12, 13, 14];
+    let stocksToScan = SCREEN_STOCKS;
+
+    if (SHAREHOLDING_STRATEGIES.includes(strategyId)) {
+      const filtered: string[] = [];
+      for (const symbol of SCREEN_STOCKS) {
+        const sh = await fetchDynamicShareholding(symbol);
+        if (sh && (sh.promoter > 0 || sh.mutualFund > 0)) {
+          filtered.push(symbol);
+        }
+      }
+      stocksToScan = filtered;
+      console.log(`[Strategy ${strategyId}] Pre-filtered: ${filtered.length}/${SCREEN_STOCKS.length} stocks have shareholding data`);
+    }
+
+    // Process stocks in batches
+    for (let i = 0; i < stocksToScan.length; i += batchSize) {
+      const batch = stocksToScan.slice(i, i + batchSize);
       const results = await Promise.all(
         batch.map(async (symbol) => {
           try {
