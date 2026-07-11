@@ -1,6 +1,6 @@
 // API Route: Proven Strategies Stock Screener
-// Screens 250 NSE stocks against 10 quantitative swing trading strategies
-// using REAL OHLCV + fundamental data from Yahoo Finance
+// Screens ~500 NSE stocks against 14 quantitative swing trading strategies
+// using REAL OHLCV + fundamental + shareholding data from Yahoo Finance & Upstox
 
 import { NextResponse } from 'next/server';
 import {
@@ -14,11 +14,13 @@ import {
 } from '@/lib/technicalAnalysis';
 import { getLatestShareholding } from '@/lib/shareholdingData';
 import { toYahooTicker } from '@/lib/symbolMap';
+import { getInstrumentKey } from '@/lib/upstoxInstruments';
+import { getUpstoxToken } from '@/lib/upstoxTokenStore';
 
 export const dynamic = 'force-dynamic';
 
-// ─── Stock Universe: 250 NSE Stocks (Large + Mid + Small Cap) ───────
-// Covers Nifty 50, Nifty Next 50, Nifty Midcap 100, and select small-cap hidden gems
+// ─── Stock Universe: ~500 NSE Stocks ────────────────────────────────
+// Covers Nifty 50, Next 50, Midcap 150, Smallcap 250, PSU Banks, Defence, etc.
 const SCREEN_STOCKS = [
   // ── Nifty 50 (Large Cap) ──
   'RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'BHARTIARTL',
@@ -30,67 +32,132 @@ const SCREEN_STOCKS = [
   'BEL', 'HAL', 'TRENT', 'INDUSINDBK', 'BRITANNIA', 'TATACONSUM',
   'APOLLOHOSP', 'BAJAJFINSV', 'TECHM', 'DIVISLAB', 'SHRIRAMFIN', 'JSWENERGY',
 
-  // ── Nifty Next 50 (Large-Mid Cap) ──
+  // ── Nifty Next 50 / Large-Mid ──
   'DLF', 'GODREJCP', 'PIDILITIND', 'DABUR', 'MARICO', 'COLPAL',
   'HAVELLS', 'VOLTAS', 'SIEMENS', 'ABB', 'BOSCHLTD', 'CUMMINSIND',
   'TORNTPHARM', 'LUPIN', 'BIOCON', 'AUROPHARMA', 'ALKEM', 'IPCALAB',
   'PERSISTENT', 'COFORGE', 'LTIM', 'MPHASIS', 'NAUKRI', 'ZOMATO',
   'POLICYBZR', 'SBILIFE', 'HDFCLIFE', 'ICICIPRULI', 'MUTHOOTFIN', 'CHOLAFIN',
-  'PFC', 'RECLTD', 'IRFC', 'PNB', 'BANKBARODA', 'CANBK', 'IDFCFIRSTB',
-  'FEDERALBNK', 'BANDHANBNK', 'IDBI',
-  'VEDL', 'HINDALCO', 'NMDC', 'NATIONALUM', 'HINDCOPPER',
+  'PFC', 'RECLTD', 'IRFC', 'VEDL', 'HINDALCO', 'NMDC', 'NATIONALUM', 'HINDCOPPER',
   'TATAPOWER', 'NHPC', 'SJVN', 'IREDA', 'ADANIGREEN',
 
-  // ── Midcap — IT & Tech ──
+  // ── Banks — PSU ──
+  'PNB', 'BANKBARODA', 'CANBK', 'UNIONBANK', 'BANKINDIA', 'IOB',
+  'CENTRALBK', 'UCOBANK', 'INDIANB', 'PSB', 'MAHABANK',
+  'IDBI', 'J&KBANK', 'KARURVYSYA',
+
+  // ── Banks — Private & Small Finance ──
+  'IDFCFIRSTB', 'FEDERALBNK', 'BANDHANBNK', 'RBLBANK', 'SOUTHBANK',
+  'UJJIVANSFB', 'EQUITASBNK', 'AUBANK', 'CUB', 'CSB', 'DCBBANK',
+  'KARNATKABNK', 'TMB', 'ESAFSFB',
+
+  // ── NBFCs & Finance ──
+  'MANAPPURAM', 'IIFL', 'LICHSGFIN', 'CANFINHOME', 'HUDCO',
+  'CREDITACC', 'AAVAS', 'POONAWALLA', 'SBFC', 'APTUS',
+  'HOMEFIRST', 'EDELWEISS', 'JMFINANCIL', 'MOTILALOFS', 'ANGELONE',
+  'FIVESTAR', 'SUNDARMFIN',
+
+  // ── Insurance ──
+  'LICI', 'NIACL', 'GICRE', 'STARHEALTH', 'ICICIPRULI',
+
+  // ── IT & Tech ──
   'HAPPSTMNDS', 'KPITTECH', 'TATAELXSI', 'ZENSAR', 'MASTEK',
   'SONATA', 'NIITLTD', 'NEWGEN', 'ROUTE', 'INTELLECT',
+  'CYIENT', 'BIRLASOFT', 'AFFLE', 'TANLA', 'LATENTVIEW',
+  'DATAPATTNS', 'RATEGAIN', 'MAPMYINDIA',
 
-  // ── Midcap — Pharma & Healthcare ──
+  // ── Pharma & Healthcare ──
   'LALPATHLAB', 'METROPOLIS', 'SYNGENE', 'GLAND', 'LAURUSLABS',
   'GRANULES', 'NATCOPHARM', 'AARTIIND', 'ASTRAZEN', 'PFIZER',
   'AJANTPHARM', 'STAR', 'MEDANTA', 'MAXHEALTH', 'RAINBOW',
+  'GLENMARK', 'IPCALAB', 'ABBOTINDIA', 'SANOFI', 'GLAXO',
+  'ERIS', 'SUNCLAYERG', 'SUVEN', 'MANKIND',
 
-  // ── Midcap — FMCG & Consumer ──
+  // ── FMCG & Consumer ──
   'GODREJIND', 'EMAMILTD', 'JYOTHYLAB', 'VGUARD', 'CROMPTON',
   'WHIRLPOOL', 'BATAINDIA', 'RELAXO', 'PAGEIND', 'TTKPRESTIG',
   'RADICO', 'UBL', 'UNITDSPR', 'DEVYANI', 'JUBLFOOD',
+  'TATAELXSI', 'BIKAJI', 'SAPPHIRE', 'GODFRYPHLP',
 
-  // ── Midcap — Auto & Auto Ancillary ──
+  // ── Auto & Auto Ancillary ──
   'ASHOKLEY', 'ESCORTS', 'TVSMOTORS', 'BALKRISIND', 'CEATLTD',
   'APOLLOTYRE', 'MRF', 'MOTHERSON', 'ENDURANCE', 'EXIDEIND',
   'AMARAJABAT', 'TIINDIA', 'SUNDRMFAST', 'BHARATFORG', 'KALYANKJIL',
+  'OLECTRA', 'JBMA', 'CRAFTSMAN', 'GABRIEL', 'SUBROS',
 
-  // ── Midcap — Banking & Finance ──
-  'MANAPPURAM', 'IIFL', 'LICHSGFIN', 'CANFINHOME', 'HUDCO',
-  'IRCTC', 'INDIANB', 'CENTRALBK', 'RBLBANK', 'UJJIVANSFB',
-  'EQUITASBNK', 'AUBANK', 'CUB', 'CREDITACC', 'AAVAS',
-
-  // ── Midcap — Infra & Construction ──
+  // ── Infra & Construction ──
   'NBCC', 'IRCON', 'RVNL', 'ENGINERSIN', 'KEC',
   'KALPATPOWR', 'LTTS', 'JKCEMENT', 'RAMCOCEM', 'DALBHARAT',
   'SHREECEM', 'AMBUJACEM', 'JKLAKSHMI', 'HEIDELBERG', 'STARCEMENT',
+  'NCC', 'KPIL', 'HCC', 'PNCINFRA', 'AHLUCONT',
+  'JSWINFRA', 'GPPL',
 
-  // ── Midcap — Chemicals & Materials ──
-  'PIDILITIND', 'SRF', 'DEEPAKNTR', 'ATUL', 'NAVINFLUOR',
+  // ── Chemicals & Materials ──
+  'SRF', 'DEEPAKNTR', 'ATUL', 'NAVINFLUOR',
   'FINEORG', 'CLEAN', 'GALAXYSURF', 'SUDARSCHEM', 'VINATIORGA',
+  'ALKYLAMINE', 'LXCHEM', 'TATACHEM', 'ROSSARI', 'ANURAS',
 
-  // ── Midcap — Energy & Power ──
+  // ── Energy, Power & Gas ──
   'GAIL', 'IGL', 'MGL', 'PETRONET', 'HINDPETRO',
   'IOC', 'OIL', 'MRPL', 'CESC', 'TORNTPOWER',
   'JSL', 'JINDALSTEL', 'SAIL', 'WELCORP', 'RATNAMANI',
+  'ADANIENSOL', 'ADANITRANS', 'TATAPOWER', 'JPPOWER', 'RPOWER',
+
+  // ── Defence & Aerospace ──
+  'BDL', 'GRSE', 'COCHINSHIP', 'MAZAGONDOCK', 'GARDENREACH',
+  'SOLARINDS', 'PARAS', 'DCAL', 'MIDHANI', 'BEML',
+  'ASTRA', 'ZENTEC', 'DATAPATTNS',
+
+  // ── Railways & Logistics ──
+  'IRCTC', 'RITES', 'RAILTEL', 'TITAGARH', 'JUPITERWAG',
+  'TEXRAIL', 'CONCOR', 'BLUEDART', 'TCI', 'MAHLOG',
+  'DELHIVERY', 'ALLCARGO', 'GESHIP',
+
+  // ── Real Estate ──
+  'GODREJPROP', 'OBEROIRLTY', 'PRESTIGE', 'BRIGADE', 'SOBHA',
+  'MAHLIFE', 'LODHA', 'RAYMOND', 'PHOENIXLTD', 'SUNTECK',
+
+  // ── Telecom & Media ──
+  'IDEA', 'TTML', 'HFCL', 'STLTECH', 'SUNTV',
+  'PVRINOX', 'ZEEL', 'TV18BRDCST', 'NETWORK18',
+
+  // ── Textiles & Apparel ──
+  'ARVIND', 'TRIDENT', 'WELSPUNLIV', 'KPRMILL', 'GOKALDAS',
+  'SOMANYCERA', 'ORIENTELEC', 'PGHL',
+
+  // ── Sugar & Agri ──
+  'BALRAMCHIN', 'RENUKA', 'DWARIKESH', 'EIDPARRY', 'TRIVENI',
+  'DHANUKA', 'UPL', 'PI', 'RALLIS', 'BAYER',
+
+  // ── Fertilizers & Chemicals ──
+  'CHAMBLFERT', 'GNFC', 'GSFC', 'RCF', 'NFL',
+  'FACT', 'COROMANDEL', 'DEEPAKFERT',
+
+  // ── Capital Goods & Engineering ──
+  'THERMAX', 'ISGEC', 'ELGIEQUIP', 'PRAJIND', 'AIAENG',
+  'KENNAMET', 'SCHAEFFLER', 'TIMKEN', 'SKFINDIA',
+  'GRINDWELL', 'CARBORUNIV', 'SUPRAJIT', 'CUMMINSIND',
+  'CGPOWER', 'SUZLON', 'INOXWIND', 'TDPOWERSYS',
+
+  // ── PSU Misc (High Promoter) ──
+  'BHEL', 'CONCOR', 'NLCINDIA', 'MMTC', 'MOIL',
+  'IRCON', 'NBCC', 'RVNL', 'HUDCO', 'HSCL',
+  'OFSS', 'MAZDOCK', 'SJVN',
+
+  // ── Exchanges & Market Infra ──
+  'CDSL', 'BSE', 'MCX', 'CAMS',
 
   // ── Small Cap — Hidden Gems ──
-  'POLYCAB', 'DIXON', 'KAYNES', 'AFFLE', 'TANLA',
-  'CDSL', 'BSE', 'MCX', 'ANGELONE', 'MOTILALOFS',
-  'EIDPARRY', 'TRIVENI', 'GRINDWELL', 'CARBORUNIV', 'SUPRAJIT',
-  'ELGIEQUIP', 'THERMAX', 'ISGEC', 'GRSE', 'COCHINSHIP',
-  'MAZAGONDOCK', 'GARDENREACH', 'BDL', 'SOLARINDS', 'PRAJIND',
-  'AIAENG', 'KENNAMET', 'SCHAEFFLER', 'TIMKEN', 'SKFINDIA',
+  'POLYCAB', 'DIXON', 'KAYNES', 'RAJESHEXPO', 'CCL',
+  'ZYDUSLIFE', 'JBCHEPHARM', 'HEMIPROP',
+  'LTFOODS', 'KRBL', 'BSOFT', 'HAPPIEST',
+  'FINCABLES', 'IIFLWAM', 'TARSONS', 'CLEAN',
+  'CAMPUS', 'MAPMYINDIA', 'YATHARTH',
 
-  // ── Small Cap — Textiles & Misc ──
-  'RAYMOND', 'ARVIND', 'PGHL', 'RAJESHEXPO', 'CCL',
-  'ZYDUSLIFE', 'JBCHEPHARM', 'HEMIPROP', 'SUNTV', 'PVRINOX',
-];
+  // ── Jewellery & Retail ──
+  'TITAN', 'KALYANKJIL', 'SENCO', 'THANGAMAYIL',
+  'DMART', 'SHOPERSTOP', 'VMART', 'TRENT',
+].filter((v, i, a) => a.indexOf(v) === i); // Deduplicate
 
 // ─── In-memory strategy results cache ───────────────────────────────
 const strategyCache: Map<string, { data: any; ts: number }> = new Map();
@@ -161,6 +228,89 @@ async function fetchRealFundamentals(symbol: string): Promise<RealFundamentals |
   }
 
   fundamentalsCache.set(cacheKey, { data: null, ts: Date.now() });
+  return null;
+}
+
+// ─── Dynamic Shareholding from Upstox API ───────────────────────────
+// Tries Upstox fundamentals API for real shareholding data,
+// falls back to local curated data if unavailable
+
+interface ShareholdingSnapshot {
+  promoter: number;
+  mutualFund: number;
+  dii: number;
+  retail: number;
+}
+
+const shareholdingCache: Map<string, { data: ShareholdingSnapshot | null; ts: number }> = new Map();
+const SHAREHOLDING_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours (quarterly data)
+
+function mapUpstoxCat(cat: string): keyof ShareholdingSnapshot | null {
+  const lower = cat.toLowerCase();
+  if (lower.includes('promoter')) return 'promoter';
+  if (lower.includes('mutual_fund') || lower.includes('mutual fund')) return 'mutualFund';
+  if (lower.includes('dii') || lower.includes('domestic_institutional') || lower.includes('other_dii')) return 'dii';
+  if (lower.includes('public') || lower.includes('retail')) return 'retail';
+  return null;
+}
+
+async function fetchDynamicShareholding(symbol: string): Promise<ShareholdingSnapshot | null> {
+  const cacheKey = `sh:${symbol}`;
+  const cached = shareholdingCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < SHAREHOLDING_CACHE_TTL) return cached.data;
+
+  // Try Upstox API first
+  try {
+    const storedToken = await getUpstoxToken();
+    if (storedToken) {
+      const instrumentKey = getInstrumentKey(symbol);
+      if (instrumentKey) {
+        const isin = instrumentKey.split('|')[1];
+        if (isin) {
+          const res = await fetch(`https://api.upstox.com/v2/fundamentals/${isin}/share-holdings`, {
+            headers: { Accept: 'application/json', Authorization: `Bearer ${storedToken.accessToken}` },
+          });
+          if (res.ok) {
+            const json = await res.json();
+            if (json.status === 'success' && Array.isArray(json.data)) {
+              const snapshot: ShareholdingSnapshot = { promoter: 0, mutualFund: 0, dii: 0, retail: 0 };
+              for (const cat of json.data) {
+                const field = mapUpstoxCat(cat.category);
+                if (field && Array.isArray(cat.history) && cat.history.length > 0) {
+                  // Latest period's value
+                  const latest = cat.history.sort((a: any, b: any) =>
+                    new Date(b.period).getTime() - new Date(a.period).getTime()
+                  )[0];
+                  snapshot[field] += latest.value;
+                }
+              }
+              if (snapshot.promoter > 0 || snapshot.mutualFund > 0) {
+                shareholdingCache.set(cacheKey, { data: snapshot, ts: Date.now() });
+                return snapshot;
+              }
+            }
+          }
+        }
+      }
+    }
+  } catch {
+    // Fall through to local data
+  }
+
+  // Fallback: local static data
+  const local = getLatestShareholding(symbol);
+  if (local) {
+    const snapshot: ShareholdingSnapshot = {
+      promoter: local.promoter,
+      mutualFund: local.mutualFund,
+      dii: local.dii,
+      retail: local.retail,
+    };
+    shareholdingCache.set(cacheKey, { data: snapshot, ts: Date.now() });
+    return snapshot;
+  }
+
+  shareholdingCache.set(cacheKey, { data: null, ts: Date.now() });
   return null;
 }
 
@@ -280,8 +430,8 @@ async function computeScreenData(symbol: string): Promise<ScreenData | null> {
       return1Y: 0,
     };
 
-    // Populate shareholding data if available
-    const sh = getLatestShareholding(symbol);
+    // Populate shareholding: try Upstox API, then fall back to local static data
+    const sh = await fetchDynamicShareholding(symbol);
     if (sh) {
       screenData.promoterHolding = sh.promoter;
       screenData.mutualFundHolding = sh.mutualFund;
