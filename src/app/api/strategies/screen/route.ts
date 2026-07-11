@@ -937,9 +937,8 @@ function screenHighPromoterBreakout(data: ScreenData): StrategyMatch | null {
   let score = 0;
   const distFrom52W = ((high52W - price) / high52W) * 100;
 
-  // Rule 1: Promoter > 55% OR MF > 10%
+  // Rule 1: Promoter > 55%
   if (promoterHolding >= 55) { score += 20; signals.push(`Promoter: ${promoterHolding.toFixed(1)}% (>55%)`); }
-  else if (data.mutualFundHolding >= 10) { score += 15; signals.push(`MF Holding: ${data.mutualFundHolding.toFixed(1)}% (>10%)`); }
   else return null;
 
   // Rule 2: Within 8% of 52W high
@@ -1046,17 +1045,18 @@ async function screenEvergreenCompounder(data: ScreenData): Promise<StrategyMatc
 // Same as Evergreen but uses 10-Year instead of All-Time
 async function screenDecadeCompounder(data: ScreenData): Promise<StrategyMatch | null> {
   const { symbol, price, promoterHolding, mutualFundHolding, return6M, return1Y } = data;
-  if (promoterHolding <= 0 && mutualFundHolding <= 0) return null;
+  if (promoterHolding <= 0 || mutualFundHolding <= 0) return null;
 
   const signals: string[] = [];
   let score = 0;
 
-  // Rule 1: Promoter > 65% OR MF > 10%
-  const hasPromoter = promoterHolding >= 65;
-  const hasMF = mutualFundHolding >= 10;
-  if (!hasPromoter && !hasMF) return null;
-  if (hasPromoter) { score += 15; signals.push(`Promoter: ${promoterHolding.toFixed(1)}% (>65%)`); }
-  if (hasMF) { score += 15; signals.push(`MF Holding: ${mutualFundHolding.toFixed(1)}% (>10%)`); }
+  // Rule 1: Promoter > 65%
+  if (promoterHolding >= 65) { score += 15; signals.push(`Promoter: ${promoterHolding.toFixed(1)}% (>65%)`); }
+  else return null;
+
+  // Rule 2: MF > 10%
+  if (mutualFundHolding >= 10) { score += 15; signals.push(`MF Holding: ${mutualFundHolding.toFixed(1)}% (>10%)`); }
+  else return null;
 
   // Rule 2: 6M return positive
   if (return6M > 0) { score += 15; signals.push(`6M Return: +${return6M.toFixed(1)}%`); }
@@ -1118,12 +1118,17 @@ async function screenMidTermCompounder(data: ScreenData): Promise<StrategyMatch 
   const signals: string[] = [];
   let score = 0;
 
-  // Rule 1: Promoter > 65% OR MF > 10%
+  // Rule 1: Promoter > 65% OR MF > 10% (Either one successful)
   const hasPromoter = promoterHolding >= 65;
   const hasMF = mutualFundHolding >= 10;
   if (!hasPromoter && !hasMF) return null;
-  if (hasPromoter) { score += 15; signals.push(`Promoter: ${promoterHolding.toFixed(1)}% (>65%)`); }
-  if (hasMF) { score += 15; signals.push(`MF Holding: ${mutualFundHolding.toFixed(1)}% (>10%)`); }
+
+  // Output both data points in signals regardless of which one was successful
+  signals.push(`Promoter: ${promoterHolding.toFixed(1)}% ${hasPromoter ? '(>=65%)' : '(<65%)'}`);
+  signals.push(`MF Holding: ${mutualFundHolding.toFixed(1)}% ${hasMF ? '(>=10%)' : '(<10%)'}`);
+
+  if (hasPromoter) score += 15;
+  if (hasMF) score += 15;
 
   // Rule 2: 6M return positive
   if (return6M > 0) { score += 15; signals.push(`6M Return: +${return6M.toFixed(1)}%`); }
