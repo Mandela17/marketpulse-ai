@@ -270,6 +270,27 @@ const STRATEGIES: StrategyDef[] = [
     gradient: 'linear-gradient(135deg, #f97316, #ea580c)',
     accentColor: '#f97316',
   },
+  {
+    id: 14,
+    name: 'Evergreen Compounder',
+    type: 'Fundamental',
+    icon: '🌳',
+    holdingPeriod: '15–60 days',
+    winRate: '65–72%',
+    riskReward: '1:2',
+    description: 'The ultimate quality filter: promoter-backed (>65%), MF-validated (>10%), and positive returns across ALL timeframes — 6M, 1Y, 5Y, and All-Time. These are true compounders that only go up over time.',
+    rules: [
+      'Promoter Holding > 65% (founder conviction)',
+      'Mutual Fund Holding > 10% (institutional stamp)',
+      '6-Month Return positive',
+      '1-Year Return positive',
+      '5-Year Return positive',
+      'All-Time Return positive (IPO to now)',
+    ],
+    keyIndicators: ['Promoter %', 'MF %', '6M Return', '1Y Return', '5Y Return', 'All-Time'],
+    gradient: 'linear-gradient(135deg, #22c55e, #15803d)',
+    accentColor: '#22c55e',
+  },
 ];
 
 // ─── Types ──────────────────────────────────────────────────────────
