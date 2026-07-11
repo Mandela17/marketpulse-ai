@@ -937,8 +937,9 @@ function screenHighPromoterBreakout(data: ScreenData): StrategyMatch | null {
   let score = 0;
   const distFrom52W = ((high52W - price) / high52W) * 100;
 
-  // Rule 1: Promoter > 55%
+  // Rule 1: Promoter > 55% OR MF > 10%
   if (promoterHolding >= 55) { score += 20; signals.push(`Promoter: ${promoterHolding.toFixed(1)}% (>55%)`); }
+  else if (data.mutualFundHolding >= 10) { score += 15; signals.push(`MF Holding: ${data.mutualFundHolding.toFixed(1)}% (>10%)`); }
   else return null;
 
   // Rule 2: Within 8% of 52W high
@@ -973,24 +974,23 @@ async function screenEvergreenCompounder(data: ScreenData): Promise<StrategyMatc
   const { symbol, price, promoterHolding, mutualFundHolding, return6M, return1Y } = data;
 
   // Must have shareholding data
-  if (promoterHolding <= 0) return null;
+  if (promoterHolding <= 0 && mutualFundHolding <= 0) return null;
 
   const signals: string[] = [];
   let score = 0;
 
-  // Rule 1: Promoter > 65%
-  if (promoterHolding >= 65) { score += 15; signals.push(`Promoter: ${promoterHolding.toFixed(1)}% (>65%)`); }
-  else return null;
+  // Rule 1: Promoter > 65% OR MF > 10%
+  const hasPromoter = promoterHolding >= 65;
+  const hasMF = mutualFundHolding >= 10;
+  if (!hasPromoter && !hasMF) return null;
+  if (hasPromoter) { score += 15; signals.push(`Promoter: ${promoterHolding.toFixed(1)}% (>65%)`); }
+  if (hasMF) { score += 15; signals.push(`MF Holding: ${mutualFundHolding.toFixed(1)}% (>10%)`); }
 
-  // Rule 2: MF > 10%
-  if (mutualFundHolding >= 10) { score += 15; signals.push(`MF Holding: ${mutualFundHolding.toFixed(1)}% (>10%)`); }
-  else return null;
-
-  // Rule 3: 6M return positive
+  // Rule 2: 6M return positive
   if (return6M > 0) { score += 15; signals.push(`6M Return: +${return6M.toFixed(1)}%`); }
   else return null;
 
-  // Rule 4: 1Y return positive
+  // Rule 3: 1Y return positive
   if (return1Y > 0) { score += 15; signals.push(`1Y Return: +${return1Y.toFixed(1)}%`); }
   else return null;
 
@@ -1046,17 +1046,23 @@ async function screenEvergreenCompounder(data: ScreenData): Promise<StrategyMatc
 // Same as Evergreen but uses 10-Year instead of All-Time
 async function screenDecadeCompounder(data: ScreenData): Promise<StrategyMatch | null> {
   const { symbol, price, promoterHolding, mutualFundHolding, return6M, return1Y } = data;
-  if (promoterHolding <= 0) return null;
+  if (promoterHolding <= 0 && mutualFundHolding <= 0) return null;
 
   const signals: string[] = [];
   let score = 0;
 
-  if (promoterHolding >= 65) { score += 15; signals.push(`Promoter: ${promoterHolding.toFixed(1)}% (>65%)`); }
-  else return null;
-  if (mutualFundHolding >= 10) { score += 15; signals.push(`MF Holding: ${mutualFundHolding.toFixed(1)}% (>10%)`); }
-  else return null;
+  // Rule 1: Promoter > 65% OR MF > 10%
+  const hasPromoter = promoterHolding >= 65;
+  const hasMF = mutualFundHolding >= 10;
+  if (!hasPromoter && !hasMF) return null;
+  if (hasPromoter) { score += 15; signals.push(`Promoter: ${promoterHolding.toFixed(1)}% (>65%)`); }
+  if (hasMF) { score += 15; signals.push(`MF Holding: ${mutualFundHolding.toFixed(1)}% (>10%)`); }
+
+  // Rule 2: 6M return positive
   if (return6M > 0) { score += 15; signals.push(`6M Return: +${return6M.toFixed(1)}%`); }
   else return null;
+
+  // Rule 3: 1Y return positive
   if (return1Y > 0) { score += 15; signals.push(`1Y Return: +${return1Y.toFixed(1)}%`); }
   else return null;
 
@@ -1104,6 +1110,59 @@ async function screenDecadeCompounder(data: ScreenData): Promise<StrategyMatch |
   };
 }
 
+// ─── Strategy 16: Mid-Term Compounder (6-Year) ──────────────────────
+async function screenMidTermCompounder(data: ScreenData): Promise<StrategyMatch | null> {
+  const { symbol, price, promoterHolding, mutualFundHolding, return6M, return1Y } = data;
+  if (promoterHolding <= 0 && mutualFundHolding <= 0) return null;
+
+  const signals: string[] = [];
+  let score = 0;
+
+  // Rule 1: Promoter > 65% OR MF > 10%
+  const hasPromoter = promoterHolding >= 65;
+  const hasMF = mutualFundHolding >= 10;
+  if (!hasPromoter && !hasMF) return null;
+  if (hasPromoter) { score += 15; signals.push(`Promoter: ${promoterHolding.toFixed(1)}% (>65%)`); }
+  if (hasMF) { score += 15; signals.push(`MF Holding: ${mutualFundHolding.toFixed(1)}% (>10%)`); }
+
+  // Rule 2: 6M return positive
+  if (return6M > 0) { score += 15; signals.push(`6M Return: +${return6M.toFixed(1)}%`); }
+  else return null;
+
+  // Rule 3: 1Y return positive
+  if (return1Y > 0) { score += 15; signals.push(`1Y Return: +${return1Y.toFixed(1)}%`); }
+  else return null;
+
+  // 6Y return (max timeframe for this strategy)
+  try {
+    const ohlcv6Y = await fetchHistoricalOHLCV(symbol, 1512); // ~6 years
+    if (ohlcv6Y.length >= 1400) {
+      const ret6Y = ((price - ohlcv6Y[0].close) / ohlcv6Y[0].close) * 100;
+      if (ret6Y > 0) { score += 25; signals.push(`6Y Return: +${ret6Y.toFixed(0)}% (since ${ohlcv6Y[0].date})`); }
+      else return null;
+    } else if (ohlcv6Y.length >= 1000) {
+      const retAvail = ((price - ohlcv6Y[0].close) / ohlcv6Y[0].close) * 100;
+      const years = (ohlcv6Y.length / 252).toFixed(1);
+      if (retAvail > 0) { score += 15; signals.push(`${years}Y Return: +${retAvail.toFixed(0)}%`); }
+      else return null;
+    } else {
+      score += 10; signals.push(`6Y: limited history (${(ohlcv6Y.length / 252).toFixed(1)}Y available)`);
+    }
+  } catch {
+    score += 5; signals.push(`6Y: data unavailable`);
+  }
+
+  return {
+    symbol,
+    price,
+    entry: price,
+    target: parseFloat((price * 1.10).toFixed(2)),
+    stopLoss: parseFloat((price * 0.95).toFixed(2)),
+    signalStrength: Math.min(100, score),
+    signals,
+  };
+}
+
 // ─── Strategy dispatcher ────────────────────────────────────────────
 // Strategy 9 is async (fetches real fundamentals), others are sync
 const SYNC_STRATEGY_FILTERS: Record<number, (data: ScreenData) => StrategyMatch | null> = {
@@ -1125,6 +1184,7 @@ const ASYNC_STRATEGY_FILTERS: Record<number, (data: ScreenData) => Promise<Strat
   9: screenOversoldQuality,
   14: screenEvergreenCompounder,
   15: screenDecadeCompounder,
+  16: screenMidTermCompounder,
 };
 
 function getFilterFn(id: number): ((data: ScreenData) => StrategyMatch | null | Promise<StrategyMatch | null>) | null {
@@ -1137,9 +1197,9 @@ export async function GET(request: Request) {
   const strategyId = parseInt(searchParams.get('strategy') || '0');
   const forceRescan = searchParams.get('force') === 'true';
 
-  if (strategyId < 1 || strategyId > 15) {
+  if (strategyId < 1 || strategyId > 16) {
     return NextResponse.json(
-      { error: 'Invalid strategy ID. Must be 1-15.' },
+      { error: 'Invalid strategy ID. Must be 1-16.' },
       { status: 400 }
     );
   }
@@ -1194,7 +1254,7 @@ export async function GET(request: Request) {
 
     // For shareholding strategies (11-14), pre-filter to stocks with shareholding data
     // This avoids fetching OHLCV for ~450 stocks that will be rejected anyway
-    const SHAREHOLDING_STRATEGIES = [11, 12, 13, 14, 15];
+    const SHAREHOLDING_STRATEGIES = [11, 12, 13, 14, 15, 16];
     let stocksToScan = SCREEN_STOCKS;
 
     if (SHAREHOLDING_STRATEGIES.includes(strategyId)) {

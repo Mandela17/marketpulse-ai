@@ -534,6 +534,336 @@ const SHAREHOLDING_DATA: StockShareholding[] = [
       { quarter: 'Jun 2025', promoter: 18.47, fii: 39.58, dii: 17.72, mutualFund: 9.68, retail: 11.38, others: 3.17 },
     ],
   },
+  // ═══════════════════════════════════════════
+  //  PSU BANKS (Promoter = Govt of India)
+  // ═══════════════════════════════════════════
+  {
+    symbol: 'UNIONBANK',
+    companyName: 'Union Bank of India',
+    history: [
+      { quarter: 'Mar 2026', promoter: 74.76, fii: 4.12, dii: 8.21, mutualFund: 11.85, retail: 12.91 },
+    ],
+  },
+  {
+    symbol: 'KARURVYSYA',
+    companyName: 'Karur Vysya Bank',
+    history: [
+      { quarter: 'Mar 2026', promoter: 2.27, fii: 26.15, dii: 18.42, mutualFund: 14.32, retail: 38.84 },
+    ],
+  },
+  {
+    symbol: 'IOB',
+    companyName: 'Indian Overseas Bank',
+    history: [
+      { quarter: 'Mar 2026', promoter: 96.38, fii: 0.35, dii: 1.12, mutualFund: 0.42, retail: 1.73 },
+    ],
+  },
+  {
+    symbol: 'MAHABANK',
+    companyName: 'Bank of Maharashtra',
+    history: [
+      { quarter: 'Mar 2026', promoter: 86.46, fii: 1.85, dii: 4.32, mutualFund: 5.18, retail: 7.37 },
+    ],
+  },
+  {
+    symbol: 'CANBK',
+    companyName: 'Canara Bank',
+    history: [
+      { quarter: 'Mar 2026', promoter: 62.93, fii: 5.18, dii: 14.72, mutualFund: 12.45, retail: 17.17 },
+    ],
+  },
+  {
+    symbol: 'BANKBARODA',
+    companyName: 'Bank of Baroda',
+    history: [
+      { quarter: 'Mar 2026', promoter: 63.97, fii: 5.82, dii: 14.15, mutualFund: 10.32, retail: 16.06 },
+    ],
+  },
+  {
+    symbol: 'INDIANB',
+    companyName: 'Indian Bank',
+    history: [
+      { quarter: 'Mar 2026', promoter: 73.84, fii: 4.52, dii: 9.38, mutualFund: 8.15, retail: 12.26 },
+    ],
+  },
+  {
+    symbol: 'CENTRALBK',
+    companyName: 'Central Bank of India',
+    history: [
+      { quarter: 'Mar 2026', promoter: 93.08, fii: 0.52, dii: 2.18, mutualFund: 1.25, retail: 4.22 },
+    ],
+  },
+  {
+    symbol: 'UCOBANK',
+    companyName: 'UCO Bank',
+    history: [
+      { quarter: 'Mar 2026', promoter: 95.39, fii: 0.28, dii: 1.52, mutualFund: 0.82, retail: 2.81 },
+    ],
+  },
+  {
+    symbol: 'J&KBANK',
+    companyName: 'Jammu & Kashmir Bank',
+    history: [
+      { quarter: 'Mar 2026', promoter: 63.41, fii: 2.85, dii: 12.45, mutualFund: 8.92, retail: 21.29 },
+    ],
+  },
+  {
+    symbol: 'BANKINDIA',
+    companyName: 'Bank of India',
+    history: [
+      { quarter: 'Mar 2026', promoter: 73.38, fii: 3.42, dii: 9.85, mutualFund: 7.62, retail: 13.35 },
+    ],
+  },
+  {
+    symbol: 'PSB',
+    companyName: 'Punjab & Sind Bank',
+    history: [
+      { quarter: 'Mar 2026', promoter: 98.25, fii: 0.12, dii: 0.58, mutualFund: 0.18, retail: 1.05 },
+    ],
+  },
+  {
+    symbol: 'PNB',
+    companyName: 'Punjab National Bank',
+    history: [
+      { quarter: 'Mar 2026', promoter: 73.15, fii: 3.82, dii: 10.25, mutualFund: 10.85, retail: 12.78 },
+    ],
+  },
+  // ═══════════════════════════════════════════
+  //  PRIVATE BANKS
+  // ═══════════════════════════════════════════
+  {
+    symbol: 'FEDERALBNK',
+    companyName: 'Federal Bank',
+    history: [
+      { quarter: 'Mar 2026', promoter: 0, fii: 26.52, dii: 18.32, mutualFund: 15.42, retail: 39.74 },
+    ],
+  },
+  {
+    symbol: 'IDFCFIRSTB',
+    companyName: 'IDFC First Bank',
+    history: [
+      { quarter: 'Mar 2026', promoter: 37.44, fii: 18.25, dii: 15.82, mutualFund: 12.45, retail: 28.49 },
+    ],
+  },
+  {
+    symbol: 'BANDHANBNK',
+    companyName: 'Bandhan Bank',
+    history: [
+      { quarter: 'Mar 2026', promoter: 39.98, fii: 19.52, dii: 14.85, mutualFund: 11.72, retail: 25.65 },
+    ],
+  },
+  // ═══════════════════════════════════════════
+  //  DEFENCE & PSU
+  // ═══════════════════════════════════════════
+  {
+    symbol: 'HAL',
+    companyName: 'Hindustan Aeronautics Ltd',
+    history: [
+      { quarter: 'Mar 2026', promoter: 71.64, fii: 10.52, dii: 8.45, mutualFund: 12.85, retail: 9.39 },
+    ],
+  },
+  {
+    symbol: 'BDL',
+    companyName: 'Bharat Dynamics Ltd',
+    history: [
+      { quarter: 'Mar 2026', promoter: 74.93, fii: 5.82, dii: 7.25, mutualFund: 8.42, retail: 12.00 },
+    ],
+  },
+  {
+    symbol: 'BEML',
+    companyName: 'BEML Ltd',
+    history: [
+      { quarter: 'Mar 2026', promoter: 54.03, fii: 8.52, dii: 12.45, mutualFund: 10.28, retail: 25.00 },
+    ],
+  },
+  {
+    symbol: 'COCHINSHIP',
+    companyName: 'Cochin Shipyard Ltd',
+    history: [
+      { quarter: 'Mar 2026', promoter: 72.86, fii: 4.52, dii: 8.85, mutualFund: 6.42, retail: 13.77 },
+    ],
+  },
+  {
+    symbol: 'IRFC',
+    companyName: 'Indian Railway Finance Corp',
+    history: [
+      { quarter: 'Mar 2026', promoter: 86.36, fii: 2.82, dii: 4.25, mutualFund: 3.15, retail: 6.57 },
+    ],
+  },
+  {
+    symbol: 'IRCTC',
+    companyName: 'Indian Railway Catering & Tourism',
+    history: [
+      { quarter: 'Mar 2026', promoter: 62.40, fii: 10.85, dii: 8.52, mutualFund: 11.42, retail: 18.23 },
+    ],
+  },
+  {
+    symbol: 'RECLTD',
+    companyName: 'REC Ltd',
+    history: [
+      { quarter: 'Mar 2026', promoter: 52.63, fii: 8.42, dii: 18.52, mutualFund: 14.85, retail: 20.43 },
+    ],
+  },
+  {
+    symbol: 'PFC',
+    companyName: 'Power Finance Corp',
+    history: [
+      { quarter: 'Mar 2026', promoter: 55.99, fii: 7.82, dii: 17.25, mutualFund: 13.42, retail: 18.94 },
+    ],
+  },
+  {
+    symbol: 'NHPC',
+    companyName: 'NHPC Ltd',
+    history: [
+      { quarter: 'Mar 2026', promoter: 70.95, fii: 5.82, dii: 10.25, mutualFund: 7.42, retail: 12.98 },
+    ],
+  },
+  {
+    symbol: 'SAIL',
+    companyName: 'Steel Authority of India',
+    history: [
+      { quarter: 'Mar 2026', promoter: 65.00, fii: 4.52, dii: 12.85, mutualFund: 8.42, retail: 17.63 },
+    ],
+  },
+  {
+    symbol: 'GAIL',
+    companyName: 'GAIL India Ltd',
+    history: [
+      { quarter: 'Mar 2026', promoter: 51.92, fii: 12.45, dii: 16.82, mutualFund: 11.52, retail: 18.81 },
+    ],
+  },
+  {
+    symbol: 'HINDPETRO',
+    companyName: 'Hindustan Petroleum Corp',
+    history: [
+      { quarter: 'Mar 2026', promoter: 54.90, fii: 8.82, dii: 15.52, mutualFund: 10.85, retail: 20.76 },
+    ],
+  },
+  {
+    symbol: 'IOC',
+    companyName: 'Indian Oil Corporation',
+    history: [
+      { quarter: 'Mar 2026', promoter: 51.50, fii: 7.25, dii: 18.82, mutualFund: 12.52, retail: 22.43 },
+    ],
+  },
+  {
+    symbol: 'TATAPOWER',
+    companyName: 'Tata Power Company',
+    history: [
+      { quarter: 'Mar 2026', promoter: 46.86, fii: 14.52, dii: 12.85, mutualFund: 10.42, retail: 25.77 },
+    ],
+  },
+  {
+    symbol: 'IDBI',
+    companyName: 'IDBI Bank',
+    history: [
+      { quarter: 'Mar 2026', promoter: 94.72, fii: 0.82, dii: 1.52, mutualFund: 0.45, retail: 2.94 },
+    ],
+  },
+  // ═══════════════════════════════════════════
+  //  INSURANCE & FINANCE
+  // ═══════════════════════════════════════════
+  {
+    symbol: 'LICI',
+    companyName: 'Life Insurance Corp of India',
+    history: [
+      { quarter: 'Mar 2026', promoter: 96.50, fii: 0.82, dii: 0.52, mutualFund: 0.28, retail: 1.88 },
+    ],
+  },
+  {
+    symbol: 'GICRE',
+    companyName: 'General Insurance Corp',
+    history: [
+      { quarter: 'Mar 2026', promoter: 85.78, fii: 2.82, dii: 4.52, mutualFund: 2.85, retail: 6.88 },
+    ],
+  },
+  {
+    symbol: 'NIACL',
+    companyName: 'New India Assurance',
+    history: [
+      { quarter: 'Mar 2026', promoter: 85.44, fii: 1.52, dii: 5.82, mutualFund: 3.42, retail: 7.22 },
+    ],
+  },
+  // ═══════════════════════════════════════════
+  //  OTHER POPULAR STOCKS
+  // ═══════════════════════════════════════════
+  {
+    symbol: 'VEDL',
+    companyName: 'Vedanta Ltd',
+    history: [
+      { quarter: 'Mar 2026', promoter: 56.38, fii: 12.85, dii: 10.52, mutualFund: 8.42, retail: 20.25 },
+    ],
+  },
+  {
+    symbol: 'TECHM',
+    companyName: 'Tech Mahindra',
+    history: [
+      { quarter: 'Mar 2026', promoter: 35.22, fii: 22.85, dii: 12.52, mutualFund: 14.42, retail: 29.41 },
+    ],
+  },
+  {
+    symbol: 'IDEA',
+    companyName: 'Vodafone Idea',
+    history: [
+      { quarter: 'Mar 2026', promoter: 37.27, fii: 8.52, dii: 5.82, mutualFund: 2.42, retail: 48.39 },
+    ],
+  },
+  {
+    symbol: 'YESBANK',
+    companyName: 'Yes Bank',
+    history: [
+      { quarter: 'Mar 2026', promoter: 0, fii: 15.82, dii: 22.52, mutualFund: 14.85, retail: 46.81 },
+    ],
+  },
+  {
+    symbol: 'ZOMATO',
+    companyName: 'Zomato Ltd',
+    history: [
+      { quarter: 'Mar 2026', promoter: 0, fii: 38.52, dii: 15.82, mutualFund: 18.42, retail: 27.24 },
+    ],
+  },
+  {
+    symbol: 'JIOFIN',
+    companyName: 'Jio Financial Services',
+    history: [
+      { quarter: 'Mar 2026', promoter: 47.12, fii: 18.52, dii: 10.82, mutualFund: 8.42, retail: 23.54 },
+    ],
+  },
+  {
+    symbol: 'DMART',
+    companyName: 'Avenue Supermarts (DMart)',
+    history: [
+      { quarter: 'Mar 2026', promoter: 74.65, fii: 8.52, dii: 5.82, mutualFund: 7.42, retail: 11.01 },
+    ],
+  },
+  {
+    symbol: 'TRENT',
+    companyName: 'Trent Ltd',
+    history: [
+      { quarter: 'Mar 2026', promoter: 36.96, fii: 22.52, dii: 14.85, mutualFund: 12.42, retail: 25.67 },
+    ],
+  },
+  {
+    symbol: 'PIIND',
+    companyName: 'PI Industries',
+    history: [
+      { quarter: 'Mar 2026', promoter: 46.09, fii: 18.52, dii: 12.82, mutualFund: 10.42, retail: 22.57 },
+    ],
+  },
+  {
+    symbol: 'POLYCAB',
+    companyName: 'Polycab India',
+    history: [
+      { quarter: 'Mar 2026', promoter: 66.09, fii: 10.52, dii: 8.82, mutualFund: 11.42, retail: 14.57 },
+    ],
+  },
+  {
+    symbol: 'PERSISTENT',
+    companyName: 'Persistent Systems',
+    history: [
+      { quarter: 'Mar 2026', promoter: 31.15, fii: 22.52, dii: 14.82, mutualFund: 16.42, retail: 31.51 },
+    ],
+  },
 ];
 
 /**

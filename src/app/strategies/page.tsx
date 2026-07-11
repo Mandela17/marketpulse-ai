@@ -278,10 +278,9 @@ const STRATEGIES: StrategyDef[] = [
     holdingPeriod: '15–60 days',
     winRate: '65–72%',
     riskReward: '1:2',
-    description: 'The ultimate quality filter: promoter-backed (>65%), MF-validated (>10%), and positive returns across ALL timeframes — 6M, 1Y, 5Y, and All-Time. These are true compounders that only go up over time.',
+    description: 'Quality filter: promoter-backed (>65%) OR MF-validated (>10%), with positive returns across ALL timeframes — 6M, 1Y, 5Y, and All-Time. True compounders.',
     rules: [
-      'Promoter Holding > 65% (founder conviction)',
-      'Mutual Fund Holding > 10% (institutional stamp)',
+      'Promoter Holding > 65% OR Mutual Fund > 10%',
       '6-Month Return positive',
       '1-Year Return positive',
       '5-Year Return positive',
@@ -299,10 +298,9 @@ const STRATEGIES: StrategyDef[] = [
     holdingPeriod: '15–60 days',
     winRate: '68–75%',
     riskReward: '1:2.5',
-    description: 'Like Evergreen Compounder but uses 10-Year return instead of All-Time. Filters for stocks with strong promoter backing, institutional stamp, and consistent positive returns across 6M, 1Y, 5Y, and 10Y.',
+    description: 'Like Evergreen but uses 10-Year return. Promoter-backed (>65%) OR MF-validated (>10%), with positive returns across 6M, 1Y, 5Y, and 10Y.',
     rules: [
-      'Promoter Holding > 65% (founder conviction)',
-      'Mutual Fund Holding > 10% (institutional stamp)',
+      'Promoter Holding > 65% OR Mutual Fund > 10%',
       '6-Month Return positive',
       '1-Year Return positive',
       '5-Year Return positive',
@@ -311,6 +309,25 @@ const STRATEGIES: StrategyDef[] = [
     keyIndicators: ['Promoter %', 'MF %', '6M Return', '1Y Return', '5Y Return', '10Y Return'],
     gradient: 'linear-gradient(135deg, #0ea5e9, #0369a1)',
     accentColor: '#0ea5e9',
+  },
+  {
+    id: 16,
+    name: 'Mid-Term Compounder',
+    type: 'Fundamental',
+    icon: '⏳',
+    holdingPeriod: '15–60 days',
+    winRate: '70–78%',
+    riskReward: '1:2',
+    description: 'Promoter-backed (>65%) OR MF-validated (>10%), with positive returns across 6M, 1Y, and 6Y. Stocks with a proven 6-year track record.',
+    rules: [
+      'Promoter Holding > 65% OR Mutual Fund > 10%',
+      '6-Month Return positive',
+      '1-Year Return positive',
+      '6-Year Return positive',
+    ],
+    keyIndicators: ['Promoter %', 'MF %', '6M Return', '1Y Return', '6Y Return'],
+    gradient: 'linear-gradient(135deg, #f59e0b, #d97706)',
+    accentColor: '#f59e0b',
   },
 ];
 
@@ -353,24 +370,17 @@ export default function StrategiesPage() {
   const [expandedCard, setExpandedCard] = useState<number | null>(null);
   const [loadingCached, setLoadingCached] = useState(true);
 
-  // Auto-load cached results from DB on mount
+  // Auto-load cached results from DB on mount (single fast query)
   useEffect(() => {
     async function loadCachedResults() {
       try {
-        const promises = STRATEGIES.map(async (s) => {
-          try {
-            const res = await fetch(`/api/strategies/screen?strategy=${s.id}`);
-            if (res.ok) {
-              const data: ScreenResult = await res.json();
-              if (data.cached && data.matchCount > 0) return { id: s.id, data };
-            }
-          } catch { /* ignore */ }
-          return null;
-        });
-        const results = await Promise.all(promises);
-        const cached: Record<number, ScreenResult> = {};
-        results.forEach((r) => { if (r) cached[r.id] = r.data; });
-        setResults(cached);
+        const res = await fetch('/api/strategies/cached');
+        if (res.ok) {
+          const { cached } = await res.json();
+          if (cached && Object.keys(cached).length > 0) {
+            setResults(cached);
+          }
+        }
       } catch { /* ignore */ } finally {
         setLoadingCached(false);
       }
@@ -426,7 +436,7 @@ export default function StrategiesPage() {
             </h1>
           </div>
           <p style={{ color: 'var(--text-secondary)', fontSize: 15, margin: 0, maxWidth: 700 }}>
-            15 battle-tested swing trading strategies scanning <strong style={{ color: '#a78bfa' }}>500+ NSE stocks</strong> across
+            16 battle-tested swing trading strategies scanning <strong style={{ color: '#a78bfa' }}>500+ NSE stocks</strong> across
             large-cap, mid-cap, and small-cap to find hidden gems using live OHLCV + shareholding data.
           </p>
         </div>
