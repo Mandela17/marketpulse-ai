@@ -41,6 +41,8 @@ export interface PaperPosition {
   qty: number;
   avgPrice: number;
   totalInvested: number;
+  stopLoss?: number;
+  target?: number;
   orders: PaperOrder[];   // BUY orders that make up this position
 }
 
@@ -190,11 +192,15 @@ export function getOpenPositions(state: PaperTradingState): PaperPosition[] {
   const positions: PaperPosition[] = [];
   for (const [symbol, data] of posMap) {
     if (data.qty > 0) {
+      // Get SL/Target from the most recent order that has them
+      const orderWithSL = [...data.orders].reverse().find(o => o.stopLoss || o.target);
       positions.push({
         symbol,
         qty: data.qty,
         avgPrice: data.totalCost / data.qty,
         totalInvested: data.totalCost,
+        stopLoss: orderWithSL?.stopLoss,
+        target: orderWithSL?.target,
         orders: data.orders,
       });
     }

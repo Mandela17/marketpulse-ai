@@ -521,14 +521,15 @@ export default function PaperTradingPage() {
             </div>
           ) : (
             <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' as any }}>
-              <table style={{ width: '100%', minWidth: 600, borderCollapse: 'collapse' }}>
+              <table style={{ width: '100%', minWidth: 750, borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
-                    {['Symbol', 'Qty', 'Avg Price', 'LTP', 'P&L', 'P&L %', 'Action'].map(h => (
+                    {['Symbol', 'Qty', 'Avg Price', 'SL', 'Target', 'LTP', 'P&L', 'P&L %', 'Action'].map(h => (
                       <th key={h} style={{
-                        padding: '10px 14px', fontSize: 10, fontWeight: 700,
+                        padding: '10px 12px', fontSize: 10, fontWeight: 700,
                         textTransform: 'uppercase', letterSpacing: '0.05em',
-                        color: 'var(--text-muted)', textAlign: h === 'Action' ? 'right' : 'left',
+                        color: h === 'SL' ? 'rgba(255,77,106,0.7)' : h === 'Target' ? 'rgba(16,185,129,0.7)' : 'var(--text-muted)',
+                        textAlign: h === 'Action' ? 'right' : 'left',
                       }}>{h}</th>
                     ))}
                   </tr>
@@ -536,21 +537,27 @@ export default function PaperTradingPage() {
                 <tbody>
                   {positions.map(pos => (
                     <tr key={pos.symbol} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                      <td style={{ padding: '12px 14px' }}>
+                      <td style={{ padding: '12px 12px' }}>
                         <Link href={`/stock/${pos.symbol}`} style={{ fontWeight: 700, color: 'var(--accent-blue)', fontSize: 14 }}>
                           {pos.symbol}
                         </Link>
                       </td>
-                      <td style={{ padding: '12px 14px', fontWeight: 600, color: 'var(--text-primary)', fontSize: 13 }}>{pos.qty}</td>
-                      <td style={{ padding: '12px 14px', fontSize: 13, color: 'var(--text-secondary)' }}>₹{fmt(pos.avgPrice)}</td>
-                      <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>₹{fmt(pos.currentPrice)}</td>
-                      <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700, color: pnlColor(pos.unrealizedPnl) }}>
+                      <td style={{ padding: '12px 12px', fontWeight: 600, color: 'var(--text-primary)', fontSize: 13 }}>{pos.qty}</td>
+                      <td style={{ padding: '12px 12px', fontSize: 13, color: 'var(--text-secondary)' }}>₹{fmt(pos.avgPrice)}</td>
+                      <td style={{ padding: '12px 12px', fontSize: 12, fontWeight: 600, color: 'var(--accent-red)' }}>
+                        {pos.stopLoss ? `₹${fmt(pos.stopLoss)}` : '—'}
+                      </td>
+                      <td style={{ padding: '12px 12px', fontSize: 12, fontWeight: 600, color: 'var(--accent-green)' }}>
+                        {pos.target ? `₹${fmt(pos.target)}` : '—'}
+                      </td>
+                      <td style={{ padding: '12px 12px', fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>₹{fmt(pos.currentPrice)}</td>
+                      <td style={{ padding: '12px 12px', fontSize: 13, fontWeight: 700, color: pnlColor(pos.unrealizedPnl) }}>
                         {pnlSign(pos.unrealizedPnl)}₹{fmt(Math.abs(pos.unrealizedPnl))}
                       </td>
-                      <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700, color: pnlColor(pos.unrealizedPnlPercent) }}>
+                      <td style={{ padding: '12px 12px', fontSize: 13, fontWeight: 700, color: pnlColor(pos.unrealizedPnlPercent) }}>
                         {pnlSign(pos.unrealizedPnlPercent)}{pos.unrealizedPnlPercent.toFixed(2)}%
                       </td>
-                      <td style={{ padding: '12px 14px', textAlign: 'right' }}>
+                      <td style={{ padding: '12px 12px', textAlign: 'right' }}>
                         <button onClick={() => closePosition(pos)}
                           style={{
                             fontSize: 11, padding: '6px 14px', borderRadius: 8, fontWeight: 700,
