@@ -596,13 +596,18 @@ export async function runAutoPaperTrade(predictions: any[]): Promise<AutoTradeRe
         continue;
       }
 
-      // Position sizing: risk% of portfolio per trade
+      // Position sizing: risk% of portfolio per trade, capped at portfolio/maxPositions
       const latestState = loadPaperState();
       const stats = getPaperStats(latestState);
       const riskAmount = (stats.portfolioValue * config.riskPerTrade) / 100;
       const slPrice = price * (1 - config.slPercent / 100);
       const riskPerShare = price - slPrice;
-      const qty = Math.max(1, Math.floor(riskAmount / riskPerShare));
+      const qtyByRisk = Math.max(1, Math.floor(riskAmount / riskPerShare));
+
+      // Cap position size so we can hold maxPositions simultaneously
+      const maxPositionValue = stats.portfolioValue / config.maxPositions;
+      const qtyByCap = Math.max(1, Math.floor(maxPositionValue / price));
+      const qty = Math.min(qtyByRisk, qtyByCap);
 
       // Check if we can afford it
       const orderValue = price * qty;
