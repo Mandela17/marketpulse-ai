@@ -6,7 +6,7 @@ import BacktestCard from '@/components/BacktestCard';
 import AccuracyTrendChart from '@/components/AccuracyTrendChart';
 import {
   getAutoTradeConfig, saveAutoTradeConfig, runAutoPaperTrade,
-  hasAutoTradedToday, getAutoTradeLog, autoClosePositions,
+  hasAutoTradedToday, clearTodayAutoTrade, getAutoTradeLog, autoClosePositions,
   AutoTradeConfig, AutoTradeResult,
 } from '@/lib/paperTradingStore';
 
@@ -119,6 +119,8 @@ export default function PredictionsDashboard() {
     setAutoTrading(true);
     setAutoTradeResult(null);
     try {
+      // Clear today's flag so re-run works (e.g. after reset or "Run again")
+      clearTodayAutoTrade();
       const result = await runAutoPaperTrade(activePredictions);
       setAutoTradeResult(result);
     } catch (err: any) {

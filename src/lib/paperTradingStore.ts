@@ -155,6 +155,10 @@ export function createFreshState(): PaperTradingState {
 export function resetPaperAccount(): PaperTradingState {
   const fresh = createFreshState();
   savePaperState(fresh);
+  // Also clear the auto-trade log so user can run again after reset
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem(AUTO_TRADE_LOG_KEY);
+  }
   return fresh;
 }
 
@@ -462,6 +466,14 @@ function todayDate(): string {
 export function hasAutoTradedToday(): boolean {
   const log = getAutoTradeLog();
   return log.some(e => e.date === todayDate());
+}
+
+export function clearTodayAutoTrade(): void {
+  const log = getAutoTradeLog();
+  const filtered = log.filter(e => e.date !== todayDate());
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(AUTO_TRADE_LOG_KEY, JSON.stringify(filtered));
+  }
 }
 
 // ─── Auto-close positions that hit SL or Target ──────────────────────
