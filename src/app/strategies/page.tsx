@@ -278,7 +278,28 @@ const STRATEGIES: StrategyDef[] = [
     holdingPeriod: '15–60 days',
     winRate: '65–72%',
     riskReward: '1:2',
-    description: 'The ultimate quality filter: promoter-backed (>65%), MF-validated (>10%), and positive returns across ALL timeframes — 6M, 1Y, 5Y, and 10Y. These are true compounders that only go up over time.',
+    description: 'The ultimate quality filter: promoter-backed (>65%), MF-validated (>10%), and positive returns across ALL timeframes — 6M, 1Y, 5Y, and All-Time. These are true compounders that only go up over time.',
+    rules: [
+      'Promoter Holding > 65% (founder conviction)',
+      'Mutual Fund Holding > 10% (institutional stamp)',
+      '6-Month Return positive',
+      '1-Year Return positive',
+      '5-Year Return positive',
+      'All-Time Return positive (IPO to now)',
+    ],
+    keyIndicators: ['Promoter %', 'MF %', '6M Return', '1Y Return', '5Y Return', 'All-Time'],
+    gradient: 'linear-gradient(135deg, #22c55e, #15803d)',
+    accentColor: '#22c55e',
+  },
+  {
+    id: 15,
+    name: 'Decade Compounder',
+    type: 'Fundamental',
+    icon: '📅',
+    holdingPeriod: '15–60 days',
+    winRate: '68–75%',
+    riskReward: '1:2.5',
+    description: 'Like Evergreen Compounder but uses 10-Year return instead of All-Time. Filters for stocks with strong promoter backing, institutional stamp, and consistent positive returns across 6M, 1Y, 5Y, and 10Y.',
     rules: [
       'Promoter Holding > 65% (founder conviction)',
       'Mutual Fund Holding > 10% (institutional stamp)',
@@ -288,8 +309,8 @@ const STRATEGIES: StrategyDef[] = [
       '10-Year Return positive',
     ],
     keyIndicators: ['Promoter %', 'MF %', '6M Return', '1Y Return', '5Y Return', '10Y Return'],
-    gradient: 'linear-gradient(135deg, #22c55e, #15803d)',
-    accentColor: '#22c55e',
+    gradient: 'linear-gradient(135deg, #0ea5e9, #0369a1)',
+    accentColor: '#0ea5e9',
   },
 ];
 
@@ -405,7 +426,7 @@ export default function StrategiesPage() {
             </h1>
           </div>
           <p style={{ color: 'var(--text-secondary)', fontSize: 15, margin: 0, maxWidth: 700 }}>
-            14 battle-tested swing trading strategies scanning <strong style={{ color: '#a78bfa' }}>500+ NSE stocks</strong> across
+            15 battle-tested swing trading strategies scanning <strong style={{ color: '#a78bfa' }}>500+ NSE stocks</strong> across
             large-cap, mid-cap, and small-cap to find hidden gems using live OHLCV + shareholding data.
           </p>
         </div>

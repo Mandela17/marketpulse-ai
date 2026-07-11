@@ -1016,23 +1016,77 @@ async function screenEvergreenCompounder(data: ScreenData): Promise<StrategyMatc
     return null;
   }
 
-  // Rule 6: 10-Year return positive (fetch 10-year data)
+  // Rule 6: All-Time return positive (fetch max data)
   try {
-    const ohlcv10Y = await fetchHistoricalOHLCV(symbol, 2520); // ~10 years
+    const ohlcvMax = await fetchHistoricalOHLCV(symbol, 9999); // range=max
+    if (ohlcvMax.length >= 1260) {
+      const ipo = ohlcvMax[0].close;
+      const retAllTime = ((price - ipo) / ipo) * 100;
+      if (retAllTime > 0) { score += 20; signals.push(`All-Time Return: +${retAllTime.toFixed(0)}% (since ${ohlcvMax[0].date})`); }
+      else return null;
+    } else {
+      score += 10; signals.push(`All-Time: limited history available`);
+    }
+  } catch {
+    score += 5; signals.push(`All-Time: data unavailable`);
+  }
+
+  return {
+    symbol,
+    price,
+    entry: price,
+    target: parseFloat((price * 1.10).toFixed(2)),
+    stopLoss: parseFloat((price * 0.95).toFixed(2)),
+    signalStrength: Math.min(100, score),
+    signals,
+  };
+}
+
+// ─── Strategy 15: Decade Compounder ─────────────────────────────────
+// Same as Evergreen but uses 10-Year instead of All-Time
+async function screenDecadeCompounder(data: ScreenData): Promise<StrategyMatch | null> {
+  const { symbol, price, promoterHolding, mutualFundHolding, return6M, return1Y } = data;
+  if (promoterHolding <= 0) return null;
+
+  const signals: string[] = [];
+  let score = 0;
+
+  if (promoterHolding >= 65) { score += 15; signals.push(`Promoter: ${promoterHolding.toFixed(1)}% (>65%)`); }
+  else return null;
+  if (mutualFundHolding >= 10) { score += 15; signals.push(`MF Holding: ${mutualFundHolding.toFixed(1)}% (>10%)`); }
+  else return null;
+  if (return6M > 0) { score += 15; signals.push(`6M Return: +${return6M.toFixed(1)}%`); }
+  else return null;
+  if (return1Y > 0) { score += 15; signals.push(`1Y Return: +${return1Y.toFixed(1)}%`); }
+  else return null;
+
+  // 5Y return
+  try {
+    const ohlcv5Y = await fetchHistoricalOHLCV(symbol, 1260);
+    if (ohlcv5Y.length >= 1000) {
+      const ret5Y = ((price - ohlcv5Y[0].close) / ohlcv5Y[0].close) * 100;
+      if (ret5Y > 0) { score += 15; signals.push(`5Y Return: +${ret5Y.toFixed(1)}%`); }
+      else return null;
+    } else if (ohlcv5Y.length >= 500) {
+      const retAvail = ((price - ohlcv5Y[0].close) / ohlcv5Y[0].close) * 100;
+      if (retAvail > 0) { score += 10; signals.push(`${(ohlcv5Y.length / 252).toFixed(1)}Y Return: +${retAvail.toFixed(1)}%`); }
+      else return null;
+    } else return null;
+  } catch { return null; }
+
+  // 10Y return
+  try {
+    const ohlcv10Y = await fetchHistoricalOHLCV(symbol, 2520);
     if (ohlcv10Y.length >= 2000) {
-      const oldPrice10Y = ohlcv10Y[0].close;
-      const ret10Y = ((price - oldPrice10Y) / oldPrice10Y) * 100;
-      if (ret10Y > 0) { score += 20; signals.push(`10Y Return: +${ret10Y.toFixed(0)}% (since ${ohlcv10Y[0].date})`); }
+      const ret10Y = ((price - ohlcv10Y[0].close) / ohlcv10Y[0].close) * 100;
+      if (ret10Y > 0) { score += 25; signals.push(`10Y Return: +${ret10Y.toFixed(0)}% (since ${ohlcv10Y[0].date})`); }
       else return null;
     } else if (ohlcv10Y.length >= 1260) {
-      // Less than 10Y but at least ~5Y — use what we have
-      const oldPrice = ohlcv10Y[0].close;
-      const retAvail = ((price - oldPrice) / oldPrice) * 100;
+      const retAvail = ((price - ohlcv10Y[0].close) / ohlcv10Y[0].close) * 100;
       const years = (ohlcv10Y.length / 252).toFixed(0);
       if (retAvail > 0) { score += 15; signals.push(`${years}Y Return: +${retAvail.toFixed(0)}%`); }
       else return null;
     } else {
-      // Not enough for 10Y, but 5Y already checked — give partial credit
       score += 10; signals.push(`10Y: limited history (${(ohlcv10Y.length / 252).toFixed(1)}Y available)`);
     }
   } catch {
@@ -1070,6 +1124,7 @@ const SYNC_STRATEGY_FILTERS: Record<number, (data: ScreenData) => StrategyMatch 
 const ASYNC_STRATEGY_FILTERS: Record<number, (data: ScreenData) => Promise<StrategyMatch | null>> = {
   9: screenOversoldQuality,
   14: screenEvergreenCompounder,
+  15: screenDecadeCompounder,
 };
 
 function getFilterFn(id: number): ((data: ScreenData) => StrategyMatch | null | Promise<StrategyMatch | null>) | null {
@@ -1082,9 +1137,9 @@ export async function GET(request: Request) {
   const strategyId = parseInt(searchParams.get('strategy') || '0');
   const forceRescan = searchParams.get('force') === 'true';
 
-  if (strategyId < 1 || strategyId > 14) {
+  if (strategyId < 1 || strategyId > 15) {
     return NextResponse.json(
-      { error: 'Invalid strategy ID. Must be 1-14.' },
+      { error: 'Invalid strategy ID. Must be 1-15.' },
       { status: 400 }
     );
   }
@@ -1139,7 +1194,7 @@ export async function GET(request: Request) {
 
     // For shareholding strategies (11-14), pre-filter to stocks with shareholding data
     // This avoids fetching OHLCV for ~450 stocks that will be rejected anyway
-    const SHAREHOLDING_STRATEGIES = [11, 12, 13, 14];
+    const SHAREHOLDING_STRATEGIES = [11, 12, 13, 14, 15];
     let stocksToScan = SCREEN_STOCKS;
 
     if (SHAREHOLDING_STRATEGIES.includes(strategyId)) {
