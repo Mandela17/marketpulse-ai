@@ -12,6 +12,7 @@ import {
   calculateVolumeProfile,
   type OHLCV,
 } from '@/lib/technicalAnalysis';
+import { getLatestShareholding } from '@/lib/shareholdingData';
 import { toYahooTicker } from '@/lib/symbolMap';
 
 export const dynamic = 'force-dynamic';
@@ -193,6 +194,14 @@ interface ScreenData {
   dayHigh: number;
   dayLow: number;
   fundamentals: RealFundamentals | null;
+  // Shareholding data
+  promoterHolding: number;
+  mutualFundHolding: number;
+  diiHolding: number;
+  retailHolding: number;
+  // Multi-timeframe returns
+  return6M: number;  // 6-month return %
+  return1Y: number;  // 1-year return %
 }
 
 async function computeScreenData(symbol: string): Promise<ScreenData | null> {
@@ -234,7 +243,7 @@ async function computeScreenData(symbol: string): Promise<ScreenData | null> {
     const bb = calculateBollingerBands(closes, 20, 2);
     const volProfile = calculateVolumeProfile(volumes);
 
-    return {
+    const screenData: ScreenData = {
       symbol,
       price: parseFloat(price.toFixed(2)),
       ohlcv,
@@ -262,8 +271,36 @@ async function computeScreenData(symbol: string): Promise<ScreenData | null> {
       priceChange5D: close5DAgo > 0 ? parseFloat((((price - close5DAgo) / close5DAgo) * 100).toFixed(2)) : 0,
       dayHigh: highs[highs.length - 1],
       dayLow: lows[lows.length - 1],
-      fundamentals: null, // Will be populated on-demand by strategies that need it
+      fundamentals: null,
+      promoterHolding: 0,
+      mutualFundHolding: 0,
+      diiHolding: 0,
+      retailHolding: 0,
+      return6M: 0,
+      return1Y: 0,
     };
+
+    // Populate shareholding data if available
+    const sh = getLatestShareholding(symbol);
+    if (sh) {
+      screenData.promoterHolding = sh.promoter;
+      screenData.mutualFundHolding = sh.mutualFund;
+      screenData.diiHolding = sh.dii;
+      screenData.retailHolding = sh.retail;
+    }
+
+    // Compute multi-timeframe returns
+    const len = closes.length;
+    if (len >= 126) {
+      screenData.return6M = ((price - closes[len - 126]) / closes[len - 126]) * 100;
+    }
+    if (len >= 250) {
+      screenData.return1Y = ((price - closes[0]) / closes[0]) * 100;
+    } else if (len >= 200) {
+      screenData.return1Y = ((price - closes[0]) / closes[0]) * 100;
+    }
+
+    return screenData;
   } catch {
     return null;
   }
@@ -643,6 +680,128 @@ function screenInstitutionalAccumulation(data: ScreenData): StrategyMatch | null
   };
 }
 
+// ─── Strategy 11: Promoter Conviction Uptrend ──────────────────────
+function screenPromoterConviction(data: ScreenData): StrategyMatch | null {
+  const { symbol, price, promoterHolding, mutualFundHolding, return6M, return1Y, ema50 } = data;
+
+  // Must have shareholding data
+  if (promoterHolding <= 0) return null;
+
+  const signals: string[] = [];
+  let score = 0;
+
+  // Rule 1: Promoter > 65%
+  if (promoterHolding >= 65) { score += 25; signals.push(`Promoter: ${promoterHolding.toFixed(1)}% (>65%)`); }
+  else return null;
+
+  // Rule 2: MF > 10%
+  if (mutualFundHolding >= 10) { score += 20; signals.push(`MF Holding: ${mutualFundHolding.toFixed(1)}% (>10%)`); }
+  else if (mutualFundHolding >= 7) { score += 10; signals.push(`MF Holding: ${mutualFundHolding.toFixed(1)}% (near 10%)`); }
+  else return null;
+
+  // Rule 3: 6M return positive
+  if (return6M > 0) { score += 20; signals.push(`6M Return: +${return6M.toFixed(1)}%`); }
+  else return null;
+
+  // Rule 4: 1Y return positive
+  if (return1Y > 0) { score += 15; signals.push(`1Y Return: +${return1Y.toFixed(1)}%`); }
+  else return null;
+
+  // Rule 5: Price above EMA 50
+  if (price > ema50) { score += 20; signals.push(`Price ₹${price} > EMA50 ₹${ema50}`); }
+  else return null;
+
+  return {
+    symbol,
+    price,
+    entry: price,
+    target: parseFloat((price * 1.08).toFixed(2)),
+    stopLoss: parseFloat((price * 0.96).toFixed(2)),
+    signalStrength: Math.min(100, score),
+    signals,
+  };
+}
+
+// ─── Strategy 12: Smart Money Momentum ─────────────────────────────
+function screenSmartMoneyMomentum(data: ScreenData): StrategyMatch | null {
+  const { symbol, price, mutualFundHolding, diiHolding, rsi, ema20, ema50, volumeRatio } = data;
+
+  const signals: string[] = [];
+  let score = 0;
+
+  // Rule 1: MF > 8%
+  if (mutualFundHolding >= 8) { score += 20; signals.push(`MF Holding: ${mutualFundHolding.toFixed(1)}% (>8%)`); }
+  else return null;
+
+  // Rule 2: DII > 15%
+  if (diiHolding >= 15) { score += 20; signals.push(`DII Holding: ${diiHolding.toFixed(1)}% (>15%)`); }
+  else return null;
+
+  // Rule 3: RSI 50-75
+  if (rsi >= 50 && rsi <= 75) { score += 20; signals.push(`RSI: ${rsi.toFixed(1)} (momentum zone)`); }
+  else return null;
+
+  // Rule 4: EMA 20 > EMA 50
+  if (ema20 > ema50) { score += 20; signals.push(`EMA20 ₹${ema20} > EMA50 ₹${ema50} (uptrend)`); }
+  else return null;
+
+  // Rule 5: Volume > 1.0x average
+  if (volumeRatio >= 1.0) { score += 20; signals.push(`Volume: ${volumeRatio.toFixed(2)}x avg`); }
+  else { score += 5; signals.push(`Volume: ${volumeRatio.toFixed(2)}x avg (below avg)`); }
+
+  return {
+    symbol,
+    price,
+    entry: price,
+    target: parseFloat((price * 1.06).toFixed(2)),
+    stopLoss: parseFloat((price * 0.97).toFixed(2)),
+    signalStrength: Math.min(100, score),
+    signals,
+  };
+}
+
+// ─── Strategy 13: High Promoter Breakout ────────────────────────────
+function screenHighPromoterBreakout(data: ScreenData): StrategyMatch | null {
+  const { symbol, price, promoterHolding, high52W, rsi, volumeRatio, bbWidth } = data;
+
+  // Must have shareholding data
+  if (promoterHolding <= 0) return null;
+
+  const signals: string[] = [];
+  let score = 0;
+  const distFrom52W = ((high52W - price) / high52W) * 100;
+
+  // Rule 1: Promoter > 55%
+  if (promoterHolding >= 55) { score += 20; signals.push(`Promoter: ${promoterHolding.toFixed(1)}% (>55%)`); }
+  else return null;
+
+  // Rule 2: Within 8% of 52W high
+  if (distFrom52W <= 8) { score += 25; signals.push(`${distFrom52W.toFixed(1)}% from 52W High ₹${high52W.toFixed(0)}`); }
+  else return null;
+
+  // Rule 3: RSI 55-80
+  if (rsi >= 55 && rsi <= 80) { score += 20; signals.push(`RSI: ${rsi.toFixed(1)} (strong momentum)`); }
+  else return null;
+
+  // Rule 4: Volume > 1.2x
+  if (volumeRatio >= 1.2) { score += 20; signals.push(`Volume: ${volumeRatio.toFixed(2)}x avg (breakout)`); }
+  else return null;
+
+  // Rule 5: BB Width < 12%
+  if (bbWidth < 12) { score += 15; signals.push(`BB Width: ${bbWidth.toFixed(1)}% (consolidation)`); }
+  else { score += 5; signals.push(`BB Width: ${bbWidth.toFixed(1)}%`); }
+
+  return {
+    symbol,
+    price,
+    entry: price,
+    target: parseFloat((high52W * 1.05).toFixed(2)),
+    stopLoss: parseFloat((price * 0.95).toFixed(2)),
+    signalStrength: Math.min(100, score),
+    signals,
+  };
+}
+
 // ─── Strategy dispatcher ────────────────────────────────────────────
 // Strategy 9 is async (fetches real fundamentals), others are sync
 const SYNC_STRATEGY_FILTERS: Record<number, (data: ScreenData) => StrategyMatch | null> = {
@@ -655,6 +814,9 @@ const SYNC_STRATEGY_FILTERS: Record<number, (data: ScreenData) => StrategyMatch 
   7: screen52WeekHigh,
   8: screenMARibbon,
   10: screenInstitutionalAccumulation,
+  11: screenPromoterConviction,
+  12: screenSmartMoneyMomentum,
+  13: screenHighPromoterBreakout,
 };
 
 const ASYNC_STRATEGY_FILTERS: Record<number, (data: ScreenData) => Promise<StrategyMatch | null>> = {
@@ -670,9 +832,9 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const strategyId = parseInt(searchParams.get('strategy') || '0');
 
-  if (strategyId < 1 || strategyId > 10) {
+  if (strategyId < 1 || strategyId > 13) {
     return NextResponse.json(
-      { error: 'Invalid strategy ID. Must be 1-10.' },
+      { error: 'Invalid strategy ID. Must be 1-13.' },
       { status: 400 }
     );
   }

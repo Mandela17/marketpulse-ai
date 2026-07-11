@@ -7,7 +7,7 @@ import Link from 'next/link';
 interface StrategyDef {
   id: number;
   name: string;
-  type: 'Trend' | 'Reversal' | 'Breakout' | 'Value';
+  type: 'Trend' | 'Reversal' | 'Breakout' | 'Value' | 'Fundamental';
   icon: string;
   holdingPeriod: string;
   winRate: string;
@@ -210,6 +210,66 @@ const STRATEGIES: StrategyDef[] = [
     gradient: 'linear-gradient(135deg, #6366f1, #4f46e5)',
     accentColor: '#6366f1',
   },
+  {
+    id: 11,
+    name: 'Promoter Conviction Uptrend',
+    type: 'Fundamental',
+    icon: '🏛️',
+    holdingPeriod: '10–30 days',
+    winRate: '62–68%',
+    riskReward: '1:2.5',
+    description: 'High promoter skin-in-the-game (>65%) combined with strong MF backing (>10%) and multi-timeframe uptrend. When founders are heavily invested and institutions agree, the stock rarely disappoints.',
+    rules: [
+      'Promoter Holding > 65% (high conviction ownership)',
+      'Mutual Fund Holding > 10% (institutional validation)',
+      '6-Month Return positive (medium-term uptrend)',
+      '1-Year Return positive (long-term uptrend)',
+      'Price above EMA 50 (current trend intact)',
+    ],
+    keyIndicators: ['Promoter %', 'MF %', '6M Return', '1Y Return', 'EMA 50'],
+    gradient: 'linear-gradient(135deg, #d946ef, #a855f7)',
+    accentColor: '#d946ef',
+  },
+  {
+    id: 12,
+    name: 'Smart Money Momentum',
+    type: 'Trend',
+    icon: '📊',
+    holdingPeriod: '5–15 days',
+    winRate: '58–63%',
+    riskReward: '1:2',
+    description: 'Stocks where domestic institutions (MF + DII > 23%) have heavy ownership AND technical momentum is strong. Smart money doesn\'t chase — when they\'re in and momentum aligns, follow the flow.',
+    rules: [
+      'Mutual Fund Holding > 8% (strong fund interest)',
+      'DII Holding > 15% (domestic institutional backing)',
+      'RSI between 50–75 (momentum zone, not overbought)',
+      'EMA 20 > EMA 50 (confirmed uptrend)',
+      'Volume Ratio > 1.0x average (healthy participation)',
+    ],
+    keyIndicators: ['MF %', 'DII %', 'RSI', 'EMA 20/50', 'Volume'],
+    gradient: 'linear-gradient(135deg, #0ea5e9, #0284c7)',
+    accentColor: '#0ea5e9',
+  },
+  {
+    id: 13,
+    name: 'High Promoter Breakout',
+    type: 'Breakout',
+    icon: '💼',
+    holdingPeriod: '5–15 days',
+    winRate: '57–62%',
+    riskReward: '1:3',
+    description: 'Promoter-backed stocks (>55%) breaking out near 52W highs after consolidation. Low float + high conviction = explosive moves when the breakout triggers.',
+    rules: [
+      'Promoter Holding > 55% (strong ownership)',
+      'Price within 8% of 52-week high (breakout zone)',
+      'RSI between 55–80 (strong momentum)',
+      'Volume Ratio > 1.2x average (breakout volume)',
+      'Bollinger Width < 12% (recent consolidation)',
+    ],
+    keyIndicators: ['Promoter %', '52W High', 'RSI', 'Volume', 'BB Width'],
+    gradient: 'linear-gradient(135deg, #f97316, #ea580c)',
+    accentColor: '#f97316',
+  },
 ];
 
 // ─── Types ──────────────────────────────────────────────────────────
@@ -241,7 +301,7 @@ interface ScreenResult {
   cached?: boolean;
 }
 
-type FilterType = 'All' | 'Trend' | 'Reversal' | 'Breakout' | 'Value';
+type FilterType = 'All' | 'Trend' | 'Reversal' | 'Breakout' | 'Value' | 'Fundamental';
 
 // ─── Main Page Component ────────────────────────────────────────────
 export default function StrategiesPage() {
@@ -275,6 +335,7 @@ export default function StrategiesPage() {
     { label: 'Reversal', icon: '🔄' },
     { label: 'Breakout', icon: '💥' },
     { label: 'Value', icon: '💎' },
+    { label: 'Fundamental', icon: '🏛️' },
   ];
 
   return (
