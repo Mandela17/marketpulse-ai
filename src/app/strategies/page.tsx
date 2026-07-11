@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 
 // ─── Strategy Definitions ───────────────────────────────────────────
@@ -330,6 +330,32 @@ export default function StrategiesPage() {
   const [runningStrategy, setRunningStrategy] = useState<number | null>(null);
   const [results, setResults] = useState<Record<number, ScreenResult>>({});
   const [expandedCard, setExpandedCard] = useState<number | null>(null);
+  const [loadingCached, setLoadingCached] = useState(true);
+
+  // Auto-load cached results from DB on mount
+  useEffect(() => {
+    async function loadCachedResults() {
+      try {
+        const promises = STRATEGIES.map(async (s) => {
+          try {
+            const res = await fetch(`/api/strategies/screen?strategy=${s.id}`);
+            if (res.ok) {
+              const data: ScreenResult = await res.json();
+              if (data.cached && data.matchCount > 0) return { id: s.id, data };
+            }
+          } catch { /* ignore */ }
+          return null;
+        });
+        const results = await Promise.all(promises);
+        const cached: Record<number, ScreenResult> = {};
+        results.forEach((r) => { if (r) cached[r.id] = r.data; });
+        setResults(cached);
+      } catch { /* ignore */ } finally {
+        setLoadingCached(false);
+      }
+    }
+    loadCachedResults();
+  }, []);
 
   const filteredStrategies = STRATEGIES.filter(
     (s) => activeFilter === 'All' || s.type === activeFilter
@@ -340,7 +366,7 @@ export default function StrategiesPage() {
     setExpandedCard(strategyId);
 
     try {
-      const res = await fetch(`/api/strategies/screen?strategy=${strategyId}`);
+      const res = await fetch(`/api/strategies/screen?strategy=${strategyId}&force=true`);
       const data: ScreenResult = await res.json();
       setResults((prev) => ({ ...prev, [strategyId]: data }));
     } catch (err) {
@@ -379,8 +405,8 @@ export default function StrategiesPage() {
             </h1>
           </div>
           <p style={{ color: 'var(--text-secondary)', fontSize: 15, margin: 0, maxWidth: 700 }}>
-            10 battle-tested swing trading strategies scanning <strong style={{ color: '#a78bfa' }}>250 NSE stocks</strong> across
-            large-cap, mid-cap, and small-cap to find hidden gems using live OHLCV data.
+            14 battle-tested swing trading strategies scanning <strong style={{ color: '#a78bfa' }}>500+ NSE stocks</strong> across
+            large-cap, mid-cap, and small-cap to find hidden gems using live OHLCV + shareholding data.
           </p>
         </div>
 
@@ -702,12 +728,12 @@ function StrategyCard({
           {isRunning ? (
             <>
               <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⏳</span>
-              Deep-scanning 250 NSE stocks...
+              Deep-scanning 500+ NSE stocks...
             </>
           ) : hasResults ? (
-            <>🔄 Re-Scan 250 Stocks</>
+            <>🔄 Re-Scan 500+ Stocks</>
           ) : (
-            <>🔍 Scan 250 NSE Stocks</>
+            <>🔍 Scan 500+ NSE Stocks</>
           )}
         </button>
 
@@ -759,7 +785,18 @@ function ScreenResults({ result, strategy }: { result: ScreenResult; strategy: S
           color: 'var(--text-muted)',
         }}>
           Scanned {result.totalScanned} stocks
-          {result.cached && ' (cached)'}
+          {result.cached && (
+            <span style={{
+              marginLeft: 6,
+              padding: '1px 6px',
+              borderRadius: 4,
+              background: '#3b82f620',
+              color: '#60a5fa',
+              fontSize: 10,
+            }}>
+              📦 cached {result.scanTime ? `• ${new Date(result.scanTime).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}
+            </span>
+          )}
         </span>
       </div>
 
@@ -871,7 +908,7 @@ function ScreenResults({ result, strategy }: { result: ScreenResult; strategy: S
 
             {/* Signals */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-              {match.signals.slice(0, 3).map((signal, i) => (
+              {match.signals.map((signal, i) => (
                 <span key={i} style={{
                   fontSize: 10,
                   padding: '2px 7px',
@@ -884,17 +921,6 @@ function ScreenResults({ result, strategy }: { result: ScreenResult; strategy: S
                   {signal}
                 </span>
               ))}
-              {match.signals.length > 3 && (
-                <span style={{
-                  fontSize: 10,
-                  padding: '2px 7px',
-                  borderRadius: 5,
-                  background: 'var(--bg-input)',
-                  color: 'var(--text-muted)',
-                }}>
-                  +{match.signals.length - 3} more
-                </span>
-              )}
             </div>
 
             {/* Fundamentals (for Strategy 9 — REAL Yahoo Finance data) */}

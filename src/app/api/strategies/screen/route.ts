@@ -16,6 +16,7 @@ import { getLatestShareholding } from '@/lib/shareholdingData';
 import { toYahooTicker } from '@/lib/symbolMap';
 import { getInstrumentKey } from '@/lib/upstoxInstruments';
 import { getUpstoxToken } from '@/lib/upstoxTokenStore';
+import { getServiceClient } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 
@@ -1057,6 +1058,7 @@ function getFilterFn(id: number): ((data: ScreenData) => StrategyMatch | null | 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const strategyId = parseInt(searchParams.get('strategy') || '0');
+  const forceRescan = searchParams.get('force') === 'true';
 
   if (strategyId < 1 || strategyId > 14) {
     return NextResponse.json(
@@ -1065,13 +1067,44 @@ export async function GET(request: Request) {
     );
   }
 
-  // Check cache
-  const cacheKey = `strategy:${strategyId}`;
-  const cached = strategyCache.get(cacheKey);
-  if (cached && Date.now() - cached.ts < STRATEGY_CACHE_TTL) {
-    return NextResponse.json({ ...cached.data, cached: true });
+  // ── If NOT force rescan, try DB cache first, then in-memory ──
+  if (!forceRescan) {
+    // Try in-memory cache
+    const cacheKey = `strategy:${strategyId}`;
+    const memCached = strategyCache.get(cacheKey);
+    if (memCached && Date.now() - memCached.ts < STRATEGY_CACHE_TTL) {
+      return NextResponse.json({ ...memCached.data, cached: true, cacheSource: 'memory' });
+    }
+
+    // Try DB cache
+    try {
+      const db = getServiceClient();
+      const { data: dbRow } = await db
+        .from('strategy_cache')
+        .select('*')
+        .eq('strategy_id', strategyId)
+        .single();
+
+      if (dbRow && dbRow.matches) {
+        const response = {
+          strategyId: dbRow.strategy_id,
+          matches: dbRow.matches,
+          totalScanned: dbRow.total_scanned,
+          matchCount: dbRow.match_count,
+          scanTime: dbRow.scan_time,
+          cached: true,
+          cacheSource: 'database',
+        };
+        // Also populate in-memory cache
+        strategyCache.set(cacheKey, { data: response, ts: Date.now() });
+        return NextResponse.json(response);
+      }
+    } catch (dbErr) {
+      console.warn('[Strategy Screen] DB cache read failed:', dbErr);
+    }
   }
 
+  // ── Fresh scan ──
   const filterFn = getFilterFn(strategyId);
   if (!filterFn) {
     return NextResponse.json({ error: 'Strategy filter not found' }, { status: 500 });
@@ -1090,7 +1123,6 @@ export async function GET(request: Request) {
           try {
             const data = await computeScreenData(symbol);
             if (!data) return null;
-            // Await in case the filter is async (Strategy 9 fetches real fundamentals)
             return await filterFn(data);
           } catch (err: any) {
             errors.push(`${symbol}: ${err.message}`);
@@ -1114,8 +1146,24 @@ export async function GET(request: Request) {
       errors: errors.length > 0 ? errors : undefined,
     };
 
-    // Cache results
+    // Cache in-memory
+    const cacheKey = `strategy:${strategyId}`;
     strategyCache.set(cacheKey, { data: response, ts: Date.now() });
+
+    // Cache in DB (upsert)
+    try {
+      const db = getServiceClient();
+      await db.from('strategy_cache').upsert({
+        strategy_id: strategyId,
+        matches: matches,
+        total_scanned: SCREEN_STOCKS.length,
+        match_count: matches.length,
+        scan_time: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'strategy_id' });
+    } catch (dbErr) {
+      console.warn('[Strategy Screen] DB cache write failed:', dbErr);
+    }
 
     return NextResponse.json(response);
   } catch (error: any) {
