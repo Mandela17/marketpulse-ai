@@ -496,7 +496,7 @@ export default function Dashboard() {
           <GlobalMarketsWidget />
 
           {/* Institutional Block Deals Widget */}
-          <BlockDealsWidget limit={6} />
+          <BlockDealsWidget limit={50} />
 
           {/* News Feed */}
           <div className="xl:sticky xl:top-6">

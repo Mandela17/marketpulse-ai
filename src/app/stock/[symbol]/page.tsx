@@ -1749,7 +1749,7 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
             />
 
             {/* Institutional Block Deals Widget */}
-            <BlockDealsWidget symbol={decodedSymbol} limit={5} />
+            <BlockDealsWidget symbol={decodedSymbol} limit={50} />
 
             <h2 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>
               📰 Related News

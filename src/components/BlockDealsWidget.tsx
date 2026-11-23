@@ -21,9 +21,10 @@ interface BlockDealsWidgetProps {
   limit?: number;
 }
 
-export default function BlockDealsWidget({ symbol, limit = 10 }: BlockDealsWidgetProps) {
+export default function BlockDealsWidget({ symbol, limit = 50 }: BlockDealsWidgetProps) {
   const [deals, setDeals] = useState<BlockDeal[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showAll, setShowAll] = useState(true); // default: show all 30 days
 
   useEffect(() => {
     async function fetchDeals() {
@@ -82,9 +83,51 @@ export default function BlockDealsWidget({ symbol, limit = 10 }: BlockDealsWidge
         </span>
       </div>
 
-      <div className="flex-1 overflow-y-auto max-h-[380px] pr-1 space-y-2 no-scrollbar">
+      {/* Summary stats */}
+      {deals.length > 0 && (
+        <div className="grid grid-cols-3 gap-2 mb-3">
+          <div className="px-2 py-1.5 rounded-lg" style={{ background: 'rgba(0,214,143,0.06)', border: '1px solid rgba(0,214,143,0.1)' }}>
+            <p className="text-[9px] uppercase font-bold" style={{ color: 'var(--text-muted)' }}>Total Value</p>
+            <p className="text-xs font-black text-white">
+              ₹{deals.reduce((s, d) => s + d.valueCr, 0).toFixed(0)} Cr
+            </p>
+          </div>
+          <div className="px-2 py-1.5 rounded-lg" style={{ background: 'rgba(0,214,143,0.06)', border: '1px solid rgba(0,214,143,0.1)' }}>
+            <p className="text-[9px] uppercase font-bold" style={{ color: 'var(--text-muted)' }}>Buys</p>
+            <p className="text-xs font-black" style={{ color: '#00d68f' }}>
+              {deals.filter(d => d.action === 'BUY').length} deals
+            </p>
+          </div>
+          <div className="px-2 py-1.5 rounded-lg" style={{ background: 'rgba(255,77,106,0.06)', border: '1px solid rgba(255,77,106,0.1)' }}>
+            <p className="text-[9px] uppercase font-bold" style={{ color: 'var(--text-muted)' }}>Sells</p>
+            <p className="text-xs font-black" style={{ color: '#ff4d6a' }}>
+              {deals.filter(d => d.action === 'SELL').length} deals
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Toggle button */}
+      {deals.length > 10 && (
+        <div className="flex justify-end mb-2">
+          <button
+            onClick={() => setShowAll(!showAll)}
+            className="text-[10px] font-bold px-2 py-0.5 rounded-full transition-all hover:opacity-80"
+            style={{
+              background: 'rgba(59,130,246,0.12)',
+              color: '#60a5fa',
+              border: '1px solid rgba(59,130,246,0.2)',
+            }}
+          >
+            {showAll ? `▲ Show 10 deals` : `▼ Show all ${deals.length} deals`}
+          </button>
+        </div>
+      )}
+
+      <div className="flex-1 overflow-y-auto max-h-[600px] pr-1 space-y-2 no-scrollbar"
+        style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(255,255,255,0.1) transparent' }}>
         {deals.length > 0 ? (
-          deals.map((deal) => {
+          (showAll ? deals : deals.slice(0, 10)).map((deal) => {
             const isUltra = deal.dealType === 'Ultra Block';
             const isBuy = deal.action === 'BUY';
             const timeStr = new Date(deal.timestamp).toLocaleTimeString('en-IN', {
