@@ -147,21 +147,28 @@ export default function Dashboard() {
               const prevClose = niftyRes.previousClose > 0 
                 ? niftyRes.previousClose 
                 : (niftyRes.price && niftyRes.change ? niftyRes.price - niftyRes.change : 0);
-              const cp = niftyRes.changePercent !== 0 
+              let cp = niftyRes.changePercent !== 0 
                 ? niftyRes.changePercent 
                 : (prevClose > 0 ? (niftyRes.change / prevClose) * 100 : 0);
 
-              setMarketData(prev => ({
-                ...prev,
-                nifty50: {
-                  value: niftyRes.price,
-                  change: niftyRes.change,
-                  changePercent: Number(cp.toFixed(2)),
-                },
-                sensex: prev?.sensex || { value: 0, change: 0, changePercent: 0 },
-                marketStatus: prev?.marketStatus || 'closed',
-              }));
-              setDataSource('upstox');
+              // If Upstox still returns 0% but Yahoo had valid data, DON'T override
+              const yahooNifty = freshMarketData?.nifty50;
+              if (cp === 0 && yahooNifty && yahooNifty.changePercent !== 0) {
+                // Upstox data is unreliable for percent — keep Yahoo data for NIFTY
+                console.warn('[Dashboard] Upstox changePercent=0, keeping Yahoo data');
+              } else {
+                setMarketData(prev => ({
+                  ...prev,
+                  nifty50: {
+                    value: niftyRes.price,
+                    change: niftyRes.change,
+                    changePercent: Number(cp.toFixed(2)),
+                  },
+                  sensex: prev?.sensex || { value: 0, change: 0, changePercent: 0 },
+                  marketStatus: prev?.marketStatus || 'closed',
+                }));
+                setDataSource('upstox');
+              }
             }
           } catch (upstoxErr) {
             console.warn('[Dashboard] Upstox NIFTY quote failed:', upstoxErr);

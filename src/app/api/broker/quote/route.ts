@@ -86,9 +86,13 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'No quote data returned' }, { status: 404 });
     }
 
-    const prevClose = q.ohlc?.close || q.close_price || (q.last_price && q.net_change ? q.last_price - q.net_change : 0);
+    const prevClose = q.ohlc?.close || q.close_price || (q.last_price && q.net_change != null ? q.last_price - q.net_change : 0);
     const change = q.net_change ?? (prevClose > 0 ? q.last_price - prevClose : 0);
-    const changePercent = prevClose > 0 ? (change / prevClose) * 100 : 0;
+    // Prefer API-provided percentage; compute only as fallback
+    let changePercent = q.percentage_change ?? 0;
+    if (changePercent === 0 && prevClose > 0 && change !== 0) {
+      changePercent = (change / prevClose) * 100;
+    }
 
     return NextResponse.json({
       symbol,

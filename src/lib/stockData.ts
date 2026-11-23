@@ -66,8 +66,12 @@ export async function fetchStockPrice(symbol: string): Promise<StockPrice | null
 
     const price = meta.regularMarketPrice || 0;
     const prevClose = meta.chartPreviousClose || meta.previousClose || price;
-    const change = price - prevClose;
-    const changePercent = prevClose > 0 ? (change / prevClose) * 100 : 0;
+    // Prefer Yahoo-provided change/percent (most reliable), fall back to manual calc
+    const change = meta.fulldayChange ?? (price - prevClose);
+    let changePercent = meta.regularMarketChangePercent ?? meta.fulldayChangePercent ?? 0;
+    if (changePercent === 0 && change !== 0 && prevClose > 0) {
+      changePercent = (change / prevClose) * 100;
+    }
 
     const result: StockPrice = {
       symbol: symbol,
