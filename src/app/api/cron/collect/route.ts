@@ -5,7 +5,7 @@
 // Schedule: Daily at 3:00 AM UTC (8:30 AM IST — pre-market)
 // For more frequent collection, call this endpoint manually or add additional cron entries.
 
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 import { fetchAllNews } from '@/lib/newsAggregator';
@@ -14,12 +14,12 @@ import { SECTORS } from '@/lib/sectorData';
 import { getServiceClient } from '@/lib/supabase';
 import type { NewsArticle } from '@/lib/types';
 import { fetchFIIDIIFlows, saveFIIDIIFlows } from '@/lib/fiiDiiData';
-import { fetchIndiaVIX, saveDailyFeatures, saveDailyFeaturesBatch, getHistoricalFeatures } from '@/lib/nseData';
+import { fetchIndiaVIX, saveDailyFeaturesBatch, getHistoricalFeatures } from '@/lib/nseData';
 import { fetchHistoricalOHLCV, computeRealTechnicals } from '@/lib/technicalAnalysis';
 import { fetchNifty50 } from '@/lib/stockData';
 import { resolveUnresolvedPredictions } from '@/lib/predictionHistory';
 import { trainAndSaveModel } from '@/lib/mlEngine';
-import { waitForRateLimit, reportSuccess, reportError, getRateLimitStats } from '@/lib/rateLimiter';
+import { getRateLimitStats } from '@/lib/rateLimiter';
 import { fitPlattScaling } from '@/lib/plattScaling';
 import { runAdaptiveLearningCycle } from '@/lib/adaptiveLearning';
 
@@ -303,30 +303,25 @@ async function resolvePredictions(): Promise<{ resolved: number; correct: number
   }
 }
 
-// ─── Main Cron Handler ──────────────────────────────────────────────
+// ─── Background pipeline (runs via after()) ────────────────────────
 
-export async function GET(request: Request) {
+async function runPipeline() {
   const startTime = Date.now();
-  
-  // Auth check
-  if (!isAuthorized(request)) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-  
+
   try {
-    console.log('[Cron] ⏰ Starting scheduled data collection...');
-    
+    console.log('[Cron] ⏰ Starting scheduled data collection (background)...');
+
     // Step 1: Fetch raw news
     const rawArticles = await fetchAllNews();
     console.log(`[Cron] 📰 Fetched ${rawArticles.length} raw articles`);
-    
+
     // Step 2: Analyze sentiment with Gemini
     const analyzedArticles = await analyzeArticlesBatch(rawArticles);
     console.log(`[Cron] 🧠 Analyzed ${analyzedArticles.length} articles`);
-    
+
     // Step 3: Compute sector sentiments
     const sectorSentiments = computeSectorSentiments(analyzedArticles);
-    
+
     const fullSectorSentiments: Record<string, any> = {};
     for (const [id, sector] of Object.entries(SECTORS)) {
       const computed = sectorSentiments[id];
@@ -359,8 +354,7 @@ export async function GET(request: Request) {
       for (const stock of (article.relatedStocks || [])) {
         if (!stockSentiments[stock]) stockSentiments[stock] = 50;
         const w = article.decayedWeight ?? article.weight ?? 1.0;
-        // Weighted moving average
-        stockSentiments[stock] = stockSentiments[stock] * 0.7 + 
+        stockSentiments[stock] = stockSentiments[stock] * 0.7 +
           Math.round(Math.max(0, Math.min(100, (article.sentiment + 1) * 50))) * 0.3;
       }
     }
@@ -380,7 +374,7 @@ export async function GET(request: Request) {
     console.log('[Cron] 🎯 Resolving pending predictions...');
     const resolution = await resolvePredictions();
     console.log(`[Cron] 🎯 Resolved ${resolution.resolved} predictions (${resolution.correct} correct)`);
-    
+
     // Step 8: Persist news and sentiment data to Supabase
     const [articlesSaved, sectorsSaved, stocksSaved] = await Promise.all([
       persistArticles(analyzedArticles),
@@ -388,12 +382,11 @@ export async function GET(request: Request) {
       persistStockSentiments(analyzedArticles),
     ]);
 
-    // Step 9: Backfill historical data WITH COMPUTED TECHNICALS (batch bulk insert)
-    // Limit to at most 1 stock per run to ensure total route time stays under 15s
+    // Step 9: Backfill historical data (1 stock per run max)
     console.log('[Cron] 📚 Checking for historical data backfill needs...');
     let backfilled = 0;
     for (const symbol of KEY_STOCKS) {
-      if (backfilled >= 1) break; // Max 1 stock per run ensures zero timeout risk
+      if (backfilled >= 1) break;
       try {
         const existing = await getHistoricalFeatures(symbol, 500);
         if (existing.length < 200) {
@@ -404,7 +397,6 @@ export async function GET(request: Request) {
             1000,
           );
           if (ohlcv && ohlcv.length > existing.length + 10) {
-            // Compute technicals from OHLCV in-memory
             const { calculateRSI, calculateEMA, calculateMACD, calculateBollingerBands, calculateVolumeProfile } = await import('@/lib/technicalAnalysis');
             const closes = ohlcv.map(c => c.close);
             const volumes = ohlcv.map(c => c.volume);
@@ -438,7 +430,6 @@ export async function GET(request: Request) {
               });
             }
 
-            // Bulk save all rows in 1 single network request!
             await saveDailyFeaturesBatch(batchRows);
             backfilled++;
             console.log(`[Cron] 📚 Bulk-backfilled ${batchRows.length} days for ${symbol} in 1 request (had ${existing.length})`);
@@ -448,11 +439,8 @@ export async function GET(request: Request) {
         console.warn(`[Cron] 📚 Backfill error for ${symbol}:`, (err as Error).message);
       }
     }
-    if (backfilled > 0) {
-      console.log(`[Cron] 📚 Backfilled historical data for ${backfilled} stocks`);
-    }
 
-    // Step 10: Train and freeze GBDT models (rotate up to 5 stocks per run to guarantee <15s completion)
+    // Step 10: Train GBDT models (rotate top 5)
     console.log('[Cron] 🤖 Training frozen GBDT models (rotating top 5 per run)...');
     let modelsTrained = 0;
     let modelsSkipped = 0;
@@ -464,7 +452,6 @@ export async function GET(request: Request) {
 
     const modelAgeMap = new Map((existingModels || []).map(m => [m.symbol, new Date(m.trained_at).getTime()]));
 
-    // Pick 5 stocks that either have no model or the oldest model
     const stocksToTrain = [...KEY_STOCKS]
       .sort((a, b) => (modelAgeMap.get(a) ?? 0) - (modelAgeMap.get(b) ?? 0))
       .slice(0, 5);
@@ -485,21 +472,17 @@ export async function GET(request: Request) {
     }
     console.log(`[Cron] 🤖 Models trained: ${modelsTrained}, skipped: ${modelsSkipped}`);
 
-    // Step 11: Run adaptive learning cycle (update ensemble weights from recent accuracy)
-    console.log('[Cron] 🎚️ Running adaptive learning cycle...');
-    let adaptiveResult = null;
+    // Step 11: Adaptive learning cycle
     try {
-      adaptiveResult = await runAdaptiveLearningCycle();
+      const adaptiveResult = await runAdaptiveLearningCycle();
       console.log(`[Cron] 🎚️ Weights updated: GBDT=${adaptiveResult.newWeights.gbdt}, Heuristic=${adaptiveResult.newWeights.heuristic}`);
     } catch (err) {
       console.warn('[Cron] 🎚️ Adaptive learning failed:', (err as Error).message);
     }
 
-    // Step 12: Fit Platt scaling calibration (Phase 6 — requires 200+ resolved predictions)
-    console.log('[Cron] 📐 Fitting Platt scaling calibration...');
-    let plattResult = null;
+    // Step 12: Platt scaling calibration
     try {
-      plattResult = await fitPlattScaling();
+      const plattResult = await fitPlattScaling();
       if (plattResult) {
         console.log(`[Cron] 📐 Platt calibration fitted: A=${plattResult.A}, B=${plattResult.B} from ${plattResult.sampleCount} predictions`);
       } else {
@@ -514,33 +497,10 @@ export async function GET(request: Request) {
     console.log(`[Cron] 📊 Yahoo rate limit: ${rateLimitStats.totalRequests} reqs, ${rateLimitStats.totalErrors} errors (${(rateLimitStats.errorRate * 100).toFixed(1)}%)`);
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-    
-    const result = {
-      success: true,
-      timestamp: new Date().toISOString(),
-      duration: `${duration}s`,
-      stats: {
-        articlesFetched: rawArticles.length,
-        articlesAnalyzed: analyzedArticles.length,
-        articlesSaved,
-        sectorsSaved,
-        stocksSaved,
-        featuresSaved,
-        backfilled,
-        modelsTrained,
-        modelsSkipped,
-        fiiDii: fiiDiiData ? { fiiNet: fiiDiiData.fiiNet, diiNet: fiiDiiData.diiNet } : null,
-        indiaVix: vixData?.value ?? null,
-        predictionsResolved: resolution.resolved,
-        predictionsCorrect: resolution.correct,
-      },
-    };
-    
     console.log(`[Cron] ✅ Complete in ${duration}s — ${articlesSaved} articles, ${featuresSaved} features, ${modelsTrained} models trained, ${resolution.resolved} predictions resolved`);
-    
-    // Step 11: Save cron health status to Supabase for monitoring
+
+    // Save cron health status
     try {
-      const db = getServiceClient();
       await db.from('cron_runs').upsert({
         job_name: 'daily-collect',
         ran_at: new Date().toISOString(),
@@ -554,13 +514,10 @@ export async function GET(request: Request) {
     } catch {
       console.warn('[Cron] Failed to save cron health status (table may not exist yet)');
     }
-
-    return NextResponse.json(result);
   } catch (error: any) {
     const duration = ((Date.now() - startTime) / 1000).toFixed(1);
     console.error(`[Cron] ❌ Failed after ${duration}s:`, error);
-    
-    // Log failure to cron_runs
+
     try {
       const db = getServiceClient();
       await db.from('cron_runs').upsert({
@@ -571,15 +528,28 @@ export async function GET(request: Request) {
         error_message: error.message?.substring(0, 500),
       }, { onConflict: 'job_name' });
     } catch {}
-
-    return NextResponse.json(
-      { 
-        success: false, 
-        error: error.message,
-        duration: `${duration}s`,
-        timestamp: new Date().toISOString(),
-      },
-      { status: 500 }
-    );
   }
+}
+
+// ─── Main Cron Handler ──────────────────────────────────────────────
+// Responds IMMEDIATELY to avoid cron-job.org 30s timeout, then runs
+// the full pipeline in the background via Next.js after().
+
+export async function GET(request: Request) {
+  // Auth check
+  if (!isAuthorized(request)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  // Schedule the full pipeline to run AFTER the response is sent.
+  // Vercel keeps the function alive for up to maxDuration (120s) even
+  // though the HTTP response is returned instantly.
+  after(runPipeline);
+
+  console.log('[Cron] ⏰ Cron triggered — pipeline scheduled via after()');
+  return NextResponse.json({
+    success: true,
+    message: 'Pipeline scheduled — running in background',
+    timestamp: new Date().toISOString(),
+  });
 }
