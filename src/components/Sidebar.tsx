@@ -4,12 +4,13 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-import { LayoutDashboard, Newspaper, TrendingUp, Star, Plug, ChevronRight, LogOut, X, Grid3x3, Search, Briefcase, Scale, Shield, GraduationCap, Target, FileText, Coins } from 'lucide-react';
+import { LayoutDashboard, Newspaper, TrendingUp, Star, Plug, ChevronRight, LogOut, X, Grid3x3, Search, Briefcase, Scale, Shield, GraduationCap, Target, FileText, Coins, Landmark } from 'lucide-react';
 
 const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/heatmap', label: 'Heatmap', icon: Grid3x3 },
   { href: '/screener', label: 'Screener', icon: Search },
+  { href: '/institutional', label: 'Institutional Flows', icon: Landmark },
   { href: '/strategies', label: 'Strategy Hub', icon: Target },
   { href: '/paper-trading', label: 'Paper Trading', icon: FileText },
   { href: '/portfolio', label: 'Portfolio', icon: Briefcase },
