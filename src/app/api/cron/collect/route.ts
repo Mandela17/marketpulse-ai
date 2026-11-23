@@ -257,6 +257,18 @@ async function collectDailyFeatures(
 
 async function resolvePredictions(): Promise<{ resolved: number; correct: number }> {
   try {
+    const db = getServiceClient();
+    // Fast check: skip if there are no pending unresolved predictions
+    const { count: pendingCount } = await db
+      .from('predictions')
+      .select('*', { count: 'exact', head: true })
+      .is('resolved_at', null);
+
+    if (!pendingCount || pendingCount === 0) {
+      console.log('[Cron] No pending predictions to resolve — skipping price fetches');
+      return { resolved: 0, correct: 0 };
+    }
+
     // Fetch closing prices for key stocks
     const closingPrices: Record<string, { todayClose: number; prevClose: number }> = {};
 
@@ -267,7 +279,7 @@ async function resolvePredictions(): Promise<{ resolved: number; correct: number
           const ohlcv = await withRetry(
             () => fetchHistoricalOHLCV(symbol, 5),
             `ohlcv(${symbol})`,
-            1, // 1 try is plenty for resolution closing prices
+            1,
             300,
           );
           if (ohlcv && ohlcv.length >= 2) {
@@ -377,11 +389,11 @@ export async function GET(request: Request) {
     ]);
 
     // Step 9: Backfill historical data WITH COMPUTED TECHNICALS (batch bulk insert)
-    // Limit to at most 2 stocks per run to prevent timeout on serverless functions
+    // Limit to at most 1 stock per run to ensure total route time stays under 15s
     console.log('[Cron] 📚 Checking for historical data backfill needs...');
     let backfilled = 0;
     for (const symbol of KEY_STOCKS) {
-      if (backfilled >= 2) break; // Max 2 stocks per run keeps execution fast and safe
+      if (backfilled >= 1) break; // Max 1 stock per run ensures zero timeout risk
       try {
         const existing = await getHistoricalFeatures(symbol, 500);
         if (existing.length < 200) {
@@ -389,7 +401,7 @@ export async function GET(request: Request) {
             () => fetchHistoricalOHLCV(symbol, 500),
             `backfill-ohlcv(${symbol})`,
             2,
-            1500,
+            1000,
           );
           if (ohlcv && ohlcv.length > existing.length + 10) {
             // Compute technicals from OHLCV in-memory
@@ -440,26 +452,36 @@ export async function GET(request: Request) {
       console.log(`[Cron] 📚 Backfilled historical data for ${backfilled} stocks`);
     }
 
-    // Step 10: Train and freeze GBDT models for key stocks in parallel batches of 5
-    console.log('[Cron] 🤖 Training frozen GBDT models in parallel...');
+    // Step 10: Train and freeze GBDT models (rotate up to 5 stocks per run to guarantee <15s completion)
+    console.log('[Cron] 🤖 Training frozen GBDT models (rotating top 5 per run)...');
     let modelsTrained = 0;
     let modelsSkipped = 0;
-    for (let i = 0; i < KEY_STOCKS.length; i += 5) {
-      const batch = KEY_STOCKS.slice(i, i + 5);
-      const results = await Promise.all(
-        batch.map(async (symbol) => {
-          try {
-            return await trainAndSaveModel(symbol);
-          } catch (err: any) {
-            console.warn(`[Cron] 🤖 Model training failed for ${symbol}:`, err.message);
-            return { success: false };
-          }
-        })
-      );
-      for (const res of results) {
-        if (res.success) modelsTrained++;
-        else modelsSkipped++;
-      }
+
+    const db = getServiceClient();
+    const { data: existingModels } = await db
+      .from('frozen_models')
+      .select('symbol, trained_at');
+
+    const modelAgeMap = new Map((existingModels || []).map(m => [m.symbol, new Date(m.trained_at).getTime()]));
+
+    // Pick 5 stocks that either have no model or the oldest model
+    const stocksToTrain = [...KEY_STOCKS]
+      .sort((a, b) => (modelAgeMap.get(a) ?? 0) - (modelAgeMap.get(b) ?? 0))
+      .slice(0, 5);
+
+    const trainResults = await Promise.all(
+      stocksToTrain.map(async (symbol) => {
+        try {
+          return await trainAndSaveModel(symbol);
+        } catch (err: any) {
+          console.warn(`[Cron] 🤖 Model training failed for ${symbol}:`, err.message);
+          return { success: false };
+        }
+      })
+    );
+    for (const res of trainResults) {
+      if (res.success) modelsTrained++;
+      else modelsSkipped++;
     }
     console.log(`[Cron] 🤖 Models trained: ${modelsTrained}, skipped: ${modelsSkipped}`);
 
