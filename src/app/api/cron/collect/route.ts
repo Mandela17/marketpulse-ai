@@ -20,6 +20,31 @@ import { fetchNifty50 } from '@/lib/stockData';
 import { resolveUnresolvedPredictions } from '@/lib/predictionHistory';
 import { trainAndSaveModel } from '@/lib/mlEngine';
 
+// ─── Retry helper with exponential backoff ───────────────────────────
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  label: string,
+  maxRetries = 3,
+  baseDelayMs = 1000,
+): Promise<T | null> {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      const is429 = err?.message?.includes('429') || err?.status === 429;
+      const delay = is429
+        ? baseDelayMs * Math.pow(2, attempt) + Math.random() * 500 // exponential + jitter
+        : baseDelayMs * attempt;
+      console.warn(`[Cron] ⚠️ ${label} attempt ${attempt}/${maxRetries} failed: ${err.message}. Retrying in ${Math.round(delay)}ms...`);
+      if (attempt < maxRetries) {
+        await new Promise(r => setTimeout(r, delay));
+      }
+    }
+  }
+  console.warn(`[Cron] ❌ ${label} failed after ${maxRetries} attempts`);
+  return null;
+}
+
 // Authenticate cron requests (Vercel sends this header automatically)
 function isAuthorized(request: Request): boolean {
   // In development, allow all requests
@@ -172,7 +197,11 @@ async function collectDailyFeatures(
 
     const promises = batch.map(async (symbol) => {
       try {
-        const technicals = await computeRealTechnicals(symbol);
+        // Use retry with exponential backoff for Yahoo Finance calls
+        const technicals = await withRetry(
+          () => computeRealTechnicals(symbol),
+          `technicals(${symbol})`,
+        );
         if (!technicals || technicals.currentPrice === 0) return;
 
         await saveDailyFeatures({
@@ -226,8 +255,12 @@ async function resolvePredictions(): Promise<{ resolved: number; correct: number
       const batch = KEY_STOCKS.slice(i, i + 5);
       const promises = batch.map(async (symbol) => {
         try {
-          const ohlcv = await fetchHistoricalOHLCV(symbol, 5);
-          if (ohlcv.length >= 2) {
+          const ohlcv = await withRetry(
+            () => fetchHistoricalOHLCV(symbol, 5),
+            `ohlcv(${symbol})`,
+            2, // fewer retries for resolution — not critical
+          );
+          if (ohlcv && ohlcv.length >= 2) {
             closingPrices[symbol] = {
               todayClose: ohlcv[ohlcv.length - 1].close,
               prevClose: ohlcv[ohlcv.length - 2].close,
@@ -341,8 +374,13 @@ export async function GET(request: Request) {
       try {
         const existing = await getHistoricalFeatures(symbol, 500);
         if (existing.length < 200) {
-          const ohlcv = await fetchHistoricalOHLCV(symbol, 500);
-          if (ohlcv.length > existing.length + 10) {
+          const ohlcv = await withRetry(
+            () => fetchHistoricalOHLCV(symbol, 500),
+            `backfill-ohlcv(${symbol})`,
+            2,
+            2000,
+          );
+          if (ohlcv && ohlcv.length > existing.length + 10) {
             // Compute technicals from OHLCV in-memory
             const { calculateRSI, calculateEMA, calculateMACD, calculateBollingerBands, calculateVolumeProfile } = await import('@/lib/technicalAnalysis');
             const closes = ohlcv.map(c => c.close);

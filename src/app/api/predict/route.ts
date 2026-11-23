@@ -332,18 +332,47 @@ export async function GET(request: Request) {
         daysToExpiry: optionsData.daysToExpiry,
         signals: optionsData.signals,
       } : null,
-      dataQuality: {
-        hasHistoricalData: prediction.metrics.totalSamples > 20,
-        hasOBI: obiData != null,
-        hasVolumeProfile: volumeProfile != null,
-        hasDeliveryData: deliveryData != null,
-        hasPcrData: pcrData != null,
-        hasVixData: vixData != null,
-        hasGlobalContext: globalContext != null,
-        hasOptionsIntelligence: optionsData != null,
-        dataPoints: prediction.metrics.totalSamples,
-        modelVersion: prediction.metrics.modelVersion,
-      },
+      dataQuality: (() => {
+        // Compute comprehensive data quality score (0-100)
+        const sources = [
+          { name: 'historicalData', available: prediction.metrics.totalSamples > 20, weight: 25 },
+          { name: 'obi', available: obiData != null, weight: 5 },
+          { name: 'volumeProfile', available: volumeProfile != null, weight: 5 },
+          { name: 'deliveryData', available: deliveryData != null, weight: 10 },
+          { name: 'pcrData', available: pcrData != null, weight: 10 },
+          { name: 'vixData', available: vixData != null, weight: 10 },
+          { name: 'globalContext', available: globalContext != null, weight: 15 },
+          { name: 'optionsIntelligence', available: optionsData != null, weight: 10 },
+          { name: 'sufficientTraining', available: prediction.metrics.totalSamples > 60, weight: 10 },
+        ];
+        const maxScore = sources.reduce((s, src) => s + src.weight, 0);
+        const earnedScore = sources.reduce((s, src) => s + (src.available ? src.weight : 0), 0);
+        const score = Math.round((earnedScore / maxScore) * 100);
+        const missingFeatures = sources.filter(s => !s.available).map(s => s.name);
+        const depthBucket = prediction.metrics.totalSamples >= 200 ? 'excellent'
+          : prediction.metrics.totalSamples >= 100 ? 'good'
+          : prediction.metrics.totalSamples >= 40 ? 'fair'
+          : 'insufficient';
+
+        return {
+          score,
+          grade: score >= 80 ? 'A' : score >= 60 ? 'B' : score >= 40 ? 'C' : 'D',
+          missingFeatures,
+          historicalDepth: prediction.metrics.totalSamples,
+          historicalDepthLabel: depthBucket,
+          warning: score < 40 ? 'Low data quality — prediction reliability is reduced' : null,
+          hasHistoricalData: prediction.metrics.totalSamples > 20,
+          hasOBI: obiData != null,
+          hasVolumeProfile: volumeProfile != null,
+          hasDeliveryData: deliveryData != null,
+          hasPcrData: pcrData != null,
+          hasVixData: vixData != null,
+          hasGlobalContext: globalContext != null,
+          hasOptionsIntelligence: optionsData != null,
+          dataPoints: prediction.metrics.totalSamples,
+          modelVersion: prediction.metrics.modelVersion,
+        };
+      })(),
       disclaimer: 'AI-assisted analysis for informational purposes only. Not financial advice. Past performance does not guarantee future results.',
     });
   } catch (error: any) {

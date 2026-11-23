@@ -12,6 +12,7 @@ import InstitutionalFlowsSection from '@/components/InstitutionalFlowsSection';
 import TopMoversWidget from '@/components/TopMoversWidget';
 import VIXGaugeWidget from '@/components/VIXGaugeWidget';
 import GlobalMarketsWidget from '@/components/GlobalMarketsWidget';
+import DataStalenessWidget from '@/components/DataStalenessWidget';
 import { loadDashboardCache, saveDashboardCache, timeAgo } from '@/lib/dashboardCache';
 
 interface MarketData {
@@ -278,6 +279,9 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* ─── Data Staleness Warning ─── */}
+      <DataStalenessWidget />
 
       {/* ─── Market Summary Strip ─── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4 mb-6 animate-fade-in-up delay-100">
