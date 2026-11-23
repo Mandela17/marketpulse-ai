@@ -11,6 +11,7 @@ interface FIIDIIData {
 export default function FIIDIIWidget() {
   const [data, setData] = useState<FIIDIIData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showAll, setShowAll] = useState(true); // default: show all 30 days
 
   useEffect(() => {
     fetch(`/api/fii-dii?_t=${Date.now()}`, { cache: 'no-store' })
@@ -48,9 +49,19 @@ export default function FIIDIIWidget() {
     if (dir === 'sell') fiiStreak = -fiiStreak;
   }
 
+  // Show 10 days collapsed, all days expanded
+  const displayDays = showAll ? recent.length : Math.min(10, recent.length);
+  const displayRecent = recent.slice(0, displayDays);
+
   const maxFlow = recent.length > 0
     ? Math.max(...recent.map(f => Math.max(Math.abs(f.fiiNet), Math.abs(f.diiNet))), 1)
     : 1;
+
+  // 30-day cumulative stats
+  const fii30dNet = recent.reduce((s, f) => s + f.fiiNet, 0);
+  const dii30dNet = recent.reduce((s, f) => s + f.diiNet, 0);
+  const fiiBuyDays = recent.filter(f => f.fiiNet > 0).length;
+  const fiiSellDays = recent.filter(f => f.fiiNet < 0).length;
 
   return (
     <div className="glass-card-static rounded-2xl p-5">
@@ -124,26 +135,70 @@ export default function FIIDIIWidget() {
         </div>
       )}
 
-      {/* Mini Bar Chart — Last 7 days */}
+      {/* 30-Day Summary Stats */}
+      {recent.length > 10 && (
+        <div className="grid grid-cols-2 gap-2 mb-4">
+          <div className="px-3 py-2 rounded-lg" style={{ background: 'rgba(59,130,246,0.05)', border: '1px solid rgba(59,130,246,0.1)' }}>
+            <p className="text-[9px] uppercase font-bold tracking-wider" style={{ color: 'var(--text-muted)' }}>
+              FII {recent.length}D Net
+            </p>
+            <p className="text-sm font-black" style={{ color: fii30dNet >= 0 ? '#00d68f' : '#ff4d6a' }}>
+              {fii30dNet >= 0 ? '+' : ''}{(fii30dNet / 1000).toFixed(1)}K Cr
+            </p>
+            <p className="text-[9px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+              {fiiBuyDays} buy / {fiiSellDays} sell days
+            </p>
+          </div>
+          <div className="px-3 py-2 rounded-lg" style={{ background: 'rgba(139,92,246,0.05)', border: '1px solid rgba(139,92,246,0.1)' }}>
+            <p className="text-[9px] uppercase font-bold tracking-wider" style={{ color: 'var(--text-muted)' }}>
+              DII {recent.length}D Net
+            </p>
+            <p className="text-sm font-black" style={{ color: dii30dNet >= 0 ? '#00d68f' : '#ff4d6a' }}>
+              {dii30dNet >= 0 ? '+' : ''}{(dii30dNet / 1000).toFixed(1)}K Cr
+            </p>
+            <p className="text-[9px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+              {recent.filter(f => f.diiNet > 0).length} buy / {recent.filter(f => f.diiNet < 0).length} sell days
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Bar Chart — Last N days */}
       {recent.length > 0 && (
         <div>
-          <p className="text-[10px] uppercase font-bold tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
-            Last {Math.min(7, recent.length)} Days Net Flow (₹ Cr)
-          </p>
-          <div className="space-y-1.5">
-            {recent.slice(0, 7).reverse().map((flow, i) => {
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[10px] uppercase font-bold tracking-wider" style={{ color: 'var(--text-muted)' }}>
+              {showAll ? `Last ${recent.length} Days` : `Last ${Math.min(10, recent.length)} Days`} Net Flow (₹ Cr)
+            </p>
+            {recent.length > 10 && (
+              <button
+                onClick={() => setShowAll(!showAll)}
+                className="text-[10px] font-bold px-2 py-0.5 rounded-full transition-all hover:opacity-80"
+                style={{
+                  background: 'rgba(59,130,246,0.12)',
+                  color: '#60a5fa',
+                  border: '1px solid rgba(59,130,246,0.2)',
+                }}
+              >
+                {showAll ? '▲ Show 10 days' : `▼ Show all ${recent.length} days`}
+              </button>
+            )}
+          </div>
+          <div className={`space-y-1 ${showAll ? 'max-h-[700px] overflow-y-auto pr-1' : ''}`}
+            style={showAll ? { scrollbarWidth: 'thin', scrollbarColor: 'rgba(255,255,255,0.1) transparent' } : {}}>
+            {displayRecent.slice().reverse().map((flow, i) => {
               const fiiPct = (Math.abs(flow.fiiNet) / maxFlow) * 100;
               const diiPct = (Math.abs(flow.diiNet) / maxFlow) * 100;
               const dayLabel = new Date(flow.date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric' });
 
               return (
-                <div key={flow.date} className="flex items-center gap-2" style={{ animationDelay: `${i * 50}ms` }}>
-                  <span className="text-[9px] w-12 shrink-0 text-right" style={{ color: 'var(--text-muted)' }}>
+                <div key={flow.date} className="flex items-center gap-2" style={{ animationDelay: `${i * 30}ms` }}>
+                  <span className="text-[9px] w-14 shrink-0 text-right" style={{ color: 'var(--text-muted)' }}>
                     {dayLabel}
                   </span>
-                  <div className="flex-1 flex gap-1 items-center">
+                  <div className="flex-1 flex gap-0.5 items-center">
                     {/* FII bar */}
-                    <div className="flex-1 h-3.5 rounded-sm overflow-hidden" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                    <div className="flex-1 h-3 rounded-sm overflow-hidden" style={{ background: 'rgba(255,255,255,0.03)' }}>
                       <div
                         className="h-full rounded-sm transition-all duration-500"
                         style={{
@@ -154,9 +209,25 @@ export default function FIIDIIWidget() {
                         }}
                       />
                     </div>
-                    <span className="text-[9px] font-bold w-14 text-right shrink-0"
+                    <span className="text-[8px] font-bold w-12 text-right shrink-0"
                       style={{ color: flow.fiiNet >= 0 ? '#00d68f' : '#ff4d6a' }}>
                       {flow.fiiNet >= 0 ? '+' : ''}{(flow.fiiNet / 1000).toFixed(1)}k
+                    </span>
+                    {/* DII bar */}
+                    <div className="flex-1 h-3 rounded-sm overflow-hidden" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                      <div
+                        className="h-full rounded-sm transition-all duration-500"
+                        style={{
+                          width: `${Math.max(diiPct, 3)}%`,
+                          background: flow.diiNet >= 0
+                            ? 'linear-gradient(90deg, #818cf8, #a78bfa)'
+                            : 'linear-gradient(90deg, #f59e0b, #fbbf24)',
+                        }}
+                      />
+                    </div>
+                    <span className="text-[8px] font-bold w-12 text-right shrink-0"
+                      style={{ color: flow.diiNet >= 0 ? '#a78bfa' : '#f59e0b' }}>
+                      {flow.diiNet >= 0 ? '+' : ''}{(flow.diiNet / 1000).toFixed(1)}k
                     </span>
                   </div>
                 </div>
@@ -169,6 +240,10 @@ export default function FIIDIIWidget() {
             </span>
             <span className="flex items-center gap-1 text-[9px]" style={{ color: 'var(--text-muted)' }}>
               <span className="w-2 h-2 rounded-sm" style={{ background: '#8b5cf6' }} /> DII
+            </span>
+            <span className="flex items-center gap-1 text-[9px] ml-auto" style={{ color: 'var(--text-muted)' }}>
+              <span className="w-2 h-2 rounded-sm" style={{ background: '#00d68f' }} /> Buy
+              <span className="w-2 h-2 rounded-sm ml-1" style={{ background: '#ff4d6a' }} /> Sell
             </span>
           </div>
         </div>
