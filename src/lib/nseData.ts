@@ -231,6 +231,70 @@ export function isFnOStock(symbol: string): boolean {
 
 // ─── Save daily features to Supabase ─────────────────────────────────
 
+export async function saveDailyFeaturesBatch(items: Array<{
+  symbol: string;
+  date: string;
+  close: number;
+  open?: number;
+  high?: number;
+  low?: number;
+  volume?: number;
+  rsi?: number;
+  macdHist?: number;
+  ema20?: number;
+  ema50?: number;
+  bollingerUpper?: number;
+  bollingerLower?: number;
+  volumeRatio?: number;
+  sentimentScore?: number;
+  articleCount?: number;
+  pcr?: number;
+  deliveryPct?: number;
+  niftyClose?: number;
+  indiaVix?: number;
+  fiiNet?: number;
+  diiNet?: number;
+}>): Promise<boolean> {
+  if (!items || items.length === 0) return true;
+  try {
+    const db = getServiceClient();
+    const rows = items.map(f => ({
+      symbol: f.symbol,
+      date: f.date,
+      close: f.close,
+      open: f.open,
+      high: f.high,
+      low: f.low,
+      volume: f.volume,
+      rsi: f.rsi,
+      macd_hist: f.macdHist,
+      ema20: f.ema20,
+      ema50: f.ema50,
+      bollinger_upper: f.bollingerUpper,
+      bollinger_lower: f.bollingerLower,
+      volume_ratio: f.volumeRatio,
+      sentiment_score: f.sentimentScore,
+      article_count: f.articleCount,
+      pcr: f.pcr,
+      delivery_pct: f.deliveryPct,
+      nifty_close: f.niftyClose,
+      india_vix: f.indiaVix,
+      fii_net: f.fiiNet,
+      dii_net: f.diiNet,
+    }));
+
+    // Insert in chunks of 200 to stay safely under payload limits
+    for (let i = 0; i < rows.length; i += 200) {
+      const chunk = rows.slice(i, i + 200);
+      await db.from('daily_features').upsert(chunk, { onConflict: 'symbol,date' });
+    }
+    return true;
+  } catch (err) {
+    console.warn(`[NSE] Bulk daily features save failed:`, err);
+    return false;
+  }
+}
+
 export async function saveDailyFeatures(features: {
   symbol: string;
   date: string;

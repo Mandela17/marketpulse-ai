@@ -14,7 +14,7 @@ import { SECTORS } from '@/lib/sectorData';
 import { getServiceClient } from '@/lib/supabase';
 import type { NewsArticle } from '@/lib/types';
 import { fetchFIIDIIFlows, saveFIIDIIFlows } from '@/lib/fiiDiiData';
-import { fetchIndiaVIX, saveDailyFeatures, getHistoricalFeatures } from '@/lib/nseData';
+import { fetchIndiaVIX, saveDailyFeatures, saveDailyFeaturesBatch, getHistoricalFeatures } from '@/lib/nseData';
 import { fetchHistoricalOHLCV, computeRealTechnicals } from '@/lib/technicalAnalysis';
 import { fetchNifty50 } from '@/lib/stockData';
 import { resolveUnresolvedPredictions } from '@/lib/predictionHistory';
@@ -48,21 +48,25 @@ async function withRetry<T>(
   return null;
 }
 
-// Authenticate cron requests (Vercel sends this header automatically)
+// Authenticate cron requests (Vercel sends this header automatically, external crons can also pass ?secret=)
 function isAuthorized(request: Request): boolean {
   // In development, allow all requests
   if (process.env.NODE_ENV === 'development') return true;
   
-  // Vercel Cron sends this header with the CRON_SECRET
-  const authHeader = request.headers.get('authorization');
   const cronSecret = process.env.CRON_SECRET;
-  
   if (!cronSecret) {
     console.warn('[Cron] No CRON_SECRET set, allowing request');
     return true;
   }
-  
-  return authHeader === `Bearer ${cronSecret}`;
+
+  const authHeader = request.headers.get('authorization');
+  const headerMatch = authHeader === `Bearer ${cronSecret}`;
+
+  const { searchParams } = new URL(request.url);
+  const querySecret = searchParams.get('secret');
+  const queryMatch = querySecret === cronSecret;
+
+  return headerMatch || queryMatch;
 }
 
 // Save articles to DB
@@ -374,11 +378,12 @@ export async function GET(request: Request) {
       persistStockSentiments(analyzedArticles),
     ]);
 
-    // Step 9: Backfill historical data WITH COMPUTED TECHNICALS
-    // Previously only saved OHLCV — now computes RSI, MACD, EMA, Bollinger from price data
+    // Step 9: Backfill historical data WITH COMPUTED TECHNICALS (batch bulk insert)
+    // Limit to at most 2 stocks per run to prevent timeout on serverless functions
     console.log('[Cron] 📚 Checking for historical data backfill needs...');
     let backfilled = 0;
     for (const symbol of KEY_STOCKS) {
+      if (backfilled >= 2) break; // Max 2 stocks per run keeps execution fast and safe
       try {
         const existing = await getHistoricalFeatures(symbol, 500);
         if (existing.length < 200) {
@@ -386,7 +391,7 @@ export async function GET(request: Request) {
             () => fetchHistoricalOHLCV(symbol, 500),
             `backfill-ohlcv(${symbol})`,
             2,
-            2000,
+            1500,
           );
           if (ohlcv && ohlcv.length > existing.length + 10) {
             // Compute technicals from OHLCV in-memory
@@ -396,19 +401,16 @@ export async function GET(request: Request) {
             const ema20Arr = calculateEMA(closes, 20);
             const ema50Arr = calculateEMA(closes, 50);
 
+            const batchRows = [];
             for (let j = 0; j < ohlcv.length; j++) {
               const candle = ohlcv[j];
-              // RSI needs 15+ prior points
               const rsi = j >= 15 ? calculateRSI(closes.slice(0, j + 1), 14) : undefined;
-              // MACD needs 35+ points
               const macd = j >= 35 ? calculateMACD(closes.slice(0, j + 1)) : null;
-              // Bollinger needs 20+ points
               const bb = j >= 20 ? calculateBollingerBands(closes.slice(0, j + 1), 20, 2) : null;
-              // Volume ratio
               const volSlice = volumes.slice(0, j + 1);
               const volProfile = volSlice.length > 1 ? calculateVolumeProfile(volSlice) : null;
 
-              await saveDailyFeatures({
+              batchRows.push({
                 symbol,
                 date: candle.date,
                 close: candle.close,
@@ -416,7 +418,7 @@ export async function GET(request: Request) {
                 high: candle.high,
                 low: candle.low,
                 volume: candle.volume,
-                rsi: rsi,
+                rsi,
                 macdHist: macd?.histogram,
                 ema20: ema20Arr[j] || undefined,
                 ema50: ema50Arr[j] || undefined,
@@ -425,8 +427,11 @@ export async function GET(request: Request) {
                 volumeRatio: volProfile?.ratio,
               });
             }
+
+            // Bulk save all rows in 1 single network request!
+            await saveDailyFeaturesBatch(batchRows);
             backfilled++;
-            console.log(`[Cron] 📚 Backfilled ${ohlcv.length} days WITH technicals for ${symbol} (had ${existing.length})`);
+            console.log(`[Cron] 📚 Bulk-backfilled ${batchRows.length} days for ${symbol} in 1 request (had ${existing.length})`);
           }
         }
       } catch (err) {
@@ -437,22 +442,25 @@ export async function GET(request: Request) {
       console.log(`[Cron] 📚 Backfilled historical data for ${backfilled} stocks`);
     }
 
-    // Step 10: Train and freeze GBDT models for all key stocks
-    console.log('[Cron] 🤖 Training frozen GBDT models...');
+    // Step 10: Train and freeze GBDT models for key stocks in parallel batches of 5
+    console.log('[Cron] 🤖 Training frozen GBDT models in parallel...');
     let modelsTrained = 0;
     let modelsSkipped = 0;
-    for (const symbol of KEY_STOCKS) {
-      try {
-        const result = await trainAndSaveModel(symbol);
-        if (result.success) {
-          modelsTrained++;
-          console.log(`[Cron] 🤖 Trained model for ${symbol}: ${result.samples} samples, ${result.valAccuracy?.toFixed(1)}% val acc`);
-        } else {
-          modelsSkipped++;
-        }
-      } catch (err) {
-        modelsSkipped++;
-        console.warn(`[Cron] 🤖 Model training failed for ${symbol}:`, (err as Error).message);
+    for (let i = 0; i < KEY_STOCKS.length; i += 5) {
+      const batch = KEY_STOCKS.slice(i, i + 5);
+      const results = await Promise.all(
+        batch.map(async (symbol) => {
+          try {
+            return await trainAndSaveModel(symbol);
+          } catch (err: any) {
+            console.warn(`[Cron] 🤖 Model training failed for ${symbol}:`, err.message);
+            return { success: false };
+          }
+        })
+      );
+      for (const res of results) {
+        if (res.success) modelsTrained++;
+        else modelsSkipped++;
       }
     }
     console.log(`[Cron] 🤖 Models trained: ${modelsTrained}, skipped: ${modelsSkipped}`);
