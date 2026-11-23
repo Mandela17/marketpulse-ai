@@ -7,12 +7,11 @@ import SentimentGauge from '@/components/SentimentGauge';
 import NewsCard from '@/components/NewsCard';
 import { getBrokerConfig, saveBrokerConfig } from '@/lib/brokerApi';
 import { Calendar } from 'lucide-react';
-import FIIDIIWidget from '@/components/FIIDIIWidget';
 import MarketRegimeWidget from '@/components/MarketRegimeWidget';
+import InstitutionalFlowsSection from '@/components/InstitutionalFlowsSection';
 import TopMoversWidget from '@/components/TopMoversWidget';
 import VIXGaugeWidget from '@/components/VIXGaugeWidget';
 import GlobalMarketsWidget from '@/components/GlobalMarketsWidget';
-import BlockDealsWidget from '@/components/BlockDealsWidget';
 import { loadDashboardCache, saveDashboardCache, timeAgo } from '@/lib/dashboardCache';
 
 interface MarketData {
@@ -302,8 +301,6 @@ export default function Dashboard() {
             </p>
           )}
         </div>
-
-        {/* SENSEX */}
         <div className="glass-card-static rounded-2xl p-4 sm:p-5">
           <div className="flex items-center justify-between mb-1">
             <p className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: 'var(--text-muted)' }}>
@@ -476,15 +473,15 @@ export default function Dashboard() {
             </div>
           </div>
           )}
+
+          {/* ─── Institutional Money Flow Section ─── */}
+          <InstitutionalFlowsSection />
         </div>
 
         {/* Right Column — Widgets + News Feed */}
         <div className="xl:col-span-1 space-y-4">
           {/* Market Regime */}
           <MarketRegimeWidget />
-
-          {/* FII/DII Flows */}
-          <FIIDIIWidget />
 
           {/* Top Movers */}
           <TopMoversWidget />
@@ -494,9 +491,6 @@ export default function Dashboard() {
 
           {/* Global Markets */}
           <GlobalMarketsWidget />
-
-          {/* Institutional Block Deals Widget */}
-          <BlockDealsWidget limit={50} />
 
           {/* News Feed */}
           <div className="xl:sticky xl:top-6">
