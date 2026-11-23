@@ -33,6 +33,12 @@ export interface GBDTModel {
     bestIteration: number;
     totalSamples: number;
   };
+  // Phase 2: Store scaler parameters for z-score standardization
+  featureScaler?: {
+    means: number[];
+    stds: number[];
+    featureCount: number;
+  };
 }
 
 const DEFAULT_CONFIG: GBDTConfig = {

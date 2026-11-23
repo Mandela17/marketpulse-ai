@@ -1,6 +1,7 @@
-// Production ML Prediction Engine v4 — Server-Side
+// Production ML Prediction Engine v6 — Server-Side
 // Ensemble: Gradient Boosted Decision Tree (GBDT) + Rule-Based Heuristic
-// Features: 25-dimensional feature vector with global correlations, options intelligence, and alternative data
+// Features: 30-dimensional feature vector with multi-timeframe, global, options, and alternative data
+// Phase 2: Z-score standardization, frozen-model-only (no on-demand training), 5 new multi-timeframe features
 // Supports frozen model mode: train nightly via cron, serve predictions from saved weights.
 // Adaptive: Ensemble weights auto-tuned from rolling accuracy via adaptiveLearning.ts
 
@@ -89,7 +90,7 @@ function extractFeatures(row: any, prevRow: any, altData?: {
   flowDivergence?: number; cumFlow10d?: number;
   sp500Overnight?: number; dxyChange?: number; crudeChange?: number;
   giftNiftyGap?: number; maxPainDist?: number;
-}): FeatureVector {
+}, historyContext?: any[]): FeatureVector {
   const close = row.close || 0;
   const prevClose = prevRow?.close || close;
   const rsi = row.rsi || 50;
@@ -112,14 +113,53 @@ function extractFeatures(row: any, prevRow: any, altData?: {
   const fiiVelocity = altData?.fiiVelocity || 0;
   const flowDivergence = altData?.flowDivergence || 0;
   const cumFlow10d = altData?.cumFlow10d || 0;
-  // Phase 3: Global + Options data
+  // Global + Options data
   const sp500Overnight = altData?.sp500Overnight || 0;
   const dxyChange = altData?.dxyChange || 0;
   const crudeChange = altData?.crudeChange || 0;
   const giftNiftyGap = altData?.giftNiftyGap || 0;
   const maxPainDist = altData?.maxPainDist || 0;
 
-  // Feature engineering — 20 engineered features (no intercept needed for GBDT)
+  // ─── Phase 2: Multi-timeframe features from history context ───
+  let f_return5d = 0;
+  let f_return20d = 0;
+  let f_rsi5 = 0;
+  let f_atrDev = 0;
+  let f_sma200dev = 0;
+
+  if (historyContext && historyContext.length > 0) {
+    // 5-day return
+    if (historyContext.length >= 5) {
+      const close5dAgo = historyContext[historyContext.length - 5]?.close;
+      if (close5dAgo > 0) f_return5d = (close - close5dAgo) / close5dAgo;
+    }
+    // 20-day return
+    if (historyContext.length >= 20) {
+      const close20dAgo = historyContext[historyContext.length - 20]?.close;
+      if (close20dAgo > 0) f_return20d = (close - close20dAgo) / close20dAgo;
+    }
+    // RSI(5) — short-term RSI from recent closes
+    const recentCloses = historyContext.slice(-6).map((r: any) => r.close).concat(close);
+    f_rsi5 = (computeLocalRSI(recentCloses, 5) - 50) / 50;
+    // ATR (14-day average true range) normalized price deviation
+    if (historyContext.length >= 14) {
+      const atrSlice = historyContext.slice(-14);
+      let atrSum = 0;
+      for (const h of atrSlice) {
+        atrSum += (h.high || h.close) - (h.low || h.close);
+      }
+      const atr = atrSum / 14;
+      if (atr > 0) f_atrDev = Math.max(-3, Math.min(3, (close - ema20) / atr));
+    }
+    // Price vs SMA(200)
+    if (historyContext.length >= 200) {
+      const sma200slice = historyContext.slice(-200);
+      const sma200 = sma200slice.reduce((s: number, r: any) => s + (r.close || 0), 0) / 200;
+      if (sma200 > 0) f_sma200dev = close / sma200 - 1;
+    }
+  }
+
+  // Feature engineering — 25 core features + 5 multi-timeframe = 30 total
   const f_rsi = (rsi - 50) / 50;                                            // RSI deviation from neutral
   const f_macd = close > 0 ? macdHist / close : 0;                          // MACD relative to price
   const f_emaDev = ema20 > 0 ? (close - ema20) / ema20 : 0;                 // EMA deviation
@@ -137,7 +177,7 @@ function extractFeatures(row: any, prevRow: any, altData?: {
   const f_bbPosition = bollingerUpper !== bollingerLower
     ? (close - bollingerLower) / (bollingerUpper - bollingerLower) - 0.5     // BB position (-0.5 to 0.5)
     : 0;
-  // Phase 2 new features
+  // Alt data features
   const f_obi = obi;                                                         // Order Book Imbalance [-1, 1]
   const f_pocPosition = pocPosition / 100;                                   // POC distance normalized
   const f_fiiVelocity = fiiVelocity / 2000;                                 // FII acceleration normalized
@@ -145,7 +185,7 @@ function extractFeatures(row: any, prevRow: any, altData?: {
     ? Math.min(1, Math.log(1 + flowDivergence / 100000)) 
     : -Math.min(1, Math.log(1 + Math.abs(flowDivergence) / 100000));
   const f_cumFlow10d = cumFlow10d / 20000;                                   // 10-day cum flow normalized
-  // Phase 3: Global correlations + Options intelligence (already normalized [-1, 1])
+  // Global correlations + Options intelligence (already normalized [-1, 1])
   const f_sp500Overnight = sp500Overnight;
   const f_dxyChange = dxyChange;
   const f_crudeChange = crudeChange;
@@ -178,14 +218,39 @@ function extractFeatures(row: any, prevRow: any, altData?: {
       f_fiiVelocity,
       f_flowDivergence,
       f_cumFlow10d,
-      // Phase 3: Global + Options (5 new features)
+      // Global + Options (5 features)
       f_sp500Overnight,
       f_dxyChange,
       f_crudeChange,
       f_giftNiftyGap,
       f_maxPainDist,
+      // Phase 2: Multi-timeframe features (5 new)
+      f_return5d,
+      f_return20d,
+      f_rsi5,
+      f_atrDev,
+      f_sma200dev,
     ],
   };
+}
+
+// ─── Local RSI helper for multi-timeframe (avoids importing technicalAnalysis) ──
+function computeLocalRSI(closes: number[], period: number): number {
+  if (closes.length < period + 1) return 50;
+  let avgGain = 0, avgLoss = 0;
+  for (let i = 1; i <= period; i++) {
+    const diff = closes[i] - closes[i - 1];
+    if (diff > 0) avgGain += diff; else avgLoss += Math.abs(diff);
+  }
+  avgGain /= period;
+  avgLoss /= period;
+  for (let i = period + 1; i < closes.length; i++) {
+    const diff = closes[i] - closes[i - 1];
+    avgGain = (avgGain * (period - 1) + (diff > 0 ? diff : 0)) / period;
+    avgLoss = (avgLoss * (period - 1) + (diff < 0 ? Math.abs(diff) : 0)) / period;
+  }
+  if (avgLoss === 0) return 100;
+  return 100 - 100 / (1 + avgGain / avgLoss);
 }
 
 // ─── Rule-Based Heuristic (Model 2) ────────────────────────────────
@@ -305,6 +370,9 @@ const FEATURE_NAMES = [
   'Flow Divergence', 'Cumulative 10d Flow',
   'S&P 500 Overnight', 'DXY Change', 'Crude Change',
   'GIFT Nifty Gap', 'Max Pain Distance',
+  // Phase 2: Multi-timeframe features
+  '5-Day Return', '20-Day Return', 'RSI(5)',
+  'ATR-Normalized Dev', 'Price vs SMA(200)',
 ];
 
 // ─── Signal Confluence Scoring ──────────────────────────────────────
@@ -450,7 +518,7 @@ async function saveFrozenModel(symbol: string, model: GBDTModel): Promise<void> 
       training_samples: model.trainingMetrics.totalSamples,
       training_accuracy: model.trainingMetrics.trainingAccuracy,
       validation_accuracy: model.trainingMetrics.validationAccuracy,
-      model_version: 'v4-gbdt-frozen',
+      model_version: 'v6-multitf-zscore',
       trained_at: new Date().toISOString(),
     }, { onConflict: 'symbol' });
     // Update in-memory cache
@@ -459,6 +527,43 @@ async function saveFrozenModel(symbol: string, model: GBDTModel): Promise<void> 
   } catch (err) {
     console.warn(`[MLEngine] Failed to save frozen model for ${symbol}:`, err);
   }
+}
+
+// ─── Z-Score Standardization Helpers ────────────────────────────────
+
+interface FeatureScaler {
+  means: number[];
+  stds: number[];
+  featureCount: number;
+}
+
+function fitScaler(X: number[][]): FeatureScaler {
+  const n = X.length;
+  const d = X[0].length;
+  const means = new Array(d).fill(0);
+  const stds = new Array(d).fill(0);
+
+  for (let j = 0; j < d; j++) {
+    let sum = 0;
+    for (let i = 0; i < n; i++) sum += X[i][j];
+    means[j] = sum / n;
+
+    let sqSum = 0;
+    for (let i = 0; i < n; i++) sqSum += Math.pow(X[i][j] - means[j], 2);
+    stds[j] = Math.sqrt(sqSum / n) || 1; // avoid division by zero
+  }
+
+  return { means, stds, featureCount: d };
+}
+
+function transformFeatures(X: number[][], scaler: FeatureScaler): number[][] {
+  return X.map(row =>
+    row.map((val, j) => (val - scaler.means[j]) / scaler.stds[j])
+  );
+}
+
+function transformSingle(features: number[], scaler: FeatureScaler): number[] {
+  return features.map((val, j) => (val - scaler.means[j]) / scaler.stds[j]);
 }
 
 // ─── Train and Save Model (called by cron job) ─────────────────────
@@ -493,7 +598,9 @@ export async function trainAndSaveModel(symbol: string): Promise<{
         row.dii_net = matchingFlow.diiNet;
       }
 
-      const fv = extractFeatures(row, prevRow);
+      // Pass history context for multi-timeframe features
+      const histContext = history.slice(0, i);
+      const fv = extractFeatures(row, prevRow, undefined, histContext);
 
       // Skip rows where >30% of features are zero/default (likely missing data)
       const nullCount = fv.features.filter(f => f === 0).length;
@@ -512,10 +619,14 @@ export async function trainAndSaveModel(symbol: string): Promise<{
       return { success: false, error: `Too few quality training samples: ${m} (after filtering noise)` };
     }
 
+    // Phase 2: Z-score standardize features (fit on training data only)
+    const scaler = fitScaler(X);
+    const X_scaled = transformFeatures(X, scaler);
+
     const trainSize = Math.floor(m * 0.7);
-    const X_train = X.slice(0, trainSize);
+    const X_train = X_scaled.slice(0, trainSize);
     const Y_train = Y.slice(0, trainSize);
-    const X_val = X.slice(trainSize);
+    const X_val = X_scaled.slice(trainSize);
     const Y_val = Y.slice(trainSize);
 
     const gbdtModel = trainGBDT(X_train, Y_train, X_val, Y_val, {
@@ -527,6 +638,9 @@ export async function trainAndSaveModel(symbol: string): Promise<{
       l2Regularization: 1.0,
       earlyStoppingRounds: 8,
     });
+
+    // Store scaler parameters with the model
+    gbdtModel.featureScaler = scaler;
 
     await saveFrozenModel(symbol, gbdtModel);
 
@@ -634,7 +748,7 @@ export async function generatePrediction(
         },
         supportingSignals,
         contradictingSignals,
-        modelVersion: 'v5-selective',
+        modelVersion: 'v6-multitf-heuristic',
         predictedAt: new Date().toISOString(),
       });
 
@@ -658,14 +772,14 @@ export async function generatePrediction(
           trainingAccuracy: 0,
           validationAccuracy: 0,
           totalSamples: history.length,
-          modelVersion: 'v5-selective',
+          modelVersion: 'v6-multitf-heuristic',
           bestIteration: 0,
           ensembleWeights,
         },
       };
     }
 
-    // 4. Build training data from historical features
+    // 4. Build training data from historical features (for heuristic context + fallback)
     const X: number[][] = [];
     const Y: number[] = [];
     const featureVectors: FeatureVector[] = [];
@@ -682,7 +796,9 @@ export async function generatePrediction(
         row.dii_net = matchingFlow.diiNet;
       }
 
-      const fv = extractFeatures(row, prevRow);
+      // Pass history context for multi-timeframe features
+      const histContext = history.slice(0, i);
+      const fv = extractFeatures(row, prevRow, undefined, histContext);
 
       // Skip rows where >40% of features are zero/default (likely missing data from backfill)
       const nullCount = fv.features.filter(f => f === 0).length;
@@ -700,35 +816,21 @@ export async function generatePrediction(
     const m = X.length;
     if (m < 8) return null;
 
-    // 5. Chronological train/validation split (70/30)
-    const trainSize = Math.floor(m * 0.7);
-    const X_train = X.slice(0, trainSize);
-    const Y_train = Y.slice(0, trainSize);
-    const X_val = X.slice(trainSize);
-    const Y_val = Y.slice(trainSize);
-
-    // 6. Try loading frozen model first, fall back to training on-demand
+    // 5. Phase 2: Load frozen model — NO on-demand training
     let gbdtModel = await loadFrozenModel(symbol);
     let usedFrozenModel = false;
+    let scaler: FeatureScaler | null = null;
 
     if (gbdtModel && gbdtModel.trees && gbdtModel.trees.length > 0) {
       console.log(`[MLEngine] Using frozen model for ${symbol} (${gbdtModel.trainingMetrics.totalSamples} samples)`);
       usedFrozenModel = true;
+      scaler = gbdtModel.featureScaler || null;
     } else {
-      // Fall back to training on-demand
-      console.log(`[MLEngine] No frozen model for ${symbol}, training on-demand...`);
-      gbdtModel = trainGBDT(X_train, Y_train, X_val, Y_val, {
-        numTrees: m < 30 ? 20 : m < 100 ? 50 : 70,
-        maxDepth: m < 30 ? 3 : 4,
-        learningRate: 0.08,
-        subsampleRatio: 0.8,
-        minSamplesLeaf: Math.max(2, Math.floor(trainSize * 0.04)),
-        l2Regularization: 1.0,
-        earlyStoppingRounds: 6,
-      });
+      // Phase 2: Instead of training on-demand, return a heuristic-only prediction
+      console.warn(`[MLEngine] No frozen model for ${symbol} — using heuristic-only (cron hasn't trained yet)`);
     }
 
-    // 7. Predict today → tomorrow
+    // 6. Predict today → tomorrow
     const latestRow = history[history.length - 1];
     const prevLatestRow = history[history.length - 2];
 
@@ -748,10 +850,18 @@ export async function generatePrediction(
     latestRow.dii_net = fiiFeatures.diiNetToday || latestRow.dii_net || 0;
     latestRow.india_vix = latestVix;
 
-    const todayFV = extractFeatures(latestRow, prevLatestRow, mergedAltData);
+    // Pass full history context for multi-timeframe features
+    const todayFV = extractFeatures(latestRow, prevLatestRow, mergedAltData, history.slice(0, -1));
 
     // Sub-model predictions
-    const gbdtProb = predictGBDT(gbdtModel, todayFV.features);
+    let gbdtProb = 0.5; // default neutral if no frozen model
+    if (usedFrozenModel && gbdtModel) {
+      // Apply z-score standardization if scaler is available
+      const scaledFeatures = scaler
+        ? transformSingle(todayFV.features, scaler)
+        : todayFV.features;
+      gbdtProb = predictGBDT(gbdtModel, scaledFeatures);
+    }
     const heurResult = predictHeuristic(todayFV);
 
     // 8. Ensemble: Adaptive weighted vote
@@ -771,6 +881,8 @@ export async function generatePrediction(
     const gbdtDir = gbdtProb >= 0.5 ? 'up' : 'down';
     const heurDir = heurResult.probability >= 0.5 ? 'up' : 'down';
     if (gbdtDir !== heurDir) confidenceDiscount += 8;
+    // Phase 2: Extra discount if no frozen model (heuristic-only mode)
+    if (!usedFrozenModel) confidenceDiscount += 12;
 
     const confidence = Math.max(50, Math.min(95, rawConfidence - confidenceDiscount));
 
@@ -813,7 +925,7 @@ export async function generatePrediction(
         trainingAccuracy: gbdtModel.trainingMetrics.trainingAccuracy,
         validationAccuracy: gbdtModel.trainingMetrics.validationAccuracy,
         totalSamples: m,
-        modelVersion: usedFrozenModel ? 'v5-selective-frozen' : 'v5-selective',
+        modelVersion: usedFrozenModel ? 'v6-multitf-frozen' : 'v6-multitf-heuristic',
         bestIteration: gbdtModel.trainingMetrics.bestIteration,
         ensembleWeights,
       },
