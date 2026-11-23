@@ -20,10 +20,10 @@ interface RateLimitState {
 }
 
 const DEFAULT_CONFIG: RateLimitConfig = {
-  maxRequestsPerMinute: 25,     // Yahoo free tier is generous but bursty
-  maxRequestsPerHour: 500,
-  backoffBaseMs: 2000,
-  maxBackoffMs: 60000,          // Max 1 minute backoff
+  maxRequestsPerMinute: 120,    // High burst capacity to keep cron runs well under 20s
+  maxRequestsPerHour: 1000,
+  backoffBaseMs: 1000,
+  maxBackoffMs: 15000,          // Max 15 second backoff
 };
 
 // In-memory state (resets on cold start — fine for serverless)

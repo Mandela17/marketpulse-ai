@@ -196,31 +196,27 @@ async function collectDailyFeatures(
   diiNet: number,
 ): Promise<number> {
   const today = new Date().toISOString().split('T')[0];
-  let saved = 0;
+  const allFeatures: any[] = [];
 
-  // Process in small batches to avoid overwhelming Yahoo Finance
-  for (let i = 0; i < KEY_STOCKS.length; i += 5) {
-    const batch = KEY_STOCKS.slice(i, i + 5);
+  // Process in parallel batches of 8 for fast completion
+  for (let i = 0; i < KEY_STOCKS.length; i += 8) {
+    const batch = KEY_STOCKS.slice(i, i + 8);
 
     const promises = batch.map(async (symbol) => {
       try {
-        // Use retry with exponential backoff for Yahoo Finance calls
         const technicals = await withRetry(
-          async () => {
-            await waitForRateLimit('yahoo');
-            const result = await computeRealTechnicals(symbol);
-            reportSuccess('yahoo');
-            return result;
-          },
+          () => computeRealTechnicals(symbol),
           `technicals(${symbol})`,
+          2,
+          500,
         );
         if (!technicals || technicals.currentPrice === 0) return;
 
-        await saveDailyFeatures({
+        allFeatures.push({
           symbol,
           date: today,
           close: technicals.currentPrice,
-          open: technicals.dayLow, // Simplified — use day low as proxy
+          open: technicals.dayLow,
           high: technicals.dayHigh,
           low: technicals.dayLow,
           volume: technicals.volumeToday,
@@ -238,22 +234,23 @@ async function collectDailyFeatures(
           fiiNet,
           diiNet,
         });
-
-        saved++;
       } catch (err) {
         console.warn(`[Cron] Daily features error for ${symbol}:`, (err as Error).message);
       }
     });
 
     await Promise.all(promises);
-
-    // Small delay between batches
-    if (i + 5 < KEY_STOCKS.length) {
-      await new Promise(resolve => setTimeout(resolve, 500));
+    if (i + 8 < KEY_STOCKS.length) {
+      await new Promise(resolve => setTimeout(resolve, 100));
     }
   }
 
-  return saved;
+  // 1 single bulk DB upsert for all 39 stocks!
+  if (allFeatures.length > 0) {
+    await saveDailyFeaturesBatch(allFeatures);
+  }
+
+  return allFeatures.length;
 }
 
 // ─── NEW: Resolve yesterday's predictions ────────────────────────────
@@ -263,14 +260,15 @@ async function resolvePredictions(): Promise<{ resolved: number; correct: number
     // Fetch closing prices for key stocks
     const closingPrices: Record<string, { todayClose: number; prevClose: number }> = {};
 
-    for (let i = 0; i < KEY_STOCKS.length; i += 5) {
-      const batch = KEY_STOCKS.slice(i, i + 5);
+    for (let i = 0; i < KEY_STOCKS.length; i += 10) {
+      const batch = KEY_STOCKS.slice(i, i + 10);
       const promises = batch.map(async (symbol) => {
         try {
           const ohlcv = await withRetry(
             () => fetchHistoricalOHLCV(symbol, 5),
             `ohlcv(${symbol})`,
-            2, // fewer retries for resolution — not critical
+            1, // 1 try is plenty for resolution closing prices
+            300,
           );
           if (ohlcv && ohlcv.length >= 2) {
             closingPrices[symbol] = {
@@ -281,8 +279,8 @@ async function resolvePredictions(): Promise<{ resolved: number; correct: number
         } catch {}
       });
       await Promise.all(promises);
-      if (i + 5 < KEY_STOCKS.length) {
-        await new Promise(resolve => setTimeout(resolve, 300));
+      if (i + 10 < KEY_STOCKS.length) {
+        await new Promise(resolve => setTimeout(resolve, 50));
       }
     }
 
