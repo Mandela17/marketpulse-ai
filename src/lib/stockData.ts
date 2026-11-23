@@ -94,7 +94,7 @@ export async function fetchStockPrice(symbol: string): Promise<StockPrice | null
 // Alternative: Use Google Finance as fallback for index data
 async function fetchIndexFromGoogle(indexName: 'NIFTY_50' | 'SENSEX'): Promise<IndexData | null> {
   try {
-    const query = indexName === 'NIFTY_50' ? 'NIFTY+50' : 'SENSEX';
+    const query = indexName === 'NIFTY_50' ? 'NIFTY_50' : 'SENSEX';
     const url = `https://www.google.com/finance/quote/${query}:INDEXNSE`;
     const altUrl = indexName === 'SENSEX' ? 'https://www.google.com/finance/quote/SENSEX:INDEXBOM' : url;
     
@@ -114,10 +114,17 @@ async function fetchIndexFromGoogle(indexName: 'NIFTY_50' | 'SENSEX'): Promise<I
     const pctMatch = html.match(/data-last-change-percent="(-?[\d.]+)"/);
     
     if (priceMatch) {
+      const value = parseFloat(priceMatch[1]);
+      const change = changeMatch ? parseFloat(changeMatch[1]) : 0;
+      let changePercent = pctMatch ? parseFloat(pctMatch[1]) : 0;
+      if (changePercent === 0 && change !== 0 && value > 0) {
+        const prevClose = value - change;
+        changePercent = prevClose > 0 ? (change / prevClose) * 100 : 0;
+      }
       return {
-        value: parseFloat(priceMatch[1]),
-        change: changeMatch ? parseFloat(changeMatch[1]) : 0,
-        changePercent: pctMatch ? parseFloat(pctMatch[1]) : 0,
+        value,
+        change,
+        changePercent,
       };
     }
     return null;
@@ -132,7 +139,12 @@ export async function fetchNifty50(): Promise<IndexData> {
   try {
     const data = await fetchStockPrice('^NSEI');
     if (data && data.price > 0) {
-      return { value: data.price, change: data.change, changePercent: data.changePercent };
+      let changePercent = data.changePercent;
+      if (changePercent === 0 && data.change !== 0) {
+        const prevClose = data.previousClose > 0 ? data.previousClose : data.price - data.change;
+        changePercent = prevClose > 0 ? (data.change / prevClose) * 100 : 0;
+      }
+      return { value: data.price, change: data.change, changePercent };
     }
   } catch {}
 
@@ -150,7 +162,12 @@ export async function fetchSensex(): Promise<IndexData> {
   try {
     const data = await fetchStockPrice('^BSESN');
     if (data && data.price > 0) {
-      return { value: data.price, change: data.change, changePercent: data.changePercent };
+      let changePercent = data.changePercent;
+      if (changePercent === 0 && data.change !== 0) {
+        const prevClose = data.previousClose > 0 ? data.previousClose : data.price - data.change;
+        changePercent = prevClose > 0 ? (data.change / prevClose) * 100 : 0;
+      }
+      return { value: data.price, change: data.change, changePercent };
     }
   } catch {}
 

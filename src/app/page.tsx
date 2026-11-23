@@ -144,12 +144,19 @@ export default function Dashboard() {
             }).then(r => r.json());
 
             if (niftyRes && !niftyRes.error && niftyRes.price > 0) {
+              const prevClose = niftyRes.previousClose > 0 
+                ? niftyRes.previousClose 
+                : (niftyRes.price && niftyRes.change ? niftyRes.price - niftyRes.change : 0);
+              const cp = niftyRes.changePercent !== 0 
+                ? niftyRes.changePercent 
+                : (prevClose > 0 ? (niftyRes.change / prevClose) * 100 : 0);
+
               setMarketData(prev => ({
                 ...prev,
                 nifty50: {
                   value: niftyRes.price,
                   change: niftyRes.change,
-                  changePercent: niftyRes.changePercent,
+                  changePercent: Number(cp.toFixed(2)),
                 },
                 sensex: prev?.sensex || { value: 0, change: 0, changePercent: 0 },
                 marketStatus: prev?.marketStatus || 'closed',
@@ -293,13 +300,20 @@ export default function Dashboard() {
               <span className="inline-block h-6 w-24 rounded animate-pulse" style={{ background: 'var(--border-color)' }} />
             )}
           </p>
-          {nifty.value > 0 && (
-            <p className="text-sm font-medium" style={{
-              color: nifty.change >= 0 ? 'var(--accent-green)' : 'var(--accent-red)',
-            }}>
-              {nifty.change >= 0 ? '+' : ''}{nifty.change.toFixed(2)} ({nifty.changePercent >= 0 ? '+' : ''}{nifty.changePercent.toFixed(2)}%)
-            </p>
-          )}
+          {nifty.value > 0 && (() => {
+            const pct = nifty.changePercent !== 0 
+              ? nifty.changePercent 
+              : (nifty.change !== 0 && nifty.value > 0
+                  ? (nifty.change / (nifty.value - nifty.change)) * 100 
+                  : 0);
+            return (
+              <p className="text-sm font-medium" style={{
+                color: nifty.change >= 0 ? 'var(--accent-green)' : 'var(--accent-red)',
+              }}>
+                {nifty.change >= 0 ? '+' : ''}{nifty.change.toFixed(2)} ({pct >= 0 ? '+' : ''}{pct.toFixed(2)}%)
+              </p>
+            );
+          })()}
         </div>
         <div className="glass-card-static rounded-2xl p-4 sm:p-5">
           <div className="flex items-center justify-between mb-1">
@@ -313,13 +327,20 @@ export default function Dashboard() {
               <span className="inline-block h-6 w-24 rounded animate-pulse" style={{ background: 'var(--border-color)' }} />
             )}
           </p>
-          {sensex.value > 0 && (
-            <p className="text-sm font-medium" style={{
-              color: sensex.change >= 0 ? 'var(--accent-green)' : 'var(--accent-red)',
-            }}>
-              {sensex.change >= 0 ? '+' : ''}{sensex.change.toFixed(2)} ({sensex.changePercent >= 0 ? '+' : ''}{sensex.changePercent.toFixed(2)}%)
-            </p>
-          )}
+          {sensex.value > 0 && (() => {
+            const pct = sensex.changePercent !== 0 
+              ? sensex.changePercent 
+              : (sensex.change !== 0 && sensex.value > 0
+                  ? (sensex.change / (sensex.value - sensex.change)) * 100 
+                  : 0);
+            return (
+              <p className="text-sm font-medium" style={{
+                color: sensex.change >= 0 ? 'var(--accent-green)' : 'var(--accent-red)',
+              }}>
+                {sensex.change >= 0 ? '+' : ''}{sensex.change.toFixed(2)} ({pct >= 0 ? '+' : ''}{pct.toFixed(2)}%)
+              </p>
+            );
+          })()}
         </div>
 
         {/* News Sentiment */}

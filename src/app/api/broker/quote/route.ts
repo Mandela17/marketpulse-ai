@@ -86,16 +86,20 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'No quote data returned' }, { status: 404 });
     }
 
+    const prevClose = q.ohlc?.close || q.close_price || (q.last_price && q.net_change ? q.last_price - q.net_change : 0);
+    const change = q.net_change ?? (prevClose > 0 ? q.last_price - prevClose : 0);
+    const changePercent = prevClose > 0 ? (change / prevClose) * 100 : 0;
+
     return NextResponse.json({
       symbol,
       instrumentKey,
       price: q.last_price || 0,
-      change: q.net_change || (q.last_price - q.close_price) || 0,
-      changePercent: q.close_price > 0 ? ((q.last_price - q.close_price) / q.close_price) * 100 : 0,
+      change: Number(change.toFixed(2)),
+      changePercent: Number(changePercent.toFixed(2)),
       open: q.ohlc?.open || 0,
       high: q.ohlc?.high || 0,
       low: q.ohlc?.low || 0,
-      previousClose: q.close_price || 0,
+      previousClose: Number(prevClose.toFixed(2)),
       volume: q.volume || 0,
       averagePrice: q.average_price || 0,
       totalBuyQty: q.total_buy_quantity || 0,
