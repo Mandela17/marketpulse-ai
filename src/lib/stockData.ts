@@ -51,6 +51,62 @@ async function yahooFetch(yahooTicker: string): Promise<any> {
   return null;
 }
 
+// Fetch quote data from Yahoo Finance v6 quote endpoint (has change/changePercent)
+async function yahooQuoteFetch(yahooTicker: string): Promise<any> {
+  const encodedTicker = encodeURIComponent(yahooTicker);
+  const urls = [
+    `https://query1.finance.yahoo.com/v6/finance/quote?symbols=${encodedTicker}`,
+    `https://query2.finance.yahoo.com/v6/finance/quote?symbols=${encodedTicker}`,
+  ];
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'application/json',
+        },
+        next: { revalidate: 300 },
+      });
+      if (res.ok) {
+        const json = await res.json();
+        const q = json?.quoteResponse?.result?.[0];
+        if (q) return q;
+      }
+    } catch { continue; }
+  }
+  return null;
+}
+
+// Fetch 5-day chart to compute real previous-trading-day close (works on weekends)
+async function yahooChart5d(yahooTicker: string): Promise<{ prevClose: number; lastClose: number; change: number; changePercent: number } | null> {
+  const encodedTicker = encodeURIComponent(yahooTicker);
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodedTicker}?interval=1d&range=5d`;
+  try {
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json',
+      },
+      next: { revalidate: 300 },
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    const result = json?.chart?.result?.[0];
+    if (!result) return null;
+    const closes = result.indicators?.quote?.[0]?.close as number[] | undefined;
+    const meta = result.meta;
+    const lastClose = meta?.regularMarketPrice || 0;
+    if (!closes || closes.length < 2 || lastClose <= 0) return null;
+    // Last valid close before the final day = previous trading day's close
+    const validCloses = closes.filter((c: number | null) => c != null && c > 0);
+    if (validCloses.length < 2) return null;
+    const prevClose = validCloses[validCloses.length - 2];
+    const change = lastClose - prevClose;
+    const changePercent = prevClose > 0 ? (change / prevClose) * 100 : 0;
+    return { prevClose, lastClose, change, changePercent };
+  } catch { return null; }
+}
+
 // Fetch stock price from Yahoo Finance (with caching)
 export async function fetchStockPrice(symbol: string): Promise<StockPrice | null> {
   const cacheKey = `quote:${symbol}`;
@@ -60,18 +116,42 @@ export async function fetchStockPrice(symbol: string): Promise<StockPrice | null
   const nseSym = toYahooTicker(symbol);
 
   try {
+    // Try v6 quote endpoint first — it has reliable change/changePercent fields
+    const quote = await yahooQuoteFetch(nseSym);
+    if (quote && quote.regularMarketPrice > 0) {
+      const price = quote.regularMarketPrice;
+      const prevClose = quote.regularMarketPreviousClose || quote.previousClose || price;
+      const change = quote.regularMarketChange ?? (price - prevClose);
+      let changePercent = quote.regularMarketChangePercent ?? 0;
+      if (changePercent === 0 && change !== 0 && prevClose > 0) {
+        changePercent = (change / prevClose) * 100;
+      }
+
+      const result: StockPrice = {
+        symbol,
+        name: quote.shortName || quote.longName || symbol,
+        price,
+        change,
+        changePercent,
+        previousClose: prevClose,
+        dayHigh: quote.regularMarketDayHigh || price,
+        dayLow: quote.regularMarketDayLow || price,
+        volume: quote.regularMarketVolume || 0,
+        currency: quote.currency || 'INR',
+      };
+      quoteCache.set(cacheKey, result, QUOTE_TTL);
+      return result;
+    }
+
+    // Fallback to v8 chart endpoint
     const data = await yahooFetch(nseSym);
     const meta = data?.chart?.result?.[0]?.meta;
     if (!meta) return null;
 
     const price = meta.regularMarketPrice || 0;
     const prevClose = meta.chartPreviousClose || meta.previousClose || price;
-    // Prefer Yahoo-provided change/percent (most reliable), fall back to manual calc
-    const change = meta.fulldayChange ?? (price - prevClose);
-    let changePercent = meta.regularMarketChangePercent ?? meta.fulldayChangePercent ?? 0;
-    if (changePercent === 0 && change !== 0 && prevClose > 0) {
-      changePercent = (change / prevClose) * 100;
-    }
+    const change = price - prevClose;
+    let changePercent = prevClose > 0 && change !== 0 ? (change / prevClose) * 100 : 0;
 
     const result: StockPrice = {
       symbol: symbol,
@@ -144,11 +224,21 @@ export async function fetchNifty50(): Promise<IndexData> {
     const data = await fetchStockPrice('^NSEI');
     if (data && data.price > 0) {
       let changePercent = data.changePercent;
-      if (changePercent === 0 && data.change !== 0) {
-        const prevClose = data.previousClose > 0 ? data.previousClose : data.price - data.change;
-        changePercent = prevClose > 0 ? (data.change / prevClose) * 100 : 0;
+      let change = data.change;
+      // If percent is still 0 (weekend/holiday), use 5-day chart to compute real change
+      if (changePercent === 0 && Math.abs(change) < 0.01) {
+        const chart5d = await yahooChart5d(toYahooTicker('^NSEI'));
+        if (chart5d) {
+          change = chart5d.change;
+          changePercent = chart5d.changePercent;
+          return { value: data.price, change, changePercent };
+        }
       }
-      return { value: data.price, change: data.change, changePercent };
+      if (changePercent === 0 && change !== 0) {
+        const prevClose = data.previousClose > 0 ? data.previousClose : data.price - change;
+        changePercent = prevClose > 0 ? (change / prevClose) * 100 : 0;
+      }
+      return { value: data.price, change, changePercent };
     }
   } catch {}
 
@@ -167,11 +257,21 @@ export async function fetchSensex(): Promise<IndexData> {
     const data = await fetchStockPrice('^BSESN');
     if (data && data.price > 0) {
       let changePercent = data.changePercent;
-      if (changePercent === 0 && data.change !== 0) {
-        const prevClose = data.previousClose > 0 ? data.previousClose : data.price - data.change;
-        changePercent = prevClose > 0 ? (data.change / prevClose) * 100 : 0;
+      let change = data.change;
+      // If percent is still 0 (weekend/holiday), use 5-day chart to compute real change
+      if (changePercent === 0 && Math.abs(change) < 0.01) {
+        const chart5d = await yahooChart5d(toYahooTicker('^BSESN'));
+        if (chart5d) {
+          change = chart5d.change;
+          changePercent = chart5d.changePercent;
+          return { value: data.price, change, changePercent };
+        }
       }
-      return { value: data.price, change: data.change, changePercent };
+      if (changePercent === 0 && change !== 0) {
+        const prevClose = data.previousClose > 0 ? data.previousClose : data.price - change;
+        changePercent = prevClose > 0 ? (change / prevClose) * 100 : 0;
+      }
+      return { value: data.price, change, changePercent };
     }
   } catch {}
 

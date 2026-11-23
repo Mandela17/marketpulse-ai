@@ -333,17 +333,35 @@ export async function GET(request: Request) {
       persistStockSentiments(analyzedArticles),
     ]);
 
-    // Step 9: Backfill historical data for stocks with insufficient history
+    // Step 9: Backfill historical data WITH COMPUTED TECHNICALS
+    // Previously only saved OHLCV — now computes RSI, MACD, EMA, Bollinger from price data
     console.log('[Cron] 📚 Checking for historical data backfill needs...');
     let backfilled = 0;
     for (const symbol of KEY_STOCKS) {
       try {
         const existing = await getHistoricalFeatures(symbol, 500);
         if (existing.length < 200) {
-          // Fetch 2 years of OHLCV and save daily features
           const ohlcv = await fetchHistoricalOHLCV(symbol, 500);
           if (ohlcv.length > existing.length + 10) {
-            for (const candle of ohlcv) {
+            // Compute technicals from OHLCV in-memory
+            const { calculateRSI, calculateEMA, calculateMACD, calculateBollingerBands, calculateVolumeProfile } = await import('@/lib/technicalAnalysis');
+            const closes = ohlcv.map(c => c.close);
+            const volumes = ohlcv.map(c => c.volume);
+            const ema20Arr = calculateEMA(closes, 20);
+            const ema50Arr = calculateEMA(closes, 50);
+
+            for (let j = 0; j < ohlcv.length; j++) {
+              const candle = ohlcv[j];
+              // RSI needs 15+ prior points
+              const rsi = j >= 15 ? calculateRSI(closes.slice(0, j + 1), 14) : undefined;
+              // MACD needs 35+ points
+              const macd = j >= 35 ? calculateMACD(closes.slice(0, j + 1)) : null;
+              // Bollinger needs 20+ points
+              const bb = j >= 20 ? calculateBollingerBands(closes.slice(0, j + 1), 20, 2) : null;
+              // Volume ratio
+              const volSlice = volumes.slice(0, j + 1);
+              const volProfile = volSlice.length > 1 ? calculateVolumeProfile(volSlice) : null;
+
               await saveDailyFeatures({
                 symbol,
                 date: candle.date,
@@ -352,13 +370,22 @@ export async function GET(request: Request) {
                 high: candle.high,
                 low: candle.low,
                 volume: candle.volume,
+                rsi: rsi,
+                macdHist: macd?.histogram,
+                ema20: ema20Arr[j] || undefined,
+                ema50: ema50Arr[j] || undefined,
+                bollingerUpper: bb?.upper,
+                bollingerLower: bb?.lower,
+                volumeRatio: volProfile?.ratio,
               });
             }
             backfilled++;
-            console.log(`[Cron] 📚 Backfilled ${ohlcv.length} days for ${symbol} (had ${existing.length})`);
+            console.log(`[Cron] 📚 Backfilled ${ohlcv.length} days WITH technicals for ${symbol} (had ${existing.length})`);
           }
         }
-      } catch {}
+      } catch (err) {
+        console.warn(`[Cron] 📚 Backfill error for ${symbol}:`, (err as Error).message);
+      }
     }
     if (backfilled > 0) {
       console.log(`[Cron] 📚 Backfilled historical data for ${backfilled} stocks`);
@@ -409,11 +436,40 @@ export async function GET(request: Request) {
     
     console.log(`[Cron] ✅ Complete in ${duration}s — ${articlesSaved} articles, ${featuresSaved} features, ${modelsTrained} models trained, ${resolution.resolved} predictions resolved`);
     
+    // Step 11: Save cron health status to Supabase for monitoring
+    try {
+      const db = getServiceClient();
+      await db.from('cron_runs').upsert({
+        job_name: 'daily-collect',
+        ran_at: new Date().toISOString(),
+        status: 'success',
+        duration_ms: Date.now() - startTime,
+        stocks_processed: featuresSaved,
+        models_trained: modelsTrained,
+        predictions_resolved: resolution.resolved,
+        articles_saved: articlesSaved,
+      }, { onConflict: 'job_name' });
+    } catch {
+      console.warn('[Cron] Failed to save cron health status (table may not exist yet)');
+    }
+
     return NextResponse.json(result);
   } catch (error: any) {
     const duration = ((Date.now() - startTime) / 1000).toFixed(1);
     console.error(`[Cron] ❌ Failed after ${duration}s:`, error);
     
+    // Log failure to cron_runs
+    try {
+      const db = getServiceClient();
+      await db.from('cron_runs').upsert({
+        job_name: 'daily-collect',
+        ran_at: new Date().toISOString(),
+        status: 'failed',
+        duration_ms: Date.now() - startTime,
+        error_message: error.message?.substring(0, 500),
+      }, { onConflict: 'job_name' });
+    } catch {}
+
     return NextResponse.json(
       { 
         success: false, 

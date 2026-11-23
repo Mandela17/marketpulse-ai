@@ -494,13 +494,22 @@ export async function trainAndSaveModel(symbol: string): Promise<{
       }
 
       const fv = extractFeatures(row, prevRow);
+
+      // Skip rows where >30% of features are zero/default (likely missing data)
+      const nullCount = fv.features.filter(f => f === 0).length;
+      if (nullCount / fv.features.length > 0.4) continue;
+
+      // Use threshold-based labels: skip flat days (<0.3% move) — they're noise
+      const returnPct = (nextRow.close - row.close) / row.close;
+      if (Math.abs(returnPct) < 0.003) continue; // Skip noise
+
       X.push(fv.features);
-      Y.push(nextRow.close > row.close ? 1 : 0);
+      Y.push(returnPct > 0 ? 1 : 0);
     }
 
     const m = X.length;
-    if (m < 20) {
-      return { success: false, error: `Too few training samples: ${m}` };
+    if (m < 15) {
+      return { success: false, error: `Too few quality training samples: ${m} (after filtering noise)` };
     }
 
     const trainSize = Math.floor(m * 0.7);
@@ -674,11 +683,18 @@ export async function generatePrediction(
       }
 
       const fv = extractFeatures(row, prevRow);
+
+      // Skip rows where >40% of features are zero/default (likely missing data from backfill)
+      const nullCount = fv.features.filter(f => f === 0).length;
+      if (nullCount / fv.features.length > 0.4) continue;
+
+      // Threshold-based labels: skip flat days (<0.3% move) — they're noise the model can't learn from
+      const returnPct = (nextRow.close - row.close) / row.close;
+      if (Math.abs(returnPct) < 0.003) continue;
+
       featureVectors.push(fv);
       X.push(fv.features);
-
-      // Label: did price go up next day?
-      Y.push(nextRow.close > row.close ? 1 : 0);
+      Y.push(returnPct > 0 ? 1 : 0);
     }
 
     const m = X.length;

@@ -19,8 +19,8 @@ export interface AdaptiveLearningResult {
 }
 
 const DEFAULT_WEIGHTS: EnsembleWeights = {
-  gbdt: 0.60,
-  heuristic: 0.40,
+  gbdt: 0.85,
+  heuristic: 0.15,
   lastUpdated: new Date().toISOString(),
 };
 
@@ -116,8 +116,8 @@ export async function runAdaptiveLearningCycle(): Promise<AdaptiveLearningResult
   let gbdtWeight = totalScore > 0 ? gbdtScore / totalScore : 0.5;
   let heuristicWeight = totalScore > 0 ? heuristicScore / totalScore : 0.5;
 
-  // Clamp weights: neither model should get less than 20% or more than 80%
-  gbdtWeight = Math.max(0.20, Math.min(0.80, gbdtWeight));
+  // Clamp weights: GBDT should get at least 50% (it's the trained model)
+  gbdtWeight = Math.max(0.50, Math.min(0.90, gbdtWeight));
   heuristicWeight = 1 - gbdtWeight;
 
   const newWeights: EnsembleWeights = {

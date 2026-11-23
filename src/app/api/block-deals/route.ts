@@ -134,7 +134,9 @@ export async function GET(request: Request) {
     return NextResponse.json({
       success: true,
       count: results.length,
-      deals: results
+      deals: results,
+      isMockData: true,
+      disclaimer: 'Block deal data is simulated for demonstration purposes. Real NSE block deal integration is planned.',
     });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
