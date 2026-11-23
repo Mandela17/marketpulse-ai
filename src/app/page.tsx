@@ -13,6 +13,7 @@ import TopMoversWidget from '@/components/TopMoversWidget';
 import VIXGaugeWidget from '@/components/VIXGaugeWidget';
 import GlobalMarketsWidget from '@/components/GlobalMarketsWidget';
 import DataStalenessWidget from '@/components/DataStalenessWidget';
+import AccuracyDriftWidget from '@/components/AccuracyDriftWidget';
 import { loadDashboardCache, saveDashboardCache, timeAgo } from '@/lib/dashboardCache';
 
 interface MarketData {
@@ -520,6 +521,9 @@ export default function Dashboard() {
 
           {/* India VIX Fear Gauge */}
           <VIXGaugeWidget />
+
+          {/* Model Accuracy Drift Monitor */}
+          <AccuracyDriftWidget />
 
           {/* Global Markets */}
           <GlobalMarketsWidget />

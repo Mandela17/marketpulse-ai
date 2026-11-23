@@ -1,7 +1,8 @@
-// Production ML Prediction Engine v6 — Server-Side
+// Production ML Prediction Engine v7 — Server-Side
 // Ensemble: Gradient Boosted Decision Tree (GBDT) + Rule-Based Heuristic
-// Features: 30-dimensional feature vector with multi-timeframe, global, options, and alternative data
-// Phase 2: Z-score standardization, frozen-model-only (no on-demand training), 5 new multi-timeframe features
+// Features: 32-dimensional feature vector with multi-timeframe, global, options, relative strength, and earnings context
+// Phase 5: Relative strength vs NIFTY, earnings-aware confidence discount
+// Phase 6: Platt scaling confidence calibration, model versioning
 // Supports frozen model mode: train nightly via cron, serve predictions from saved weights.
 // Adaptive: Ensemble weights auto-tuned from rolling accuracy via adaptiveLearning.ts
 
@@ -11,6 +12,8 @@ import { savePrediction, getConfidenceLevel } from './predictionHistory';
 import { trainGBDT, predictGBDT, GBDTModel } from './gbdt';
 import { getEnsembleWeights } from './adaptiveLearning';
 import { getServiceClient } from './supabase';
+import { getStockEvent, getEarningsProximity } from './eventCalendar';
+import { loadPlattParams, calibrateConfidence } from './plattScaling';
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -71,6 +74,9 @@ interface FeatureVector {
   crudeChange: number;       // Brent Crude change (inverted, normalized)
   giftNiftyGap: number;      // GIFT Nifty implied gap % (normalized)
   maxPainDist: number;       // Distance from Max Pain (normalized)
+  // Phase 5: Relative strength
+  relativeStrength5d: number; // Stock 5d return minus NIFTY 5d return
+  earningsProximity: number;  // Days to earnings (normalized, 0 = earnings day)
   // Scaled feature array for models
   features: number[];
 }
@@ -90,6 +96,7 @@ function extractFeatures(row: any, prevRow: any, altData?: {
   flowDivergence?: number; cumFlow10d?: number;
   sp500Overnight?: number; dxyChange?: number; crudeChange?: number;
   giftNiftyGap?: number; maxPainDist?: number;
+  relativeStrength5d?: number; earningsProximity?: number;
 }, historyContext?: any[]): FeatureVector {
   const close = row.close || 0;
   const prevClose = prevRow?.close || close;
@@ -119,6 +126,9 @@ function extractFeatures(row: any, prevRow: any, altData?: {
   const crudeChange = altData?.crudeChange || 0;
   const giftNiftyGap = altData?.giftNiftyGap || 0;
   const maxPainDist = altData?.maxPainDist || 0;
+  // Phase 5: Relative strength + earnings
+  const relativeStrength5d = altData?.relativeStrength5d || 0;
+  const earningsProximity = altData?.earningsProximity ?? -1;
 
   // ─── Phase 2: Multi-timeframe features from history context ───
   let f_return5d = 0;
@@ -191,12 +201,18 @@ function extractFeatures(row: any, prevRow: any, altData?: {
   const f_crudeChange = crudeChange;
   const f_giftNiftyGap = giftNiftyGap;
   const f_maxPainDist = maxPainDist;
+  // Phase 5: Relative strength + earnings proximity
+  const f_relStrength = Math.max(-3, Math.min(3, relativeStrength5d * 20)); // Scale ~5% diff to [-1,1]
+  const f_earningsProx = earningsProximity >= 0 && earningsProximity <= 5
+    ? 1 - (earningsProximity / 5)   // 1.0 on earnings day, 0.0 at 5+ days away
+    : 0;
 
   return {
     rsi, macdHist, ema20, close, volumeRatio, sentimentScore,
     pcr, deliveryPct, indiaVix, fiiNet, diiNet, bollingerUpper, bollingerLower,
     obi, pocPosition, fiiVelocity, flowDivergence, cumFlow10d,
     sp500Overnight, dxyChange, crudeChange, giftNiftyGap, maxPainDist,
+    relativeStrength5d, earningsProximity,
     features: [
       f_rsi,
       f_macd,
@@ -230,6 +246,9 @@ function extractFeatures(row: any, prevRow: any, altData?: {
       f_rsi5,
       f_atrDev,
       f_sma200dev,
+      // Phase 5: Relative strength + earnings (2 new)
+      f_relStrength,
+      f_earningsProx,
     ],
   };
 }
@@ -373,6 +392,8 @@ const FEATURE_NAMES = [
   // Phase 2: Multi-timeframe features
   '5-Day Return', '20-Day Return', 'RSI(5)',
   'ATR-Normalized Dev', 'Price vs SMA(200)',
+  // Phase 5: Relative strength + earnings
+  'Relative Strength vs NIFTY', 'Earnings Proximity',
 ];
 
 // ─── Signal Confluence Scoring ──────────────────────────────────────
@@ -669,6 +690,7 @@ export async function generatePrediction(
     flowDivergence?: number; cumFlow10d?: number;
     sp500Overnight?: number; dxyChange?: number; crudeChange?: number;
     giftNiftyGap?: number; maxPainDist?: number;
+    relativeStrength5d?: number; earningsProximity?: number;
   }
 ): Promise<MLPrediction | null> {
   try {
@@ -720,6 +742,8 @@ export async function generatePrediction(
         crudeChange: altData?.crudeChange || 0,
         giftNiftyGap: altData?.giftNiftyGap || 0,
         maxPainDist: altData?.maxPainDist || 0,
+        relativeStrength5d: altData?.relativeStrength5d || 0,
+        earningsProximity: altData?.earningsProximity ?? -1,
         features: [],
       };
 
@@ -883,8 +907,22 @@ export async function generatePrediction(
     if (gbdtDir !== heurDir) confidenceDiscount += 8;
     // Phase 2: Extra discount if no frozen model (heuristic-only mode)
     if (!usedFrozenModel) confidenceDiscount += 12;
+    // Phase 5: Earnings proximity discount — reduce confidence near earnings announcements
+    const earningsInfo = getEarningsProximity(symbol);
+    if (earningsInfo.confidenceDiscount > 0) {
+      confidenceDiscount += earningsInfo.confidenceDiscount;
+      console.log(`[MLEngine] ${symbol}: Earnings in ${earningsInfo.daysToEarnings} days, confidence discount: -${earningsInfo.confidenceDiscount}`);
+    }
 
-    const confidence = Math.max(50, Math.min(95, rawConfidence - confidenceDiscount));
+    let confidence = Math.max(50, Math.min(95, rawConfidence - confidenceDiscount));
+
+    // Phase 6: Platt scaling confidence calibration (if enough resolved predictions)
+    const plattParams = await loadPlattParams();
+    if (plattParams && plattParams.sampleCount >= 200) {
+      const calibrated = calibrateConfidence(confidence, plattParams);
+      console.log(`[MLEngine] ${symbol}: Platt calibration ${confidence}% → ${calibrated}% (A=${plattParams.A}, B=${plattParams.B})`);
+      confidence = calibrated;
+    }
 
     // 9. Signal confluence and trade grading
     const confluence = computeConfluence(todayFV, direction, gbdtDir, heurDir, confidence);
@@ -895,8 +933,10 @@ export async function generatePrediction(
 
     // 11. Feature importance from GBDT
     const featureImportance: Record<string, number> = {};
-    for (let j = 0; j < gbdtModel.featureImportance.length && j < FEATURE_NAMES.length; j++) {
-      featureImportance[FEATURE_NAMES[j]] = gbdtModel.featureImportance[j];
+    if (gbdtModel) {
+      for (let j = 0; j < gbdtModel.featureImportance.length && j < FEATURE_NAMES.length; j++) {
+        featureImportance[FEATURE_NAMES[j]] = gbdtModel.featureImportance[j];
+      }
     }
 
     const prediction: MLPrediction = {
@@ -922,11 +962,11 @@ export async function generatePrediction(
         },
       },
       metrics: {
-        trainingAccuracy: gbdtModel.trainingMetrics.trainingAccuracy,
-        validationAccuracy: gbdtModel.trainingMetrics.validationAccuracy,
+        trainingAccuracy: gbdtModel?.trainingMetrics.trainingAccuracy ?? 0,
+        validationAccuracy: gbdtModel?.trainingMetrics.validationAccuracy ?? 0,
         totalSamples: m,
-        modelVersion: usedFrozenModel ? 'v6-multitf-frozen' : 'v6-multitf-heuristic',
-        bestIteration: gbdtModel.trainingMetrics.bestIteration,
+        modelVersion: usedFrozenModel ? 'v7-relstrength-frozen' : 'v7-relstrength-heuristic',
+        bestIteration: gbdtModel?.trainingMetrics.bestIteration ?? 0,
         ensembleWeights,
       },
     };
@@ -940,8 +980,8 @@ export async function generatePrediction(
       featuresJson: {
         ...featureImportance,
         subModels: prediction.subModelVotes,
-        gbdtTrainAcc: gbdtModel.trainingMetrics.trainingAccuracy,
-        gbdtValAcc: gbdtModel.trainingMetrics.validationAccuracy,
+        gbdtTrainAcc: gbdtModel?.trainingMetrics.trainingAccuracy ?? 0,
+        gbdtValAcc: gbdtModel?.trainingMetrics.validationAccuracy ?? 0,
         ensembleWeights,
         tradeGrade: confluence.grade,
         confluenceScore: confluence.score,

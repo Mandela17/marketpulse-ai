@@ -166,7 +166,82 @@ export async function GET(request: Request) {
         const weeks = weeksParam ? parseInt(weeksParam, 10) : 12;
         const sanitizedWeeks = isNaN(weeks) || weeks <= 0 ? 12 : weeks;
         const trend = await getAccuracyTrend(sanitizedWeeks);
-        return NextResponse.json(trend);
+
+        // Phase 6: Compute drift info for AccuracyDriftWidget
+        const db = getServiceClient();
+        const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+        const fourteenDaysAgo = new Date(Date.now() - 14 * 86400000).toISOString();
+
+        const [recent7d, previous7d] = await Promise.all([
+          db.from('predictions')
+            .select('probability, is_correct')
+            .not('resolved_at', 'is', null)
+            .not('is_correct', 'is', null)
+            .gte('resolved_at', sevenDaysAgo),
+          db.from('predictions')
+            .select('probability, is_correct')
+            .not('resolved_at', 'is', null)
+            .not('is_correct', 'is', null)
+            .gte('resolved_at', fourteenDaysAgo)
+            .lt('resolved_at', sevenDaysAgo),
+        ]);
+
+        const r7 = recent7d.data || [];
+        const p7 = previous7d.data || [];
+        const r7Correct = r7.filter(p => p.is_correct).length;
+        const p7Correct = p7.filter(p => p.is_correct).length;
+        const current7dAcc = r7.length > 0 ? parseFloat(((r7Correct / r7.length) * 100).toFixed(1)) : null;
+        const previous7dAcc = p7.length > 0 ? parseFloat(((p7Correct / p7.length) * 100).toFixed(1)) : null;
+
+        // Compute by-confidence buckets for drift widget
+        const byConfidence: Record<string, { count: number; accuracy: number }> = {};
+        const buckets = ['50-55', '55-60', '60-65', '65-70', '70+'];
+        for (const b of buckets) byConfidence[b] = { count: 0, accuracy: 0 };
+        for (const p of r7) {
+          const prob = Number(p.probability) || 50;
+          const normProb = prob > 0 && prob <= 1 ? prob * 100 : prob;
+          const bucket = normProb >= 70 ? '70+' : normProb >= 65 ? '65-70' : normProb >= 60 ? '60-65' : normProb >= 55 ? '55-60' : '50-55';
+          byConfidence[bucket].count++;
+          if (p.is_correct) byConfidence[bucket].accuracy++;
+        }
+        for (const b of buckets) {
+          if (byConfidence[b].count > 0) {
+            byConfidence[b].accuracy = parseFloat(((byConfidence[b].accuracy / byConfidence[b].count) * 100).toFixed(0));
+          }
+        }
+
+        let driftTrend: 'improving' | 'declining' | 'stable' | 'insufficient' = 'insufficient';
+        if (r7.length >= 5 && current7dAcc !== null) {
+          if (previous7dAcc === null || p7.length < 5) {
+            driftTrend = 'stable';
+          } else {
+            const delta = current7dAcc - previous7dAcc;
+            driftTrend = delta > 3 ? 'improving' : delta < -3 ? 'declining' : 'stable';
+          }
+        }
+
+        // Get latest model version
+        let modelVersion: string | null = null;
+        try {
+          const { data: latestPred } = await db.from('predictions')
+            .select('model_version')
+            .not('model_version', 'is', null)
+            .order('predicted_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          modelVersion = latestPred?.model_version || null;
+        } catch {}
+
+        return NextResponse.json({
+          ...trend,
+          current7d: current7dAcc,
+          previous7d: previous7dAcc,
+          trend: driftTrend,
+          resolved7d: r7.length,
+          resolved14d: p7.length,
+          byConfidence,
+          modelVersion,
+        });
       }
 
       case 'by-confidence': {

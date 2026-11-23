@@ -1,11 +1,12 @@
-// Market Event Calendar — Tracks earnings, RBI policy, F&O expiry, and other market-moving events
+// Market Event Calendar — Tracks earnings, RBI policy, F&O expiry, FOMC, and other market-moving events
 // Provides event-aware context to the ML engine for better predictions around key dates.
+// Phase 5: Added FOMC meetings, global macro events, and earnings proximity detection.
 
 export interface MarketEvent {
   id: string;
   title: string;
   date: string;           // YYYY-MM-DD
-  type: 'earnings' | 'rbi_policy' | 'fno_expiry' | 'budget' | 'ipo' | 'dividend' | 'macro' | 'global';
+  type: 'earnings' | 'rbi_policy' | 'fno_expiry' | 'budget' | 'ipo' | 'dividend' | 'macro' | 'global' | 'fomc';
   impact: 'high' | 'medium' | 'low';
   relatedStocks: string[];
   relatedSectors: string[];
@@ -186,6 +187,41 @@ function getBudgetEvent(year: number): MarketEvent | null {
   };
 }
 
+// ─── FOMC Meeting Dates (Phase 5: Global macro events) ──────────────
+
+const FOMC_DATES_2026 = [
+  '2026-01-28', '2026-03-18', '2026-05-06', '2026-06-17',
+  '2026-07-29', '2026-09-16', '2026-11-04', '2026-12-16',
+];
+
+const FOMC_DATES_2027 = [
+  '2027-01-27', '2027-03-17', '2027-05-05', '2027-06-16',
+  '2027-07-28', '2027-09-15', '2027-11-03', '2027-12-15',
+];
+
+function getFOMCEvents(year: number): MarketEvent[] {
+  const dates = year === 2026 ? FOMC_DATES_2026
+    : year === 2027 ? FOMC_DATES_2027
+    : estimateFOMCDates(year);
+  return dates.map(date => ({
+    id: `fomc-${date}`,
+    title: 'US Fed FOMC Rate Decision',
+    date,
+    type: 'fomc' as const,
+    impact: 'high' as const,
+    relatedStocks: [],
+    relatedSectors: ['banking', 'it', 'pharma'], // Export-sensitive
+    description: 'US Federal Reserve interest rate decision. Impacts global risk appetite, FII flows, and INR.',
+    expectedVolatility: 'high' as const,
+  }));
+}
+
+function estimateFOMCDates(year: number): string[] {
+  // FOMC meets ~8 times per year, roughly every 6-7 weeks
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return [1, 3, 5, 6, 7, 9, 11, 12].map(m => `${year}-${pad(m)}-${pad(16 + (m % 3))}`);
+}
+
 // ─── Public API ─────────────────────────────────────────────────────
 
 /**
@@ -195,6 +231,10 @@ export function getEventsForMonth(year: number, month: number): MarketEvent[] {
   const events: MarketEvent[] = [
     ...getRecurringEvents(year, month),
     ...getRBIPolicyEvents(year).filter(e => {
+      const d = new Date(e.date);
+      return d.getFullYear() === year && d.getMonth() + 1 === month;
+    }),
+    ...getFOMCEvents(year).filter(e => {
       const d = new Date(e.date);
       return d.getFullYear() === year && d.getMonth() + 1 === month;
     }),
@@ -282,4 +322,57 @@ export function getEventVolatilityAdjustment(symbol: string): {
   }
 
   return { factor: 1.0, reason: null };
+}
+
+
+// ─── Phase 5: Earnings Proximity Detection ──────────────────────────
+// Returns days until next earnings for a stock (0 = earnings today, -1 = no known earnings)
+
+export function getEarningsProximity(symbol: string): {
+  daysToEarnings: number;
+  isPreEarnings: boolean;   // within 3 days before
+  isPostEarnings: boolean;  // within 2 days after
+  confidenceDiscount: number; // 0-15 points to subtract
+} {
+  const earningsMonths = EARNINGS_SCHEDULE[symbol];
+  if (!earningsMonths) {
+    return { daysToEarnings: -1, isPreEarnings: false, isPostEarnings: false, confidenceDiscount: 0 };
+  }
+
+  const today = new Date();
+  const todayStr = today.toISOString().split('T')[0];
+  const year = today.getFullYear();
+  const pad = (n: number) => String(n).padStart(2, '0');
+
+  // Find the nearest earnings date
+  let minDays = Infinity;
+  for (const month of earningsMonths) {
+    const day = 15 + Math.floor(symbol.charCodeAt(0) % 10);
+    const clampedDay = Math.min(day, 28);
+    const earningsDate = `${year}-${pad(month)}-${pad(clampedDay)}`;
+    const diff = (new Date(earningsDate).getTime() - today.getTime()) / 86400000;
+    if (Math.abs(diff) < Math.abs(minDays)) minDays = diff;
+  }
+
+  const daysToEarnings = Math.round(minDays);
+  const isPreEarnings = daysToEarnings >= 0 && daysToEarnings <= 3;
+  const isPostEarnings = daysToEarnings < 0 && daysToEarnings >= -2;
+
+  // Confidence discount: highest near earnings day, decreasing as distance grows
+  let confidenceDiscount = 0;
+  if (isPreEarnings) {
+    confidenceDiscount = daysToEarnings === 0 ? 15 : daysToEarnings === 1 ? 12 : daysToEarnings === 2 ? 8 : 5;
+  } else if (isPostEarnings) {
+    confidenceDiscount = daysToEarnings === -1 ? 10 : 5;
+  }
+
+  return { daysToEarnings, isPreEarnings, isPostEarnings, confidenceDiscount };
+}
+
+// ─── Earnings Season Check ──────────────────────────────────────────
+
+export function isEarningsSeason(): boolean {
+  const month = new Date().getMonth() + 1;
+  // Earnings season: Jan-Feb, Apr-May, Jul-Aug, Oct-Nov
+  return [1, 2, 4, 5, 7, 8, 10, 11].includes(month);
 }

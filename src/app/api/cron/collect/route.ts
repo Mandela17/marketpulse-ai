@@ -19,6 +19,9 @@ import { fetchHistoricalOHLCV, computeRealTechnicals } from '@/lib/technicalAnal
 import { fetchNifty50 } from '@/lib/stockData';
 import { resolveUnresolvedPredictions } from '@/lib/predictionHistory';
 import { trainAndSaveModel } from '@/lib/mlEngine';
+import { waitForRateLimit, reportSuccess, reportError, getRateLimitStats } from '@/lib/rateLimiter';
+import { fitPlattScaling } from '@/lib/plattScaling';
+import { runAdaptiveLearningCycle } from '@/lib/adaptiveLearning';
 
 // ─── Retry helper with exponential backoff ───────────────────────────
 async function withRetry<T>(
@@ -199,7 +202,12 @@ async function collectDailyFeatures(
       try {
         // Use retry with exponential backoff for Yahoo Finance calls
         const technicals = await withRetry(
-          () => computeRealTechnicals(symbol),
+          async () => {
+            await waitForRateLimit('yahoo');
+            const result = await computeRealTechnicals(symbol);
+            reportSuccess('yahoo');
+            return result;
+          },
           `technicals(${symbol})`,
         );
         if (!technicals || technicals.currentPrice === 0) return;
@@ -448,6 +456,34 @@ export async function GET(request: Request) {
       }
     }
     console.log(`[Cron] 🤖 Models trained: ${modelsTrained}, skipped: ${modelsSkipped}`);
+
+    // Step 11: Run adaptive learning cycle (update ensemble weights from recent accuracy)
+    console.log('[Cron] 🎚️ Running adaptive learning cycle...');
+    let adaptiveResult = null;
+    try {
+      adaptiveResult = await runAdaptiveLearningCycle();
+      console.log(`[Cron] 🎚️ Weights updated: GBDT=${adaptiveResult.newWeights.gbdt}, Heuristic=${adaptiveResult.newWeights.heuristic}`);
+    } catch (err) {
+      console.warn('[Cron] 🎚️ Adaptive learning failed:', (err as Error).message);
+    }
+
+    // Step 12: Fit Platt scaling calibration (Phase 6 — requires 200+ resolved predictions)
+    console.log('[Cron] 📐 Fitting Platt scaling calibration...');
+    let plattResult = null;
+    try {
+      plattResult = await fitPlattScaling();
+      if (plattResult) {
+        console.log(`[Cron] 📐 Platt calibration fitted: A=${plattResult.A}, B=${plattResult.B} from ${plattResult.sampleCount} predictions`);
+      } else {
+        console.log('[Cron] 📐 Not enough resolved predictions for Platt scaling (need 200+)');
+      }
+    } catch (err) {
+      console.warn('[Cron] 📐 Platt scaling failed:', (err as Error).message);
+    }
+
+    // Step 13: Log rate limit stats
+    const rateLimitStats = getRateLimitStats('yahoo');
+    console.log(`[Cron] 📊 Yahoo rate limit: ${rateLimitStats.totalRequests} reqs, ${rateLimitStats.totalErrors} errors (${(rateLimitStats.errorRate * 100).toFixed(1)}%)`);
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(1);
     

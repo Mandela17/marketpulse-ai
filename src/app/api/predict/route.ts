@@ -17,6 +17,7 @@ import { computeVolumeProfile } from '@/lib/volumeProfile';
 import { fetchGlobalCorrelations } from '@/lib/globalCorrelations';
 import { fetchOptionsIntelligence } from '@/lib/optionsIntelligence';
 import { getServiceClient } from '@/lib/supabase';
+import { getEarningsProximity } from '@/lib/eventCalendar';
 
 export const dynamic = 'force-dynamic';
 
@@ -70,7 +71,24 @@ export async function GET(request: Request) {
       atr = recent14.reduce((s, tr) => s + tr, 0) / recent14.length;
     }
 
-    // 4. Build alternative data features (now includes global + options)
+    // 4. Build alternative data features (now includes global + options + relative strength)
+    // Phase 5: Compute relative strength vs NIFTY
+    let relativeStrength5d = 0;
+    if (ohlcvData.length >= 5) {
+      const stockReturn5d = (ohlcvData[ohlcvData.length - 1].close - ohlcvData[ohlcvData.length - 5].close) / ohlcvData[ohlcvData.length - 5].close;
+      // Fetch NIFTY 5d return from ohlcv
+      try {
+        const niftyOhlcv = await fetchHistoricalOHLCV('^NSEI', 10).catch(() => []);
+        if (niftyOhlcv.length >= 5) {
+          const niftyReturn5d = (niftyOhlcv[niftyOhlcv.length - 1].close - niftyOhlcv[niftyOhlcv.length - 5].close) / niftyOhlcv[niftyOhlcv.length - 5].close;
+          relativeStrength5d = stockReturn5d - niftyReturn5d;
+        }
+      } catch {}
+    }
+
+    // Phase 5: Earnings proximity
+    const earningsInfo = getEarningsProximity(symbol);
+
     const altData = {
       obi: obiData?.bidAskImbalance || 0,
       pocPosition: volumeProfile?.pocDistancePct || 0,
@@ -81,6 +99,9 @@ export async function GET(request: Request) {
       giftNiftyGap: globalContext?.features?.giftNiftyGap || 0,
       // Phase 3: Options intelligence
       maxPainDist: optionsData?.features?.maxPainDist || 0,
+      // Phase 5: Relative strength + earnings
+      relativeStrength5d,
+      earningsProximity: earningsInfo.daysToEarnings,
     };
 
     // 5. Build current features for the ML engine
