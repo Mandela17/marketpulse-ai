@@ -230,7 +230,13 @@ export default function PortfolioPage() {
 
             if (pred) {
               aiSignal = pred.predictedDirection === 'up' ? 'bullish' : 'bearish';
-              aiConfidence = Math.round((pred.probability || 0.65) * 100);
+              let prob = Number(pred.probability);
+              if (isNaN(prob) || prob <= 0) prob = 65;
+              // If stored as decimal (0.0 to 1.0), convert to percentage
+              if (prob > 0 && prob <= 1) {
+                prob *= 100;
+              }
+              aiConfidence = Math.round(Math.min(99, Math.max(50, prob)));
             } else if (tech?.signal) {
               if (tech.signal === 'STRONG_BUY' || tech.signal === 'BUY') {
                 aiSignal = 'bullish';
