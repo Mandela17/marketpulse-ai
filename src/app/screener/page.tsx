@@ -12,35 +12,18 @@ import {
   ChevronDown,
   ArrowUpDown,
   ExternalLink,
-  ShieldCheck,
+  Clock,
   Zap,
+  CheckCircle2,
 } from 'lucide-react';
-
-interface ScreenerStock {
-  symbol: string;
-  name: string;
-  sector: string;
-  price: number;
-  change: number;
-  changePercent: number;
-  dayHigh: number;
-  dayLow: number;
-  volume: number;
-  rsi: number | null;
-  prediction?: {
-    direction: 'bullish' | 'bearish' | 'neutral';
-    probability: number;
-    confidenceLevel: string;
-    supportingSignals?: string[];
-  } | null;
-}
-
-interface ScreenerStats {
-  bullishCount: number;
-  bearishCount: number;
-  gainersCount: number;
-  losersCount: number;
-}
+import {
+  loadScreenerCache,
+  saveScreenerCache,
+  formatScanTimestamp,
+  formatTimeAgo,
+  type ScreenerCachedItem,
+  type ScreenerStats,
+} from '@/lib/screenerCache';
 
 type FilterType =
   | 'all'
@@ -56,50 +39,85 @@ type SortField = 'changePercent' | 'probability' | 'price' | 'rsi' | 'symbol';
 type SortOrder = 'asc' | 'desc';
 
 export default function ScreenerPage() {
-  const [stocks, setStocks] = useState<ScreenerStock[]>([]);
-  const [stats, setStats] = useState<ScreenerStats | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  // Synchronous initial cache hydration for instant (0ms) render
+  const initialCache = typeof window !== 'undefined' ? loadScreenerCache() : null;
+
+  const [stocks, setStocks] = useState<ScreenerCachedItem[]>(initialCache?.stocks ?? []);
+  const [stats, setStats] = useState<ScreenerStats | null>(initialCache?.stats ?? null);
+  const [cacheTimestamp, setCacheTimestamp] = useState<number | null>(initialCache?.timestamp ?? null);
+  const [isCachedView, setIsCachedView] = useState<boolean>(!!initialCache);
+  const [timeAgoText, setTimeAgoText] = useState<string>(
+    initialCache?.timestamp ? formatTimeAgo(initialCache.timestamp) : ''
+  );
+  const [loading, setLoading] = useState<boolean>(!initialCache);
+  const [refreshing, setRefreshing] = useState<boolean>(false);
+  const [justUpdated, setJustUpdated] = useState<boolean>(false);
+
+  // Filters and sorting state
   const [filter, setFilter] = useState<FilterType>('all');
   const [selectedSector, setSelectedSector] = useState<string>('all');
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState<string>('');
   const [sortField, setSortField] = useState<SortField>('changePercent');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
-  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchScreenerData = useCallback(async (isRefresh = false) => {
-    if (isRefresh) setRefreshing(true);
-    else setLoading(true);
+  // Update the relative time-ago string every 30 seconds
+  useEffect(() => {
+    if (!cacheTimestamp) return;
+    const interval = setInterval(() => {
+      setTimeAgoText(formatTimeAgo(cacheTimestamp));
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [cacheTimestamp]);
+
+  // Fetch data from API (used on first load if no cache, or when user clicks re-fetch)
+  const fetchScreenerData = useCallback(async (isUserInitiated = false) => {
+    if (isUserInitiated) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
     setError(null);
 
     try {
-      const res = await fetch(`/api/screener${isRefresh ? '?refresh=true' : ''}`);
+      // Force refresh query parameter bypasses server in-memory cache
+      const res = await fetch(`/api/screener${isUserInitiated ? '?refresh=true' : ''}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
 
       if (data.stocks && Array.isArray(data.stocks)) {
+        const now = Date.now();
         setStocks(data.stocks);
         if (data.stats) setStats(data.stats);
-        if (data.timestamp) {
-          const d = new Date(data.timestamp);
-          setLastUpdated(d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+        setCacheTimestamp(now);
+        setTimeAgoText(formatTimeAgo(now));
+        setIsCachedView(false);
+
+        // Save to localStorage for instant subsequent loads
+        saveScreenerCache(data.stocks, data.stats, now);
+
+        if (isUserInitiated) {
+          setJustUpdated(true);
+          setTimeout(() => setJustUpdated(false), 3000);
         }
       } else {
         throw new Error('Invalid response structure');
       }
     } catch (err: any) {
       console.error('Failed to load stock screener:', err);
-      setError('Unable to load screener data. Please try again.');
+      setError('Unable to fetch live market data. Using cached scan if available.');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
+  // Only auto-fetch if no cache exists in localStorage
   useEffect(() => {
-    fetchScreenerData();
-  }, [fetchScreenerData]);
+    if (!initialCache) {
+      fetchScreenerData(false);
+    }
+  }, [initialCache, fetchScreenerData]);
 
   // Extract unique sectors
   const sectors = useMemo(() => {
@@ -159,8 +177,8 @@ export default function ScreenerPage() {
 
     // Sort
     result.sort((a, b) => {
-      let valA: any = a[sortField as keyof ScreenerStock];
-      let valB: any = b[sortField as keyof ScreenerStock];
+      let valA: any = a[sortField as keyof ScreenerCachedItem];
+      let valB: any = b[sortField as keyof ScreenerCachedItem];
 
       if (sortField === 'probability') {
         valA = a.prediction?.probability || 0;
@@ -194,41 +212,106 @@ export default function ScreenerPage() {
   return (
     <div className="w-full max-w-7xl mx-auto pb-12">
       {/* Header */}
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-6">
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-5">
         <div>
           <h1 className="text-2xl sm:text-3xl font-extrabold text-white flex items-center gap-2.5">
             <span>🔎</span> Stock Screener
           </h1>
           <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
-            Real-time scanner filtering liquid NSE stocks by ML predictions, price momentum & technical RSI.
+            Filter liquid NSE stocks by ML predictions, price momentum & technical RSI.
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5 shrink-0">
-          {lastUpdated && (
-            <span className="text-xs px-2.5 py-1 rounded-md" style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--text-muted)' }}>
-              Updated {lastUpdated}
-            </span>
+        {/* Timestamp and User Option to Fetch Again */}
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          {cacheTimestamp && (
+            <div
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs"
+              style={{
+                background: 'rgba(255,255,255,0.03)',
+                border: '1px solid var(--border-subtle)',
+              }}
+              title={`Exact time: ${formatScanTimestamp(cacheTimestamp)}`}
+            >
+              <Clock size={12} style={{ color: isCachedView ? '#fbbf24' : '#00d68f' }} />
+              <span style={{ color: 'var(--text-muted)' }}>
+                {isCachedView ? 'Cached:' : 'Updated:'}
+              </span>
+              <span className="text-white font-semibold">
+                {formatScanTimestamp(cacheTimestamp)}
+              </span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded font-medium"
+                style={{
+                  background: isCachedView ? 'rgba(251,191,36,0.12)' : 'rgba(0,214,143,0.12)',
+                  color: isCachedView ? '#fbbf24' : '#00d68f',
+                }}
+              >
+                {timeAgoText || 'Just now'}
+              </span>
+            </div>
           )}
+
           <button
             onClick={() => fetchScreenerData(true)}
             disabled={refreshing || loading}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-all hover:brightness-125"
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold cursor-pointer transition-all shadow-md hover:brightness-125 disabled:opacity-50"
             style={{
-              background: 'rgba(59,130,246,0.15)',
+              background: 'linear-gradient(135deg, rgba(59,130,246,0.25), rgba(59,130,246,0.12))',
               color: '#60a5fa',
-              border: '1px solid rgba(59,130,246,0.3)',
+              border: '1px solid rgba(59,130,246,0.4)',
             }}
           >
-            <RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} />
-            {refreshing ? 'Scanning...' : 'Refresh'}
+            <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
+            <span>{refreshing ? 'Scanning Market...' : 'Fetch Fresh Data'}</span>
           </button>
         </div>
       </div>
 
+      {/* Instant Cache Status Alert Banner */}
+      {isCachedView && !justUpdated && stocks.length > 0 && (
+        <div
+          className="mb-5 px-4 py-2.5 rounded-xl flex items-center justify-between gap-3 text-xs animate-fade-in-up"
+          style={{
+            background: 'linear-gradient(135deg, rgba(59,130,246,0.08), rgba(59,130,246,0.03))',
+            border: '1px solid rgba(59,130,246,0.2)',
+          }}
+        >
+          <div className="flex items-center gap-2 text-gray-300">
+            <Zap size={14} style={{ color: '#60a5fa', flexShrink: 0 }} />
+            <span>
+              Loaded instantly from local cache <span className="text-white font-semibold">({timeAgoText || 'recently'})</span>. Want updated live quotes or AI signals?
+            </span>
+          </div>
+          <button
+            onClick={() => fetchScreenerData(true)}
+            disabled={refreshing}
+            className="text-xs font-bold px-2.5 py-1 rounded-lg text-blue-400 hover:text-white underline cursor-pointer shrink-0"
+          >
+            {refreshing ? 'Scanning...' : 'Re-scan now →'}
+          </button>
+        </div>
+      )}
+
+      {/* Just Updated Confirmation Toast */}
+      {justUpdated && (
+        <div
+          className="mb-5 px-4 py-2.5 rounded-xl flex items-center gap-2 text-xs animate-fade-in-up"
+          style={{
+            background: 'rgba(0,214,143,0.1)',
+            border: '1px solid rgba(0,214,143,0.3)',
+            color: '#00d68f',
+          }}
+        >
+          <CheckCircle2 size={14} />
+          <span className="font-semibold">
+            Fresh market scan complete! Cached locally for instant next load.
+          </span>
+        </div>
+      )}
+
       {/* Summary KPI Badges */}
       {!loading && stats && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6 animate-fade-in-up">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5 animate-fade-in-up">
           <div className="p-3.5 rounded-xl flex items-center justify-between"
             style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
             <div>

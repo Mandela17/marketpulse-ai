@@ -40,9 +40,9 @@ interface ScreenerItem {
   } | null;
 }
 
-// In-memory cache for screener results (60 seconds)
+// In-memory cache for screener results (5 minutes)
 let screenerCache: { data: any; timestamp: number } | null = null;
-const SCREENER_CACHE_TTL = 60 * 1000;
+const SCREENER_CACHE_TTL = 5 * 60 * 1000;
 
 // Fetch multiple stock quotes in batch via Yahoo v6 quote endpoint
 async function fetchYahooBatchQuotes(symbols: string[]): Promise<Map<string, any>> {
@@ -279,3 +279,4 @@ export async function GET(request: Request) {
     );
   }
 }
+
