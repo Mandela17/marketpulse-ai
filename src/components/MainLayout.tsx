@@ -25,6 +25,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
     '/screener': 'Screener',
     '/heatmap': 'Heatmap',
     '/portfolio': 'Portfolio',
+    '/trade': 'Live Trade',
     '/compare': 'Compare',
   };
   const currentPageName = pageNames[pathname] || 'MarketPulse';

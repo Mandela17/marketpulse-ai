@@ -3,6 +3,8 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { searchStocks, getStockBySymbol } from '@/lib/sectorData';
+import { getBrokerConfig } from '@/lib/brokerApi';
+import { useAuth } from '@/context/AuthContext';
 
 interface Holding {
   symbol: string;
@@ -72,9 +74,12 @@ const SAMPLE_PORTFOLIO: SavedHolding[] = [
 ];
 
 export default function PortfolioPage() {
+  const { session } = useAuth();
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [savedHoldings, setSavedHoldings] = useState<SavedHolding[]>([]);
   const [loading, setLoading] = useState(true);
+  const [syncingUpstox, setSyncingUpstox] = useState(false);
+  const [syncNotice, setSyncNotice] = useState<string | null>(null);
   const [activePredictions, setActivePredictions] = useState<Record<string, any>>({});
 
   // Add / Edit form states
@@ -380,6 +385,53 @@ export default function PortfolioPage() {
     saveToStorage(SAMPLE_PORTFOLIO);
   };
 
+  const syncFromUpstoxDemat = async () => {
+    if (!session?.access_token) {
+      setSyncNotice('Sign in required to sync Upstox holdings.');
+      return;
+    }
+    setSyncingUpstox(true);
+    setSyncNotice(null);
+    try {
+      const cfg = getBrokerConfig();
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${session.access_token}`,
+      };
+      if (cfg.provider === 'upstox' && cfg.accessToken) {
+        headers['X-Upstox-Token'] = cfg.accessToken;
+      }
+      const res = await fetch('/api/upstox/portfolio', { headers });
+      const data = await res.json();
+      if (!res.ok || !data.connected) {
+        setSyncNotice(data.error || 'Upstox account not connected.');
+        return;
+      }
+      const dematList = Array.isArray(data.holdings) ? data.holdings : [];
+      if (dematList.length === 0) {
+        setSyncNotice('Connected to Upstox, but your Demat holdings list is empty (0 settled stocks).');
+        return;
+      }
+      const mapped: SavedHolding[] = dematList
+        .filter((h: any) => h.symbol && h.totalQuantity > 0)
+        .map((h: any) => {
+          const meta = getStockBySymbol(h.symbol);
+          return {
+            symbol: h.symbol.toUpperCase(),
+            name: h.companyName || meta?.name || h.symbol,
+            sector: meta?.sector || 'general',
+            qty: Number(h.totalQuantity),
+            avgPrice: Number(h.averagePrice || h.lastPrice || 0),
+          };
+        });
+      saveToStorage(mapped);
+      setSyncNotice(`Synced ${mapped.length} holding(s) from Upstox Demat.`);
+    } catch (err: any) {
+      setSyncNotice(err?.message || 'Failed to sync Upstox holdings.');
+    } finally {
+      setSyncingUpstox(false);
+    }
+  };
+
   const clearPortfolio = () => {
     if (confirm('Are you sure you want to clear your portfolio holdings?')) {
       saveToStorage([]);
@@ -580,6 +632,25 @@ export default function PortfolioPage() {
         </div>
 
         <div className="flex items-center gap-2.5 flex-wrap">
+          <Link
+            href="/trade"
+            className="text-xs px-3.5 py-2 rounded-xl font-bold transition-all flex items-center gap-1.5 hover:brightness-125"
+            style={{ background: 'rgba(0,214,143,0.14)', border: '1px solid rgba(0,214,143,0.35)', color: '#00d68f' }}
+          >
+            ⚡ Live Upstox Trade →
+          </Link>
+
+          <button
+            type="button"
+            onClick={syncFromUpstoxDemat}
+            disabled={syncingUpstox}
+            className="text-xs px-3.5 py-2 rounded-xl font-semibold transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+            style={{ background: 'rgba(139,92,246,0.15)', border: '1px solid rgba(139,92,246,0.35)', color: '#c4b5fd' }}
+            title="Import settled Demat holdings from Upstox"
+          >
+            {syncingUpstox ? '⏳ Syncing...' : '🔄 Sync Upstox Demat'}
+          </button>
+
           {holdings.length > 0 && (
             <button
               onClick={exportToCSV}
@@ -607,6 +678,18 @@ export default function PortfolioPage() {
           </button>
         </div>
       </div>
+
+      {syncNotice && (
+        <div
+          className="mb-5 px-4 py-2.5 rounded-xl flex items-center justify-between text-xs"
+          style={{ background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.3)', color: '#ddd6fe' }}
+        >
+          <span>{syncNotice}</span>
+          <button type="button" onClick={() => setSyncNotice(null)} className="text-slate-400 hover:text-white cursor-pointer">
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* ─── Search & Add Holding Modal/Drawer ─── */}
       {showAdd && (
