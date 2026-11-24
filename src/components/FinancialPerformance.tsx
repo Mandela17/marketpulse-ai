@@ -1,16 +1,14 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import type { FinancialPeriod, FinancialSummary } from '@/lib/financialData';
+import { getBrokerConfig } from '@/lib/brokerApi';
+import type { FinancialPeriod, FinancialSummary, StatementType } from '@/lib/financialData';
 
 function formatCroresValue(value: number): string {
   const absVal = Math.abs(value);
   const sign = value < 0 ? '-' : '';
   const crores = absVal / 1e7;
 
-  if (crores >= 100000) {
-    return `${sign}₹${(crores / 100000).toFixed(2)} Lk Cr`;
-  }
   if (crores >= 1) {
     return `${sign}₹${Math.round(crores).toLocaleString('en-IN')}Cr`;
   }
@@ -25,7 +23,7 @@ function formatAxisTickCr(valueInInr: number): string {
   const absCr = Math.abs(cr);
   const sign = cr < 0 ? '-' : '';
   if (absCr === 0) return '0';
-  if (absCr >= 100000) return `${sign}${(absCr / 100000).toFixed(1)}L`;
+  if (absCr >= 100000) return `${sign}${(absCr / 100000).toFixed(1)}L Cr`;
   if (absCr >= 1000) {
     const k = absCr / 1000;
     return `${sign}${Number.isInteger(k) ? k : k.toFixed(1)}k`;
@@ -76,8 +74,10 @@ function ChangePct({ value, tag }: { value: number | null; tag?: string }) {
     >
       {isPos ? '+' : ''}{value.toFixed(2)}%
       {tag && (
-        <span className="text-[9px] font-semibold px-1 py-0.2 rounded opacity-75"
-          style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)' }}>
+        <span
+          className="text-[9px] font-semibold px-1 py-0.2 rounded opacity-75"
+          style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)' }}
+        >
           {tag}
         </span>
       )}
@@ -91,10 +91,7 @@ function GrowthStatValue({ value }: { value: number | null }) {
   }
   const isPos = value >= 0;
   return (
-    <span
-      className="text-sm font-extrabold"
-      style={{ color: isPos ? '#00d68f' : '#ff4d6a' }}
-    >
+    <span className="text-sm font-extrabold" style={{ color: isPos ? '#00d68f' : '#ff4d6a' }}>
       {isPos ? '+' : ''}{Math.round(value) === value ? value : value.toFixed(1)}%
     </span>
   );
@@ -105,6 +102,7 @@ export default function FinancialPerformance({ symbol }: { symbol: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<'quarterly' | 'yearly'>('quarterly');
+  const [statementType, setStatementType] = useState<StatementType>('consolidated');
   const [selectedIdx, setSelectedIdx] = useState<number>(-1);
   const [showRevenue, setShowRevenue] = useState(true);
   const [showProfit, setShowProfit] = useState(true);
@@ -116,7 +114,16 @@ export default function FinancialPerformance({ symbol }: { symbol: string }) {
     setError(null);
     setSelectedIdx(-1);
 
-    fetch(`/api/financials?symbol=${encodeURIComponent(symbol)}`, { signal: controller.signal })
+    const brokerConfig = getBrokerConfig();
+    const headers: Record<string, string> = {};
+    if (brokerConfig.provider === 'upstox' && brokerConfig.connected && brokerConfig.accessToken) {
+      headers['X-Upstox-Token'] = brokerConfig.accessToken;
+    }
+
+    fetch(`/api/financials?symbol=${encodeURIComponent(symbol)}&type=${statementType}`, {
+      headers,
+      signal: controller.signal,
+    })
       .then((r) => r.json())
       .then((json) => {
         if (json.error) {
@@ -133,14 +140,15 @@ export default function FinancialPerformance({ symbol }: { symbol: string }) {
       .finally(() => setLoading(false));
 
     return () => controller.abort();
-  }, [symbol]);
+  }, [symbol, statementType]);
 
   const periods: FinancialPeriod[] = useMemo(() => {
     if (!data) return [];
     return view === 'quarterly' ? data.quarterly : data.annual;
   }, [data, view]);
 
-  const activeIdx = periods.length === 0 ? -1 : (selectedIdx >= 0 && selectedIdx < periods.length ? selectedIdx : periods.length - 1);
+  const activeIdx =
+    periods.length === 0 ? -1 : selectedIdx >= 0 && selectedIdx < periods.length ? selectedIdx : periods.length - 1;
   const activePeriod = activeIdx >= 0 ? periods[activeIdx] : undefined;
 
   const { ticks, scaleMin, scaleMax } = useMemo(() => {
@@ -157,7 +165,7 @@ export default function FinancialPerformance({ symbol }: { symbol: string }) {
 
   const toggleSeries = (series: 'revenue' | 'profit') => {
     if (series === 'revenue') {
-      if (showRevenue && !showProfit) return; // keep at least one visible
+      if (showRevenue && !showProfit) return;
       setShowRevenue((prev) => !prev);
     } else {
       if (showProfit && !showRevenue) return;
@@ -167,10 +175,14 @@ export default function FinancialPerformance({ symbol }: { symbol: string }) {
 
   if (loading) {
     return (
-      <div className="rounded-xl p-10 text-center border"
-        style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
-        <div className="w-8 h-8 border-3 rounded-full animate-spin mx-auto mb-3"
-          style={{ borderColor: 'var(--border-color)', borderTopColor: 'var(--accent-blue)' }} />
+      <div
+        className="rounded-xl p-10 text-center border"
+        style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}
+      >
+        <div
+          className="w-8 h-8 border-3 rounded-full animate-spin mx-auto mb-3"
+          style={{ borderColor: 'var(--border-color)', borderTopColor: 'var(--accent-blue)' }}
+        />
         <p className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
           Fetching quarterly &amp; annual financials for {symbol}...
         </p>
@@ -180,8 +192,10 @@ export default function FinancialPerformance({ symbol }: { symbol: string }) {
 
   if (error || !data || (data.quarterly.length === 0 && data.annual.length === 0)) {
     return (
-      <div className="rounded-xl p-10 text-center border"
-        style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
+      <div
+        className="rounded-xl p-10 text-center border"
+        style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}
+      >
         <p className="text-3xl mb-3">📊</p>
         <p className="text-sm font-semibold" style={{ color: 'var(--text-secondary)' }}>
           Financial statements unavailable for {symbol}
@@ -199,6 +213,52 @@ export default function FinancialPerformance({ symbol }: { symbol: string }) {
 
   return (
     <div className="space-y-5 animate-fade-in">
+      {/* ─── Top Bar: Source Badge + Statement Scope (Consolidated / Standalone) ─── */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span
+          className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
+            data.source === 'upstox'
+              ? 'bg-purple-500/15 text-purple-300 border border-purple-500/30'
+              : 'bg-slate-700/50 text-slate-400 border border-slate-600/30'
+          }`}
+        >
+          {data.source === 'upstox'
+            ? `🟢 UPSTOX LIVE • ${data.statementType === 'standalone' ? 'Standalone' : 'Consolidated'}`
+            : '📊 Yahoo Finance (Fallback)'}
+        </span>
+
+        {data.source === 'upstox' && (
+          <div
+            className="flex items-center rounded-lg overflow-hidden text-[11px]"
+            style={{ border: '1px solid var(--border-color)' }}
+          >
+            <button
+              type="button"
+              onClick={() => setStatementType('consolidated')}
+              className="px-2.5 py-1 font-semibold cursor-pointer transition-colors"
+              style={{
+                background: data.statementType === 'consolidated' ? 'rgba(139,92,246,0.2)' : 'transparent',
+                color: data.statementType === 'consolidated' ? '#c4b5fd' : 'var(--text-muted)',
+              }}
+            >
+              Consolidated
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatementType('standalone')}
+              className="px-2.5 py-1 font-semibold cursor-pointer transition-colors"
+              style={{
+                background: data.statementType === 'standalone' ? 'rgba(139,92,246,0.2)' : 'transparent',
+                color: data.statementType === 'standalone' ? '#c4b5fd' : 'var(--text-muted)',
+                borderLeft: '1px solid var(--border-color)',
+              }}
+            >
+              Standalone
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* ─── Header Row: Title + Quarterly/Yearly Pills + All Financials Toggle ─── */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3 flex-wrap">
@@ -208,7 +268,10 @@ export default function FinancialPerformance({ symbol }: { symbol: string }) {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => { setView('quarterly'); setSelectedIdx(-1); }}
+              onClick={() => {
+                setView('quarterly');
+                setSelectedIdx(-1);
+              }}
               className="px-4 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer"
               style={{
                 background: view === 'quarterly' ? 'rgba(59,130,246,0.16)' : 'transparent',
@@ -220,7 +283,10 @@ export default function FinancialPerformance({ symbol }: { symbol: string }) {
             </button>
             <button
               type="button"
-              onClick={() => { setView('yearly'); setSelectedIdx(-1); }}
+              onClick={() => {
+                setView('yearly');
+                setSelectedIdx(-1);
+              }}
               className="px-4 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer"
               style={{
                 background: view === 'yearly' ? 'rgba(59,130,246,0.16)' : 'transparent',
@@ -253,18 +319,28 @@ export default function FinancialPerformance({ symbol }: { symbol: string }) {
           {/* Selected Period Summary Header */}
           {activePeriod && (
             <div className="mb-6">
-              <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                 <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
                   {activePeriod.label}
                 </span>
-                {activePeriod.netMarginPct !== null && (
-                  <span
-                    className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
-                    style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)' }}
-                  >
-                    Net Margin: <strong style={{ color: activePeriod.netMarginPct >= 0 ? '#14b8a6' : '#ff4d6a' }}>{activePeriod.netMarginPct}%</strong>
-                  </span>
-                )}
+                <div className="flex items-center gap-2">
+                  {activePeriod.operatingIncome !== null && (
+                    <span
+                      className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                      style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)' }}
+                    >
+                      Op. Profit: <strong style={{ color: 'var(--text-primary)' }}>{formatCroresValue(activePeriod.operatingIncome)}</strong>
+                    </span>
+                  )}
+                  {activePeriod.netMarginPct !== null && (
+                    <span
+                      className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                      style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)' }}
+                    >
+                      Net Margin: <strong style={{ color: activePeriod.netMarginPct >= 0 ? '#14b8a6' : '#ff4d6a' }}>{activePeriod.netMarginPct}%</strong>
+                    </span>
+                  )}
+                </div>
               </div>
 
               <div className="flex flex-wrap items-start gap-8">
@@ -343,9 +419,7 @@ export default function FinancialPerformance({ symbol }: { symbol: string }) {
 
           {/* Chart Body with Dashed Gridlines & Right-Side Y-Axis Labels */}
           <div className="relative flex">
-            {/* Bars Plot Area */}
             <div className="relative flex-1" style={{ height: `${chartHeightPx}px` }}>
-              {/* Horizontal Dashed Gridlines */}
               {ticks.map((t, i) => {
                 const bottomPct = ((t - scaleMin) / totalRange) * 100;
                 const isZero = Math.abs(t) < 1;
@@ -363,11 +437,9 @@ export default function FinancialPerformance({ symbol }: { symbol: string }) {
                 );
               })}
 
-              {/* Columns for each period */}
               <div className="relative h-full flex items-stretch justify-around px-2 z-10">
                 {periods.map((period, idx) => {
                   const isActive = idx === activeIdx;
-
                   const revPct = (Math.max(0, period.revenue) / totalRange) * 100;
                   const profPositive = period.profit >= 0;
                   const profHeightPct = (Math.abs(period.profit) / totalRange) * 100;
@@ -380,7 +452,6 @@ export default function FinancialPerformance({ symbol }: { symbol: string }) {
                       className="flex-1 relative cursor-pointer group flex justify-center items-end"
                     >
                       <div className="relative w-full h-full flex justify-center gap-1.5">
-                        {/* Revenue Bar */}
                         {showRevenue && (
                           <div className="relative w-5 sm:w-7 h-full">
                             <div
@@ -394,7 +465,6 @@ export default function FinancialPerformance({ symbol }: { symbol: string }) {
                           </div>
                         )}
 
-                        {/* Profit Bar (extends upward if positive, downward below zero if loss) */}
                         {showProfit && (
                           <div className="relative w-5 sm:w-7 h-full">
                             <div
@@ -407,8 +477,12 @@ export default function FinancialPerformance({ symbol }: { symbol: string }) {
                                   : `${Math.max(0, zeroPctFromBottom - profHeightPct)}%`,
                                 height: `${Math.max(1.5, profHeightPct)}%`,
                                 background: profPositive
-                                  ? isActive ? '#00b386' : 'rgba(0,179,134,0.45)'
-                                  : isActive ? '#ff4d6a' : 'rgba(255,77,106,0.5)',
+                                  ? isActive
+                                    ? '#00b386'
+                                    : 'rgba(0,179,134,0.45)'
+                                  : isActive
+                                    ? '#ff4d6a'
+                                    : 'rgba(255,77,106,0.5)',
                               }}
                             />
                           </div>
@@ -420,8 +494,7 @@ export default function FinancialPerformance({ symbol }: { symbol: string }) {
               </div>
             </div>
 
-            {/* Right Y-Axis Labels (in Crores) */}
-            <div className="relative w-12 flex-shrink-0 pl-2" style={{ height: `${chartHeightPx}px` }}>
+            <div className="relative w-14 flex-shrink-0 pl-2" style={{ height: `${chartHeightPx}px` }}>
               {ticks.map((t, i) => {
                 const bottomPct = ((t - scaleMin) / totalRange) * 100;
                 return (
@@ -441,8 +514,7 @@ export default function FinancialPerformance({ symbol }: { symbol: string }) {
             </div>
           </div>
 
-          {/* X-Axis Period Labels */}
-          <div className="flex pr-12 mt-2.5">
+          <div className="flex pr-14 mt-2.5">
             {periods.map((period, idx) => {
               const isActive = idx === activeIdx;
               return (
@@ -462,12 +534,14 @@ export default function FinancialPerformance({ symbol }: { symbol: string }) {
             })}
           </div>
           <p className="text-[9px] text-right mt-2" style={{ color: 'var(--text-muted)', opacity: 0.6 }}>
-            Values in ₹ Crores ({data.currency}) • Source: {data.yahooTicker}
+            Values in ₹ Crores ({data.currency}) • {data.source === 'upstox' ? `Upstox ISIN: ${data.sourceTicker}` : data.sourceTicker}
           </p>
         </div>
       ) : (
-        <div className="rounded-xl p-6 text-center border"
-          style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
+        <div
+          className="rounded-xl p-6 text-center border"
+          style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}
+        >
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
             No {view} chart data available for {symbol}. Try switching between Quarterly and Yearly.
           </p>
@@ -480,10 +554,11 @@ export default function FinancialPerformance({ symbol }: { symbol: string }) {
         style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}
       >
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Revenue Growth Column */}
           <div className="md:pr-6 md:border-r" style={{ borderColor: 'var(--border-color)' }}>
-            <div className="flex items-center justify-between text-[10px] uppercase font-bold tracking-wider mb-3"
-              style={{ color: 'var(--text-muted)' }}>
+            <div
+              className="flex items-center justify-between text-[10px] uppercase font-bold tracking-wider mb-3"
+              style={{ color: 'var(--text-muted)' }}
+            >
               <span>Revenue Growth</span>
               <span>Value</span>
             </div>
@@ -503,10 +578,11 @@ export default function FinancialPerformance({ symbol }: { symbol: string }) {
             </div>
           </div>
 
-          {/* Profit Growth Column */}
           <div>
-            <div className="flex items-center justify-between text-[10px] uppercase font-bold tracking-wider mb-3"
-              style={{ color: 'var(--text-muted)' }}>
+            <div
+              className="flex items-center justify-between text-[10px] uppercase font-bold tracking-wider mb-3"
+              style={{ color: 'var(--text-muted)' }}
+            >
               <span>Profit Growth</span>
               <span>Value</span>
             </div>
@@ -528,98 +604,179 @@ export default function FinancialPerformance({ symbol }: { symbol: string }) {
         </div>
       </div>
 
+      {/* ─── Valuation & Profitability Key Ratios (Company vs Sector, from Upstox) ─── */}
+      {data.keyRatios && data.keyRatios.length > 0 && (
+        <div
+          className="rounded-xl p-5"
+          style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}
+        >
+          <div className="flex items-center justify-between mb-3.5">
+            <h3 className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>
+              📐 Key Valuation &amp; Return Ratios
+            </h3>
+            <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+              Company vs. Sector Benchmark
+            </span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5">
+            {data.keyRatios.map((r) => (
+              <div
+                key={r.name}
+                className="p-3 rounded-lg"
+                style={{ background: 'var(--bg-primary)', border: '1px solid rgba(255,255,255,0.04)' }}
+              >
+                <p className="text-[10px] font-bold uppercase" style={{ color: 'var(--text-muted)' }}>
+                  {r.name}
+                </p>
+                <p className="text-sm font-extrabold text-white mt-1 tabular-nums">{r.companyValue}</p>
+                <p className="text-[10px] mt-0.5 tabular-nums" style={{ color: 'var(--text-muted)' }}>
+                  Sector: {r.sectorValue}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ─── Expandable "All Financials" Statement Table ─── */}
       {showAllTable && (
         <div
           className="rounded-xl p-5 space-y-5 animate-fade-in"
           style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}
         >
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <h3 className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>
-              📋 Detailed {view === 'quarterly' ? 'Quarterly' : 'Annual'} Income Statement
+              📋 Detailed {view === 'yearly' || !data.annualFullStatement ? (view === 'quarterly' ? 'Quarterly' : 'Annual') : 'Annual'} P&amp;L Statement
             </h3>
-            <span className="text-[10px] px-2 py-0.5 rounded-full"
-              style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)' }}>
+            <span
+              className="text-[10px] px-2 py-0.5 rounded-full"
+              style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)' }}
+            >
               All values in ₹ Crores except EPS
             </span>
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b" style={{ borderColor: 'var(--border-color)' }}>
-                  <th className="text-left py-2.5 pr-4 font-bold uppercase text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                    Metric
-                  </th>
-                  {periods.map((p) => (
-                    <th key={p.endDate} className="text-right py-2.5 px-2 font-bold text-[11px]" style={{ color: 'var(--text-primary)' }}>
-                      {p.label}
+            {view === 'yearly' && data.annualFullStatement ? (
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b" style={{ borderColor: 'var(--border-color)' }}>
+                    <th className="text-left py-2.5 pr-4 font-bold uppercase text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                      Particulars
                     </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                <tr className="border-b" style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
-                  <td className="py-2.5 pr-4 font-semibold" style={{ color: 'var(--text-secondary)' }}>Revenue</td>
-                  {periods.map((p) => (
-                    <td key={p.endDate} className="text-right py-2.5 px-2 font-bold text-white tabular-nums">
-                      {formatCroresValue(p.revenue)}
-                    </td>
-                  ))}
-                </tr>
-                <tr className="border-b" style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
-                  <td className="py-2.5 pr-4 font-semibold" style={{ color: 'var(--text-secondary)' }}>Operating Profit</td>
-                  {periods.map((p) => (
-                    <td key={p.endDate} className="text-right py-2.5 px-2 tabular-nums" style={{ color: 'var(--text-primary)' }}>
-                      {p.operatingIncome !== null ? formatCroresValue(p.operatingIncome) : '—'}
-                    </td>
-                  ))}
-                </tr>
-                <tr className="border-b" style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
-                  <td className="py-2.5 pr-4 font-semibold" style={{ color: 'var(--text-secondary)' }}>EBITDA</td>
-                  {periods.map((p) => (
-                    <td key={p.endDate} className="text-right py-2.5 px-2 tabular-nums" style={{ color: 'var(--text-primary)' }}>
-                      {p.ebitda !== null ? formatCroresValue(p.ebitda) : '—'}
-                    </td>
-                  ))}
-                </tr>
-                <tr className="border-b" style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
-                  <td className="py-2.5 pr-4 font-semibold" style={{ color: '#14b8a6' }}>Net Profit</td>
-                  {periods.map((p) => (
-                    <td
-                      key={p.endDate}
-                      className="text-right py-2.5 px-2 font-bold tabular-nums"
-                      style={{ color: p.profit >= 0 ? '#00d68f' : '#ff4d6a' }}
-                    >
-                      {formatCroresValue(p.profit)}
-                    </td>
-                  ))}
-                </tr>
-                <tr className="border-b" style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
-                  <td className="py-2.5 pr-4 font-semibold" style={{ color: 'var(--text-secondary)' }}>Net Margin %</td>
-                  {periods.map((p) => (
-                    <td key={p.endDate} className="text-right py-2.5 px-2 tabular-nums" style={{ color: 'var(--text-muted)' }}>
-                      {p.netMarginPct !== null ? `${p.netMarginPct.toFixed(1)}%` : '—'}
-                    </td>
-                  ))}
-                </tr>
-                <tr>
-                  <td className="py-2.5 pr-4 font-semibold" style={{ color: 'var(--text-secondary)' }}>Diluted EPS (₹)</td>
-                  {periods.map((p) => (
-                    <td key={p.endDate} className="text-right py-2.5 px-2 font-semibold tabular-nums" style={{ color: 'var(--text-primary)' }}>
-                      {p.eps !== null ? `₹${p.eps.toFixed(2)}` : '—'}
-                    </td>
-                  ))}
-                </tr>
-              </tbody>
-            </table>
+                    {data.annualFullStatement.periods.map((pLabel) => (
+                      <th key={pLabel} className="text-right py-2.5 px-2 font-bold text-[11px]" style={{ color: 'var(--text-primary)' }}>
+                        {pLabel}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.annualFullStatement.rows.map((row) => {
+                    const isHighlight = /total revenue|profit after tax|profit before tax/i.test(row.particular);
+                    return (
+                      <tr key={row.particular} className="border-b" style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
+                        <td
+                          className={`py-2.5 pr-4 ${isHighlight ? 'font-bold text-white' : 'font-medium'}`}
+                          style={!isHighlight ? { color: 'var(--text-secondary)' } : undefined}
+                        >
+                          {row.particular}
+                        </td>
+                        {data.annualFullStatement!.periods.map((pLabel) => {
+                          const val = row.values[pLabel];
+                          return (
+                            <td
+                              key={pLabel}
+                              className={`text-right py-2.5 px-2 tabular-nums ${isHighlight ? 'font-bold' : ''}`}
+                              style={{
+                                color:
+                                  /profit after tax/i.test(row.particular) && val !== undefined
+                                    ? val >= 0 ? '#00d68f' : '#ff4d6a'
+                                    : isHighlight ? '#fff' : 'var(--text-primary)',
+                              }}
+                            >
+                              {val === undefined
+                                ? '—'
+                                : row.isEps
+                                  ? `₹${val.toFixed(2)}`
+                                  : formatCroresValue(val)}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            ) : (
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b" style={{ borderColor: 'var(--border-color)' }}>
+                    <th className="text-left py-2.5 pr-4 font-bold uppercase text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                      Metric
+                    </th>
+                    {periods.map((p) => (
+                      <th key={p.endDate} className="text-right py-2.5 px-2 font-bold text-[11px]" style={{ color: 'var(--text-primary)' }}>
+                        {p.label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-b" style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
+                    <td className="py-2.5 pr-4 font-semibold" style={{ color: 'var(--text-secondary)' }}>Revenue</td>
+                    {periods.map((p) => (
+                      <td key={p.endDate} className="text-right py-2.5 px-2 font-bold text-white tabular-nums">
+                        {formatCroresValue(p.revenue)}
+                      </td>
+                    ))}
+                  </tr>
+                  <tr className="border-b" style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
+                    <td className="py-2.5 pr-4 font-semibold" style={{ color: 'var(--text-secondary)' }}>Operating Profit</td>
+                    {periods.map((p) => (
+                      <td key={p.endDate} className="text-right py-2.5 px-2 tabular-nums" style={{ color: 'var(--text-primary)' }}>
+                        {p.operatingIncome !== null ? formatCroresValue(p.operatingIncome) : '—'}
+                      </td>
+                    ))}
+                  </tr>
+                  <tr className="border-b" style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
+                    <td className="py-2.5 pr-4 font-semibold" style={{ color: '#14b8a6' }}>Net Profit</td>
+                    {periods.map((p) => (
+                      <td
+                        key={p.endDate}
+                        className="text-right py-2.5 px-2 font-bold tabular-nums"
+                        style={{ color: p.profit >= 0 ? '#00d68f' : '#ff4d6a' }}
+                      >
+                        {formatCroresValue(p.profit)}
+                      </td>
+                    ))}
+                  </tr>
+                  <tr className="border-b" style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
+                    <td className="py-2.5 pr-4 font-semibold" style={{ color: 'var(--text-secondary)' }}>Op. Margin %</td>
+                    {periods.map((p) => (
+                      <td key={p.endDate} className="text-right py-2.5 px-2 tabular-nums" style={{ color: 'var(--text-muted)' }}>
+                        {p.operatingMarginPct !== null ? `${p.operatingMarginPct.toFixed(1)}%` : '—'}
+                      </td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <td className="py-2.5 pr-4 font-semibold" style={{ color: 'var(--text-secondary)' }}>Net Margin %</td>
+                    {periods.map((p) => (
+                      <td key={p.endDate} className="text-right py-2.5 px-2 tabular-nums" style={{ color: 'var(--text-muted)' }}>
+                        {p.netMarginPct !== null ? `${p.netMarginPct.toFixed(1)}%` : '—'}
+                      </td>
+                    ))}
+                  </tr>
+                </tbody>
+              </table>
+            )}
           </div>
 
           {/* Annual Balance Sheet & Cash Flow Snapshot */}
           {data.latestAnnualHealth && (
             <div className="pt-4 border-t" style={{ borderColor: 'var(--border-color)' }}>
               <p className="text-[10px] uppercase font-bold tracking-wider mb-3" style={{ color: 'var(--text-muted)' }}>
-                Cash Flow &amp; Balance Sheet Health (FY {data.latestAnnualHealth.asOfDate.slice(0, 4)})
+                Cash Flow &amp; Balance Sheet Snapshot (FY {data.latestAnnualHealth.asOfDate.slice(0, 4)})
               </p>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div className="p-3 rounded-lg" style={{ background: 'var(--bg-primary)' }}>
@@ -631,34 +788,47 @@ export default function FinancialPerformance({ symbol }: { symbol: string }) {
                   </p>
                 </div>
                 <div className="p-3 rounded-lg" style={{ background: 'var(--bg-primary)' }}>
-                  <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>Free Cash Flow</p>
+                  <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                    {data.latestAnnualHealth.freeCashFlow !== null ? 'Free Cash Flow' : 'Investing Cash Flow'}
+                  </p>
                   <p
                     className="text-sm font-bold mt-1"
                     style={{
-                      color: data.latestAnnualHealth.freeCashFlow !== null
-                        ? data.latestAnnualHealth.freeCashFlow >= 0 ? '#00d68f' : '#ff4d6a'
-                        : 'var(--text-primary)',
+                      color:
+                        data.latestAnnualHealth.freeCashFlow !== null
+                          ? data.latestAnnualHealth.freeCashFlow >= 0 ? '#00d68f' : '#ff4d6a'
+                          : 'var(--text-primary)',
                     }}
                   >
                     {data.latestAnnualHealth.freeCashFlow !== null
                       ? formatCroresValue(data.latestAnnualHealth.freeCashFlow)
-                      : '—'}
+                      : data.latestAnnualHealth.investingCashFlow !== null && data.latestAnnualHealth.investingCashFlow !== undefined
+                        ? formatCroresValue(data.latestAnnualHealth.investingCashFlow)
+                        : '—'}
                   </p>
                 </div>
                 <div className="p-3 rounded-lg" style={{ background: 'var(--bg-primary)' }}>
-                  <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>Total Debt</p>
+                  <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                    {data.latestAnnualHealth.totalAssets ? 'Total Assets' : 'Total Debt'}
+                  </p>
                   <p className="text-sm font-bold mt-1" style={{ color: 'var(--text-primary)' }}>
-                    {data.latestAnnualHealth.totalDebt !== null
-                      ? formatCroresValue(data.latestAnnualHealth.totalDebt)
-                      : '—'}
+                    {data.latestAnnualHealth.totalAssets
+                      ? formatCroresValue(data.latestAnnualHealth.totalAssets)
+                      : data.latestAnnualHealth.totalDebt !== null
+                        ? formatCroresValue(data.latestAnnualHealth.totalDebt)
+                        : '—'}
                   </p>
                 </div>
                 <div className="p-3 rounded-lg" style={{ background: 'var(--bg-primary)' }}>
-                  <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>Debt / Equity</p>
+                  <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                    {data.latestAnnualHealth.stockholdersEquity ? 'Equity Capital' : 'Debt / Equity'}
+                  </p>
                   <p className="text-sm font-bold mt-1" style={{ color: 'var(--text-primary)' }}>
-                    {data.latestAnnualHealth.debtToEquity !== null
-                      ? `${data.latestAnnualHealth.debtToEquity.toFixed(2)}x`
-                      : '—'}
+                    {data.latestAnnualHealth.stockholdersEquity
+                      ? formatCroresValue(data.latestAnnualHealth.stockholdersEquity)
+                      : data.latestAnnualHealth.debtToEquity !== null
+                        ? `${data.latestAnnualHealth.debtToEquity.toFixed(2)}x`
+                        : '—'}
                   </p>
                 </div>
               </div>
