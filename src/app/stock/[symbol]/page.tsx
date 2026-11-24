@@ -15,6 +15,7 @@ import { useAuth } from '@/context/AuthContext';
 import AlertManager from '@/components/AlertManager';
 import { checkPredictionAlerts, checkPriceAlerts } from '@/lib/priceAlerts';
 import BlockDealsWidget from '@/components/BlockDealsWidget';
+import FinancialPerformance from '@/components/FinancialPerformance';
 
 // Lazy-load heavy chart component (defers ~48KB lightweight-charts from initial bundle)
 const TradingViewChart = dynamic(() => import('@/components/TradingViewChart'), {
@@ -145,7 +146,7 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
   const [derivatives, setDerivatives] = useState<DerivativesData | null>(null);
   const [blockDeals, setBlockDeals] = useState<any[]>([]);
   const [mlResult, setMlResult] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<'technicals' | 'derivatives' | 'shareholding'>('technicals');
+  const [activeTab, setActiveTab] = useState<'technicals' | 'derivatives' | 'shareholding' | 'financials'>('technicals');
   const [lookbackDays, setLookbackDays] = useState<number>(90);
 
   // Shareholding state (fetched from Upstox API → local fallback)
@@ -600,10 +601,10 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
           )}
 
           {/* Navigation Tabs for Analytics */}
-          <div className="flex border-b" style={{ borderColor: 'var(--border-color)' }}>
+          <div className="flex overflow-x-auto no-scrollbar border-b" style={{ borderColor: 'var(--border-color)' }}>
             <button
               onClick={() => setActiveTab('technicals')}
-              className={`px-5 py-3 text-sm font-bold border-b-2 transition-all cursor-pointer ${
+              className={`px-5 py-3 text-sm font-bold border-b-2 transition-all cursor-pointer whitespace-nowrap ${
                 activeTab === 'technicals' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-slate-200'
               }`}
             >
@@ -611,7 +612,7 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
             </button>
             <button
               onClick={() => setActiveTab('derivatives')}
-              className={`px-5 py-3 text-sm font-bold border-b-2 transition-all cursor-pointer ${
+              className={`px-5 py-3 text-sm font-bold border-b-2 transition-all cursor-pointer whitespace-nowrap ${
                 activeTab === 'derivatives' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-slate-200'
               }`}
             >
@@ -619,11 +620,19 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
             </button>
             <button
               onClick={() => setActiveTab('shareholding')}
-              className={`px-5 py-3 text-sm font-bold border-b-2 transition-all cursor-pointer ${
+              className={`px-5 py-3 text-sm font-bold border-b-2 transition-all cursor-pointer whitespace-nowrap ${
                 activeTab === 'shareholding' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-slate-200'
               }`}
             >
               🏛️ Shareholding
+            </button>
+            <button
+              onClick={() => setActiveTab('financials')}
+              className={`px-5 py-3 text-sm font-bold border-b-2 transition-all cursor-pointer whitespace-nowrap ${
+                activeTab === 'financials' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              📊 Financials
             </button>
           </div>
 
@@ -1599,6 +1608,11 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
               </div>
             );
           })()}
+
+          {/* Tab 4: Financials (Quarterly & Annual Performance) */}
+          {activeTab === 'financials' && (
+            <FinancialPerformance symbol={decodedSymbol} />
+          )}
 
           {/* Validation & AI Predictor Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4">
