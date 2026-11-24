@@ -131,3 +131,4 @@ export function clearScreenerCache(): void {
     localStorage.removeItem(CACHE_KEY);
   } catch {}
 }
+

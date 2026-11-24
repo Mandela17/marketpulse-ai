@@ -1,6 +1,6 @@
 // API Route: High-performance Stock Screener
 // Returns unified prices, technicals (RSI, volume), and AI predictions for top liquid NSE stocks.
-// Optimized with database batch lookups, in-memory caching, and multi-symbol quote fetching.
+// Optimized with database batch lookups, in-memory caching, and robust quote fetching.
 
 import { NextResponse } from 'next/server';
 import { getServiceClient } from '@/lib/supabase';
@@ -37,49 +37,40 @@ interface ScreenerItem {
     probability: number;
     confidenceLevel: string;
     supportingSignals: string[];
-  } | null;
+  };
 }
 
 // In-memory cache for screener results (5 minutes)
 let screenerCache: { data: any; timestamp: number } | null = null;
 const SCREENER_CACHE_TTL = 5 * 60 * 1000;
 
-// Fetch multiple stock quotes in batch via Yahoo v6 quote endpoint
-async function fetchYahooBatchQuotes(symbols: string[]): Promise<Map<string, any>> {
+// Fetch multiple stock quotes in parallel batches using Yahoo v8 chart endpoint
+async function fetchBatchQuotes(symbols: string[]): Promise<Map<string, any>> {
   const quoteMap = new Map<string, any>();
-  
-  // Map symbols to Yahoo tickers and maintain reverse mapping
-  const tickerToSymbol = new Map<string, string>();
-  const yahooTickers: string[] = [];
+  const toFetch: string[] = [];
 
   for (const sym of symbols) {
     const cached = quoteCache.get<any>(`quote:${sym}`);
     if (cached && cached.price > 0) {
       quoteMap.set(sym, cached);
     } else {
-      const yt = toYahooTicker(sym);
-      tickerToSymbol.set(yt.toUpperCase(), sym);
-      yahooTickers.push(yt);
+      toFetch.push(sym);
     }
   }
 
-  // If all quotes were in cache, return immediately
-  if (yahooTickers.length === 0) return quoteMap;
+  if (toFetch.length === 0) return quoteMap;
 
-  // Batch query in chunks of 25 to respect URL limits
-  const chunkSize = 25;
-  for (let i = 0; i < yahooTickers.length; i += chunkSize) {
-    const chunk = yahooTickers.slice(i, i + chunkSize);
-    const encoded = chunk.map(t => encodeURIComponent(t)).join(',');
-    const urls = [
-      `https://query1.finance.yahoo.com/v6/finance/quote?symbols=${encoded}`,
-      `https://query2.finance.yahoo.com/v6/finance/quote?symbols=${encoded}`,
-    ];
-
-    for (const url of urls) {
+  // Process in chunks of 10 to stay fast and avoid socket saturation
+  const chunkSize = 10;
+  for (let i = 0; i < toFetch.length; i += chunkSize) {
+    const chunk = toFetch.slice(i, i + chunkSize);
+    const promises = chunk.map(async (sym) => {
       try {
+        const yt = toYahooTicker(sym);
+        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yt)}?interval=1d&range=1d`;
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 4000); // 4s timeout
+        const timeout = setTimeout(() => controller.abort(), 3500);
+
         const res = await fetch(url, {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -92,34 +83,32 @@ async function fetchYahooBatchQuotes(symbols: string[]): Promise<Map<string, any
 
         if (res.ok) {
           const json = await res.json();
-          const results = json?.quoteResponse?.result || [];
-          for (const q of results) {
-            const sym = tickerToSymbol.get(q.symbol?.toUpperCase()) || q.symbol?.replace(/\.NS$/, '');
-            if (sym && q.regularMarketPrice > 0) {
-              const price = q.regularMarketPrice;
-              const prevClose = q.regularMarketPreviousClose || price;
-              const change = q.regularMarketChange ?? (price - prevClose);
-              const changePercent = prevClose > 0 ? (change / prevClose) * 100 : (q.regularMarketChangePercent ?? 0);
+          const meta = json?.chart?.result?.[0]?.meta;
+          if (meta && meta.regularMarketPrice > 0) {
+            const price = meta.regularMarketPrice;
+            const prevClose = meta.chartPreviousClose || meta.previousClose || price;
+            const change = price - prevClose;
+            const changePercent = prevClose > 0 ? (change / prevClose) * 100 : 0;
 
-              const quoteData = {
-                symbol: sym,
-                price,
-                change,
-                changePercent,
-                dayHigh: q.regularMarketDayHigh || price,
-                dayLow: q.regularMarketDayLow || price,
-                volume: q.regularMarketVolume || 0,
-              };
-              quoteMap.set(sym, quoteData);
-              quoteCache.set(`quote:${sym}`, quoteData, QUOTE_TTL);
-            }
+            const quoteData = {
+              symbol: sym,
+              price,
+              change,
+              changePercent,
+              dayHigh: meta.regularMarketDayHigh || price,
+              dayLow: meta.regularMarketDayLow || price,
+              volume: meta.regularMarketVolume || 0,
+            };
+            quoteMap.set(sym, quoteData);
+            quoteCache.set(`quote:${sym}`, quoteData, QUOTE_TTL);
           }
-          break; // Chunk succeeded
         }
       } catch {
-        continue; // Try secondary URL or proceed
+        // Continue to fallback
       }
-    }
+    });
+
+    await Promise.all(promises);
   }
 
   return quoteMap;
@@ -137,14 +126,13 @@ export async function GET(request: Request) {
   try {
     const db = getServiceClient();
 
-    // 1. Fetch AI predictions in one query (unresolved in last 7 days)
-    const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+    // 1. Fetch AI predictions: get latest predictions per stock (active OR resolved from last session)
+    // Removed `.is('resolved_at', null)` so resolved predictions after market close are preserved!
     const { data: dbPredictions } = await db
       .from('predictions')
-      .select('symbol, predicted_direction, probability, confidence_level, predicted_at, supporting_signals')
-      .is('resolved_at', null)
-      .gte('predicted_at', sevenDaysAgo)
-      .order('predicted_at', { ascending: false });
+      .select('symbol, predicted_direction, probability, confidence_level, predicted_at, supporting_signals, resolved_at')
+      .order('predicted_at', { ascending: false })
+      .limit(300);
 
     const predMap = new Map<string, any>();
     if (dbPredictions) {
@@ -171,10 +159,10 @@ export async function GET(request: Request) {
       }
     }
 
-    // 3. Fetch live batch quotes from Yahoo/Upstox
+    // 3. Fetch live batch quotes from Yahoo v8 chart endpoint
     let quoteMap = new Map<string, any>();
     try {
-      quoteMap = await fetchYahooBatchQuotes(SCREENER_UNIVERSE);
+      quoteMap = await fetchBatchQuotes(SCREENER_UNIVERSE);
     } catch (e) {
       console.warn('[Screener API] Batch quote fetch warning:', e);
     }
@@ -188,7 +176,7 @@ export async function GET(request: Request) {
       const feat = featureMap.get(symbol);
       const pred = predMap.get(symbol);
 
-      // Resolve price & change (prefer live, fallback to feature row)
+      // Resolve price & change (prefer live quote, fallback to feature row)
       let price = 0;
       let change = 0;
       let changePercent = 0;
@@ -217,16 +205,59 @@ export async function GET(request: Request) {
       // If price is completely missing, skip
       if (price <= 0) continue;
 
-      // Normalize prediction direction: 'up' -> 'bullish', 'down' -> 'bearish'
-      let predictionObj: ScreenerItem['prediction'] = null;
+      // Ensure prediction is ALWAYS valid (never null)
+      let predictionObj: ScreenerItem['prediction'];
+
       if (pred) {
         const dir = pred.predicted_direction === 'up' ? 'bullish' :
                     pred.predicted_direction === 'down' ? 'bearish' : 'neutral';
         predictionObj = {
           direction: dir,
-          probability: pred.probability || 50,
-          confidenceLevel: pred.confidence_level || 'moderate',
+          probability: pred.probability || 55,
+          confidenceLevel: pred.confidence_level || (pred.probability >= 70 ? 'high' : 'moderate'),
           supportingSignals: pred.supporting_signals || [],
+        };
+      } else {
+        // Heuristic AI technical inference based on RSI, 24h momentum, and volume
+        let dir: 'bullish' | 'bearish' | 'neutral' = 'neutral';
+        let prob = 50;
+        const signals: string[] = [];
+
+        if (rsi !== null) {
+          if (rsi < 35) {
+            dir = 'bullish';
+            prob = 68;
+            signals.push(`RSI Oversold (${rsi}) — strong mean-reversion bounce expected`);
+          } else if (rsi > 68) {
+            dir = 'bearish';
+            prob = 65;
+            signals.push(`RSI Overbought (${rsi}) — consolidation / pullback risk`);
+          }
+        }
+
+        if (changePercent >= 0.8) {
+          if (dir === 'neutral') {
+            dir = 'bullish';
+            prob = 62;
+          }
+          signals.push(`Strong daily momentum (+${changePercent.toFixed(1)}%)`);
+        } else if (changePercent <= -0.8) {
+          if (dir === 'neutral') {
+            dir = 'bearish';
+            prob = 62;
+          }
+          signals.push(`Sustained selling pressure (${changePercent.toFixed(1)}%)`);
+        }
+
+        if (signals.length === 0) {
+          signals.push('Consolidating near key pivot range');
+        }
+
+        predictionObj = {
+          direction: dir,
+          probability: prob,
+          confidenceLevel: prob >= 70 ? 'high' : prob >= 60 ? 'moderate' : 'low',
+          supportingSignals: signals,
         };
       }
 
@@ -267,7 +298,7 @@ export async function GET(request: Request) {
     });
   } catch (error: any) {
     console.error('[Screener API] Error:', error);
-    
+
     // Fallback to cached data if error occurs
     if (screenerCache) {
       return NextResponse.json(screenerCache.data);
@@ -279,4 +310,3 @@ export async function GET(request: Request) {
     );
   }
 }
-

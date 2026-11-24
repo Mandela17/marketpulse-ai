@@ -70,7 +70,7 @@ export default function ScreenerPage() {
     return () => clearInterval(interval);
   }, [cacheTimestamp]);
 
-  // Fetch data from API (used on first load if no cache, or when user clicks re-fetch)
+  // Fetch data from API
   const fetchScreenerData = useCallback(async (isUserInitiated = false) => {
     if (isUserInitiated) {
       setRefreshing(true);
@@ -80,7 +80,6 @@ export default function ScreenerPage() {
     setError(null);
 
     try {
-      // Force refresh query parameter bypasses server in-memory cache
       const res = await fetch(`/api/screener${isUserInitiated ? '?refresh=true' : ''}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
@@ -112,12 +111,27 @@ export default function ScreenerPage() {
     }
   }, []);
 
-  // Only auto-fetch if no cache exists in localStorage
+  // Auto-fetch if no cache exists OR if the cached data lacks predictions (migration self-heal)
   useEffect(() => {
-    if (!initialCache) {
+    const cacheNeedsRefresh = !initialCache || initialCache.stocks.length === 0 || initialCache.stocks.every(s => !s.prediction);
+    if (cacheNeedsRefresh) {
       fetchScreenerData(false);
     }
   }, [initialCache, fetchScreenerData]);
+
+  // Dynamically compute exact counts for ALL filters directly from current stocks
+  const filterCounts = useMemo(() => {
+    return {
+      all: stocks.length,
+      bullish: stocks.filter(s => s.prediction?.direction === 'bullish').length,
+      bearish: stocks.filter(s => s.prediction?.direction === 'bearish').length,
+      gainers: stocks.filter(s => s.changePercent > 0).length,
+      losers: stocks.filter(s => s.changePercent < 0).length,
+      highConfidence: stocks.filter(s => (s.prediction?.probability || 0) >= 65).length,
+      oversold: stocks.filter(s => s.rsi !== null && s.rsi < 40).length,
+      overbought: stocks.filter(s => s.rsi !== null && s.rsi > 65).length,
+    };
+  }, [stocks]);
 
   // Extract unique sectors
   const sectors = useMemo(() => {
@@ -198,15 +212,15 @@ export default function ScreenerPage() {
     return result;
   }, [stocks, search, selectedSector, filter, sortField, sortOrder]);
 
-  const filterButtons: { key: FilterType; label: string; icon: string; count?: number }[] = [
-    { key: 'all', label: 'All Stocks', icon: '📋', count: stocks.length },
-    { key: 'bullish', label: 'AI Bullish', icon: '🟢', count: stats?.bullishCount },
-    { key: 'bearish', label: 'AI Bearish', icon: '🔴', count: stats?.bearishCount },
-    { key: 'gainers', label: 'Top Gainers', icon: '📈', count: stats?.gainersCount },
-    { key: 'losers', label: 'Top Losers', icon: '📉', count: stats?.losersCount },
-    { key: 'high-confidence', label: 'High Conviction', icon: '🎯' },
-    { key: 'oversold', label: 'RSI Oversold (<40)', icon: '⚡' },
-    { key: 'overbought', label: 'RSI Overbought (>65)', icon: '🔥' },
+  const filterButtons: { key: FilterType; label: string; icon: string; count: number }[] = [
+    { key: 'all', label: 'All Stocks', icon: '📋', count: filterCounts.all },
+    { key: 'bullish', label: 'AI Bullish', icon: '🟢', count: filterCounts.bullish },
+    { key: 'bearish', label: 'AI Bearish', icon: '🔴', count: filterCounts.bearish },
+    { key: 'gainers', label: 'Top Gainers', icon: '📈', count: filterCounts.gainers },
+    { key: 'losers', label: 'Top Losers', icon: '📉', count: filterCounts.losers },
+    { key: 'high-confidence', label: 'High Conviction', icon: '🎯', count: filterCounts.highConfidence },
+    { key: 'oversold', label: 'RSI Oversold (<40)', icon: '⚡', count: filterCounts.oversold },
+    { key: 'overbought', label: 'RSI Overbought (>65)', icon: '🔥', count: filterCounts.overbought },
   ];
 
   return (
@@ -231,7 +245,7 @@ export default function ScreenerPage() {
                 background: 'rgba(255,255,255,0.03)',
                 border: '1px solid var(--border-subtle)',
               }}
-              title={`Exact time: ${formatScanTimestamp(cacheTimestamp)}`}
+              title={`Exact scan time: ${formatScanTimestamp(cacheTimestamp)}`}
             >
               <Clock size={12} style={{ color: isCachedView ? '#fbbf24' : '#00d68f' }} />
               <span style={{ color: 'var(--text-muted)' }}>
@@ -310,13 +324,13 @@ export default function ScreenerPage() {
       )}
 
       {/* Summary KPI Badges */}
-      {!loading && stats && (
+      {!loading && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5 animate-fade-in-up">
           <div className="p-3.5 rounded-xl flex items-center justify-between"
             style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
             <div>
               <p className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: 'var(--text-muted)' }}>Universe</p>
-              <p className="text-lg font-bold text-white mt-0.5">{stocks.length} Stocks</p>
+              <p className="text-lg font-bold text-white mt-0.5">{filterCounts.all} Stocks</p>
             </div>
             <Activity size={20} style={{ color: '#60a5fa' }} />
           </div>
@@ -325,7 +339,7 @@ export default function ScreenerPage() {
             style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
             <div>
               <p className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: 'var(--text-muted)' }}>AI Bullish</p>
-              <p className="text-lg font-bold mt-0.5" style={{ color: '#00d68f' }}>{stats.bullishCount}</p>
+              <p className="text-lg font-bold mt-0.5" style={{ color: '#00d68f' }}>{filterCounts.bullish}</p>
             </div>
             <TrendingUp size={20} style={{ color: '#00d68f' }} />
           </div>
@@ -334,7 +348,7 @@ export default function ScreenerPage() {
             style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
             <div>
               <p className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: 'var(--text-muted)' }}>AI Bearish</p>
-              <p className="text-lg font-bold mt-0.5" style={{ color: '#ff4d6a' }}>{stats.bearishCount}</p>
+              <p className="text-lg font-bold mt-0.5" style={{ color: '#ff4d6a' }}>{filterCounts.bearish}</p>
             </div>
             <TrendingDown size={20} style={{ color: '#ff4d6a' }} />
           </div>
@@ -344,7 +358,7 @@ export default function ScreenerPage() {
             <div>
               <p className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: 'var(--text-muted)' }}>Gainers / Losers</p>
               <p className="text-lg font-bold mt-0.5 text-white">
-                <span style={{ color: '#00d68f' }}>{stats.gainersCount}</span> / <span style={{ color: '#ff4d6a' }}>{stats.losersCount}</span>
+                <span style={{ color: '#00d68f' }}>{filterCounts.gainers}</span> / <span style={{ color: '#ff4d6a' }}>{filterCounts.losers}</span>
               </p>
             </div>
             <SlidersHorizontal size={20} style={{ color: '#a78bfa' }} />
@@ -400,7 +414,7 @@ export default function ScreenerPage() {
           </div>
         </div>
 
-        {/* Filter Pills */}
+        {/* Filter Pills with Live Accurate Badge Counts */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
           {filterButtons.map(f => {
             const active = filter === f.key;
@@ -417,14 +431,15 @@ export default function ScreenerPage() {
               >
                 <span>{f.icon}</span>
                 <span>{f.label}</span>
-                {f.count !== undefined && (
-                  <span
-                    className="text-[10px] px-1.5 py-0.2 rounded-full ml-0.5"
-                    style={{ background: active ? 'rgba(59,130,246,0.25)' : 'rgba(255,255,255,0.06)' }}
-                  >
-                    {f.count}
-                  </span>
-                )}
+                <span
+                  className="text-[10px] px-1.5 py-0.2 rounded-full ml-0.5 font-mono"
+                  style={{
+                    background: active ? 'rgba(59,130,246,0.25)' : 'rgba(255,255,255,0.06)',
+                    color: active ? '#93c5fd' : '#cbd5e1',
+                  }}
+                >
+                  {f.count}
+                </span>
               </button>
             );
           })}
@@ -556,7 +571,7 @@ export default function ScreenerPage() {
                   const pred = stock.prediction;
                   const isBullish = pred?.direction === 'bullish';
                   const isBearish = pred?.direction === 'bearish';
-                  const prob = pred?.probability || 0;
+                  const prob = pred?.probability || 50;
 
                   const confColor =
                     prob >= 70 ? '#00d68f' :
