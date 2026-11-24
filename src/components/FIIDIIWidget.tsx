@@ -184,6 +184,18 @@ export default function FIIDIIWidget() {
               </button>
             )}
           </div>
+          {/* Column Headers */}
+          <div className="flex items-center gap-2 mb-1.5 pb-1 text-[9px] font-bold uppercase tracking-wider"
+            style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', color: 'var(--text-muted)' }}>
+            <span className="w-14 shrink-0 text-right">Date</span>
+            <div className="flex-1 flex gap-0.5 items-center">
+              <span className="flex-1 text-center" style={{ color: '#34d399' }}>FII Flow</span>
+              <span className="w-12 shrink-0 text-right">FII ₹</span>
+              <span className="flex-1 text-center" style={{ color: '#a78bfa' }}>DII Flow</span>
+              <span className="w-12 shrink-0 text-right">DII ₹</span>
+            </div>
+          </div>
+
           <div className={`space-y-1 ${showAll ? 'max-h-[700px] overflow-y-auto pr-1' : ''}`}
             style={showAll ? { scrollbarWidth: 'thin', scrollbarColor: 'rgba(255,255,255,0.1) transparent' } : {}}>
             {displayRecent.slice().reverse().map((flow, i) => {
@@ -234,16 +246,16 @@ export default function FIIDIIWidget() {
               );
             })}
           </div>
-          <div className="flex items-center gap-3 mt-2">
-            <span className="flex items-center gap-1 text-[9px]" style={{ color: 'var(--text-muted)' }}>
-              <span className="w-2 h-2 rounded-sm" style={{ background: '#3b82f6' }} /> FII
+          <div className="flex flex-wrap items-center justify-between gap-2 mt-2 pt-1.5 text-[9px]" style={{ borderTop: '1px solid rgba(255,255,255,0.05)', color: 'var(--text-muted)' }}>
+            <span className="flex items-center gap-1">
+              <span className="font-semibold text-white/70">FII:</span>
+              <span className="w-2 h-2 rounded-sm inline-block" style={{ background: '#00d68f' }} /> Buy
+              <span className="w-2 h-2 rounded-sm inline-block ml-1" style={{ background: '#ff4d6a' }} /> Sell
             </span>
-            <span className="flex items-center gap-1 text-[9px]" style={{ color: 'var(--text-muted)' }}>
-              <span className="w-2 h-2 rounded-sm" style={{ background: '#8b5cf6' }} /> DII
-            </span>
-            <span className="flex items-center gap-1 text-[9px] ml-auto" style={{ color: 'var(--text-muted)' }}>
-              <span className="w-2 h-2 rounded-sm" style={{ background: '#00d68f' }} /> Buy
-              <span className="w-2 h-2 rounded-sm ml-1" style={{ background: '#ff4d6a' }} /> Sell
+            <span className="flex items-center gap-1">
+              <span className="font-semibold text-white/70">DII:</span>
+              <span className="w-2 h-2 rounded-sm inline-block" style={{ background: '#a78bfa' }} /> Buy
+              <span className="w-2 h-2 rounded-sm inline-block ml-1" style={{ background: '#f59e0b' }} /> Sell
             </span>
           </div>
         </div>

@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server';
 export const dynamic = 'force-dynamic';
 import { fetchNifty50, fetchSensex, fetchStockPrice } from '@/lib/stockData';
+import { isMarketOpenNow } from '@/lib/marketHolidays';
 
 // In-memory cache for index data to avoid redundant Yahoo Finance calls
 let indexCache: { data: any; timestamp: number } | null = null;
@@ -35,7 +36,7 @@ export async function GET(request: Request) {
     const responseData = {
       nifty50: nifty,
       sensex: sensex,
-      marketStatus: isMarketOpen() ? 'open' : 'closed',
+      marketStatus: isMarketOpenNow() ? 'open' : 'closed',
       lastUpdated: new Date().toISOString(),
     };
 

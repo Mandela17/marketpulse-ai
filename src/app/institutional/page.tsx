@@ -352,9 +352,22 @@ export default function InstitutionalFlowsPage() {
         <div className="xl:col-span-2 space-y-6">
           {/* FII/DII Bar Chart */}
           <div className="glass-card-static rounded-2xl p-5">
-            <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
+            <h3 className="text-sm font-bold text-white mb-2 flex items-center gap-2">
               📊 Daily FII / DII Net Flow — Last {recent.length} Days
             </h3>
+
+            {/* Column Headers */}
+            <div className="flex items-center gap-2 mb-2 pb-1.5 text-[10px] font-bold uppercase tracking-wider"
+              style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', color: 'var(--text-muted)' }}>
+              <span className="w-20 shrink-0 text-right">Date</span>
+              <div className="flex-1 flex gap-1 items-center">
+                <span className="flex-1 text-center" style={{ color: '#34d399' }}>FII Net Flow</span>
+                <span className="w-14 shrink-0 text-right">FII ₹</span>
+                <span className="flex-1 text-center" style={{ color: '#a78bfa' }}>DII Net Flow</span>
+                <span className="w-14 shrink-0 text-right">DII ₹</span>
+              </div>
+            </div>
+
             <div className="space-y-1.5 max-h-[600px] overflow-y-auto pr-1"
               style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(255,255,255,0.1) transparent' }}>
               {recent.slice().reverse().map((flow) => {
@@ -390,17 +403,26 @@ export default function InstitutionalFlowsPage() {
                 );
               })}
             </div>
-            <div className="flex items-center gap-4 mt-3 pt-3" style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-              <span className="flex items-center gap-1.5 text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                <span className="w-3 h-2 rounded-sm" style={{ background: '#3b82f6' }} /> FII
-              </span>
-              <span className="flex items-center gap-1.5 text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                <span className="w-3 h-2 rounded-sm" style={{ background: '#8b5cf6' }} /> DII
-              </span>
-              <span className="flex items-center gap-1.5 text-[10px] ml-auto" style={{ color: 'var(--text-muted)' }}>
-                <span className="w-3 h-2 rounded-sm" style={{ background: '#00d68f' }} /> Buy
-                <span className="w-3 h-2 rounded-sm ml-2" style={{ background: '#ff4d6a' }} /> Sell
-              </span>
+            {/* Color Legend */}
+            <div className="flex flex-wrap items-center justify-between gap-3 mt-3 pt-3 text-[10px]" style={{ borderTop: '1px solid rgba(255,255,255,0.05)', color: 'var(--text-muted)' }}>
+              <div className="flex items-center gap-3">
+                <span className="font-semibold text-white/80">FII (Foreign):</span>
+                <span className="flex items-center gap-1">
+                  <span className="w-3 h-2 rounded-sm inline-block" style={{ background: '#00d68f' }} /> Net Buy
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="w-3 h-2 rounded-sm inline-block" style={{ background: '#ff4d6a' }} /> Net Sell
+                </span>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="font-semibold text-white/80">DII (Domestic):</span>
+                <span className="flex items-center gap-1">
+                  <span className="w-3 h-2 rounded-sm inline-block" style={{ background: '#a78bfa' }} /> Net Buy
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="w-3 h-2 rounded-sm inline-block" style={{ background: '#f59e0b' }} /> Net Sell
+                </span>
+              </div>
             </div>
           </div>
 

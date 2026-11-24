@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { LayoutDashboard, Newspaper, TrendingUp, Star, Plug, ChevronRight, LogOut, X, Grid3x3, Search, Briefcase, Scale, Shield, GraduationCap, Target, FileText, Coins, Landmark } from 'lucide-react';
+import { getMarketStatus, type MarketStatusInfo } from '@/lib/marketHolidays';
 
 const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -44,42 +45,24 @@ interface SidebarProps {
   onClose: () => void;
 }
 
-/**
- * Checks if Indian stock market (NSE/BSE) is currently open.
- * Market hours: Mon-Fri, 9:15 AM - 3:30 PM IST
- * Does not account for market holidays.
- */
-function isMarketOpen(): boolean {
-  const now = new Date();
-  // Convert to IST (UTC+5:30)
-  const utc = now.getTime() + now.getTimezoneOffset() * 60000;
-  const ist = new Date(utc + 5.5 * 3600000);
-
-  const day = ist.getDay(); // 0=Sun, 6=Sat
-  if (day === 0 || day === 6) return false;
-
-  const hours = ist.getHours();
-  const minutes = ist.getMinutes();
-  const totalMinutes = hours * 60 + minutes;
-
-  // 9:15 AM = 555 min, 3:30 PM = 930 min
-  return totalMinutes >= 555 && totalMinutes <= 930;
-}
-
 export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const { user, signOut, loading, isAdmin } = useAuth();
   const [mounted, setMounted] = useState(false);
-  const [marketOpen, setMarketOpen] = useState(false);
+  const [marketStatus, setMarketStatus] = useState<MarketStatusInfo>({
+    isOpen: false,
+    status: 'closed',
+    reason: 'Checking market...',
+  });
 
   useEffect(() => {
     setMounted(true);
-    setMarketOpen(isMarketOpen());
+    setMarketStatus(getMarketStatus());
 
     // Re-check market status every minute
     const interval = setInterval(() => {
-      setMarketOpen(isMarketOpen());
+      setMarketStatus(getMarketStatus());
     }, 60000);
 
     return () => clearInterval(interval);
@@ -484,13 +467,13 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                   height: '8px',
                   borderRadius: '50%',
                   flexShrink: 0,
-                  background: marketOpen ? 'var(--accent-green)' : 'var(--accent-red)',
-                  animation: marketOpen ? 'pulseGlow 2s infinite' : 'none',
-                  boxShadow: marketOpen ? '0 0 6px var(--accent-green)' : 'none',
+                  background: marketStatus.isOpen ? 'var(--accent-green)' : 'var(--accent-red)',
+                  animation: marketStatus.isOpen ? 'pulseGlow 2s infinite' : 'none',
+                  boxShadow: marketStatus.isOpen ? '0 0 6px var(--accent-green)' : 'none',
                 }}
               />
-              <span style={{ fontSize: '10px', fontWeight: 500, color: marketOpen ? 'var(--accent-green)' : 'var(--text-muted)' }}>
-                {mounted ? (marketOpen ? 'Market Open' : 'Market Closed') : '—'}
+              <span style={{ fontSize: '10px', fontWeight: 500, color: marketStatus.isOpen ? 'var(--accent-green)' : 'var(--text-muted)' }}>
+                {mounted ? (marketStatus.isOpen ? 'Market Open (Live)' : (marketStatus.holidayName ? `Closed: ${marketStatus.holidayName}` : marketStatus.reason)) : '—'}
               </span>
             </div>
             <p style={{ fontSize: '9px', marginTop: '4px', color: 'var(--text-disabled)' }}>

@@ -15,6 +15,7 @@ import GlobalMarketsWidget from '@/components/GlobalMarketsWidget';
 import DataStalenessWidget from '@/components/DataStalenessWidget';
 import AccuracyDriftWidget from '@/components/AccuracyDriftWidget';
 import { loadDashboardCache, saveDashboardCache, timeAgo } from '@/lib/dashboardCache';
+import { isMarketOpenNow } from '@/lib/marketHolidays';
 
 interface MarketData {
   nifty50: { value: number; change: number; changePercent: number };
@@ -193,18 +194,8 @@ export default function Dashboard() {
 
     fetchData();
 
-    // Only auto-refresh during Indian market hours (Mon-Fri 9:15-15:30 IST)
+    // Only auto-refresh during Indian market hours (Mon-Fri 9:15-15:30 IST, excluding holidays)
     // Saves unnecessary RSS + Gemini API calls during off-hours
-    function isMarketOpenNow(): boolean {
-      const now = new Date();
-      const utc = now.getTime() + now.getTimezoneOffset() * 60000;
-      const ist = new Date(utc + 5.5 * 3600000);
-      const day = ist.getDay();
-      if (day === 0 || day === 6) return false;
-      const totalMinutes = ist.getHours() * 60 + ist.getMinutes();
-      return totalMinutes >= 555 && totalMinutes <= 930;
-    }
-
     let interval: NodeJS.Timeout | undefined;
     if (isMarketOpenNow()) {
       interval = setInterval(fetchData, 5 * 60 * 1000);

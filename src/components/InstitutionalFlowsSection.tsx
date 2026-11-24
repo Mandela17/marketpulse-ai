@@ -482,16 +482,16 @@ export default function InstitutionalFlowsSection() {
                   );
                 })}
               </div>
-              <div className="flex items-center gap-3 mt-2">
-                <span className="flex items-center gap-1 text-[9px]" style={{ color: 'var(--text-muted)' }}>
-                  <span className="w-2 h-2 rounded-sm" style={{ background: '#3b82f6' }} /> FII
+              <div className="flex flex-wrap items-center justify-between gap-2 mt-2 pt-1.5 text-[9px]" style={{ borderTop: '1px solid rgba(255,255,255,0.05)', color: 'var(--text-muted)' }}>
+                <span className="flex items-center gap-1">
+                  <span className="font-semibold text-white/70">FII:</span>
+                  <span className="w-2 h-2 rounded-sm inline-block" style={{ background: '#00d68f' }} /> Buy
+                  <span className="w-2 h-2 rounded-sm inline-block ml-1" style={{ background: '#ff4d6a' }} /> Sell
                 </span>
-                <span className="flex items-center gap-1 text-[9px]" style={{ color: 'var(--text-muted)' }}>
-                  <span className="w-2 h-2 rounded-sm" style={{ background: '#8b5cf6' }} /> DII
-                </span>
-                <span className="flex items-center gap-1 text-[9px] ml-auto" style={{ color: 'var(--text-muted)' }}>
-                  <span className="w-2 h-2 rounded-sm" style={{ background: '#00d68f' }} /> Buy
-                  <span className="w-2 h-2 rounded-sm ml-1" style={{ background: '#ff4d6a' }} /> Sell
+                <span className="flex items-center gap-1">
+                  <span className="font-semibold text-white/70">DII:</span>
+                  <span className="w-2 h-2 rounded-sm inline-block" style={{ background: '#a78bfa' }} /> Buy
+                  <span className="w-2 h-2 rounded-sm inline-block ml-1" style={{ background: '#f59e0b' }} /> Sell
                 </span>
               </div>
             </div>

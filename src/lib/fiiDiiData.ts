@@ -80,8 +80,30 @@ async function fetchFromNSE(): Promise<FIIDIIFlow | null> {
     const diiBuy = parseCr(diiData?.buyValue ?? diiData?.buyvalue ?? 0);
     const diiSell = parseCr(diiData?.sellValue ?? diiData?.sellvalue ?? 0);
 
+    // Extract real trade date from NSE response (e.g. "23-Nov-2026")
+    const rawDateStr = (fiiData?.date || diiData?.date || '').toString().trim();
+    let tradeDate = new Date().toISOString().split('T')[0];
+    if (rawDateStr) {
+      const months: Record<string, string> = {
+        jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+        jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
+      };
+      const parts = rawDateStr.split('-');
+      if (parts.length === 3) {
+        if (parts[0].length === 4) {
+          tradeDate = rawDateStr;
+        } else {
+          const day = parts[0].padStart(2, '0');
+          const monthKey = parts[1].toLowerCase().slice(0, 3);
+          const month = months[monthKey] || parts[1].padStart(2, '0');
+          const year = parts[2];
+          tradeDate = `${year}-${month}-${day}`;
+        }
+      }
+    }
+
     return {
-      date: new Date().toISOString().split('T')[0],
+      date: tradeDate,
       fiiBuy,
       fiiSell,
       fiiNet: parseFloat((fiiBuy - fiiSell).toFixed(2)),
