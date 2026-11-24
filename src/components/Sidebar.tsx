@@ -90,6 +90,18 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
     onClose();
   }, [pathname]);
 
+  // Prevent background body scrolling when mobile sidebar is open
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [isOpen]);
+
   const handleSignOut = async () => {
     await signOut();
     router.push('/');
@@ -115,17 +127,21 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
         className={`
           fixed inset-y-0 left-0 z-50
           transform transition-transform duration-300 ease-out
-          lg:translate-x-0 lg:static
+          lg:translate-x-0 lg:sticky lg:top-0 lg:h-screen lg:max-h-screen
           ${isOpen ? 'translate-x-0' : '-translate-x-full'}
         `}
         style={{
           width: 'var(--sidebar-width)',
+          height: '100dvh',
+          maxHeight: '100dvh',
           display: 'flex',
           flexDirection: 'column',
           background: 'var(--bg-secondary)',
           borderRight: '1px solid var(--border-subtle)',
           backdropFilter: 'blur(25px) saturate(180%)',
           WebkitBackdropFilter: 'blur(25px) saturate(180%)',
+          overflow: 'hidden',
+          overscrollBehavior: 'contain',
         }}
       >
         {/* Top accent bar */}
@@ -178,102 +194,46 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
           </button>
         </div>
 
-        {/* Search */}
-        <div style={{ padding: '12px 16px', flexShrink: 0 }}>
-          <Link href="/search">
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px',
-                padding: '10px 14px',
-                borderRadius: '12px',
-                fontSize: '12px',
-                cursor: 'pointer',
-                transition: 'all 0.2s ease',
-                background: 'var(--bg-card)',
-                border: '1px solid var(--border-subtle)',
-                color: 'var(--text-muted)',
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--border-strong)')}
-              onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--border-subtle)')}
-            >
-              🔍 <span>Search stocks...</span>
-            </div>
-          </Link>
-        </div>
+        {/* Scrollable Navigation & Content Area */}
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            WebkitOverflowScrolling: 'touch',
+            overscrollBehavior: 'contain',
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          {/* Search */}
+          <div style={{ padding: '12px 16px', flexShrink: 0 }}>
+            <Link href="/search">
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  padding: '10px 14px',
+                  borderRadius: '12px',
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  background: 'var(--bg-card)',
+                  border: '1px solid var(--border-subtle)',
+                  color: 'var(--text-muted)',
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--border-strong)')}
+                onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--border-subtle)')}
+              >
+                🔍 <span>Search stocks...</span>
+              </div>
+            </Link>
+          </div>
 
-        {/* Navigation */}
-        <nav style={{ padding: '0 12px', marginTop: '4px', flexShrink: 0 }}>
-          <p style={{
-            padding: '0 12px',
-            marginBottom: '8px',
-            fontSize: '9px',
-            fontWeight: 600,
-            textTransform: 'uppercase',
-            letterSpacing: '0.15em',
-            color: 'var(--text-muted)',
-          }}>
-            Navigation
-          </p>
-          {navItems.map((item) => {
-            const isActive = pathname === item.href;
-            return (
-              <Link key={item.href} href={item.href}>
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '12px',
-                    padding: '10px 14px',
-                    borderRadius: '12px',
-                    fontSize: '14px',
-                    marginBottom: '2px',
-                    transition: 'all 0.2s ease',
-                    cursor: 'pointer',
-                    position: 'relative',
-                    overflow: 'hidden',
-                    fontWeight: isActive ? 600 : 400,
-                    background: isActive ? 'var(--accent-blue-dim)' : 'transparent',
-                    color: isActive ? 'var(--accent-blue)' : 'var(--text-secondary)',
-                    border: isActive ? '1px solid rgba(59, 130, 246, 0.15)' : '1px solid transparent',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!isActive) e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isActive) e.currentTarget.style.background = 'transparent';
-                  }}
-                >
-                  {/* Active left accent */}
-                  {isActive && (
-                    <div
-                      style={{
-                        position: 'absolute',
-                        left: 0,
-                        top: '50%',
-                        transform: 'translateY(-50%)',
-                        width: '3px',
-                        height: '20px',
-                        borderRadius: '0 4px 4px 0',
-                        background: 'var(--accent-blue)',
-                      }}
-                    />
-                  )}
-                  <item.icon size={17} style={{ flexShrink: 0 }} />
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.label}</span>
-                  {isActive && (
-                    <ChevronRight size={13} style={{ marginLeft: 'auto', opacity: 0.4, flexShrink: 0 }} />
-                  )}
-                </div>
-              </Link>
-            );
-          })}
-        </nav>
-
-        {/* Admin Navigation - only visible to admins */}
-        {isAdmin && (
-          <nav style={{ padding: '0 12px', marginTop: '12px', flexShrink: 0 }}>
+          {/* Navigation */}
+          <nav style={{ padding: '0 12px', marginTop: '4px', flexShrink: 0 }}>
             <p style={{
               padding: '0 12px',
               marginBottom: '8px',
@@ -281,11 +241,11 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
               fontWeight: 600,
               textTransform: 'uppercase',
               letterSpacing: '0.15em',
-              color: '#a855f7',
+              color: 'var(--text-muted)',
             }}>
-              🛡️ Admin
+              Navigation
             </p>
-            {adminItems.map((item) => {
+            {navItems.map((item) => {
               const isActive = pathname === item.href;
               return (
                 <Link key={item.href} href={item.href}>
@@ -294,68 +254,138 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                       display: 'flex',
                       alignItems: 'center',
                       gap: '12px',
-                      padding: '9px 14px',
+                      padding: '10px 14px',
                       borderRadius: '12px',
-                      fontSize: '12px',
-                      fontWeight: isActive ? 600 : 500,
+                      fontSize: '14px',
+                      marginBottom: '2px',
+                      transition: 'all 0.2s ease',
                       cursor: 'pointer',
                       position: 'relative',
-                      transition: 'all 0.2s ease',
-                      color: isActive ? '#a855f7' : 'var(--text-secondary)',
-                      background: isActive ? 'rgba(168, 85, 247, 0.08)' : 'transparent',
+                      overflow: 'hidden',
+                      fontWeight: isActive ? 600 : 400,
+                      background: isActive ? 'var(--accent-blue-dim)' : 'transparent',
+                      color: isActive ? 'var(--accent-blue)' : 'var(--text-secondary)',
+                      border: isActive ? '1px solid rgba(59, 130, 246, 0.15)' : '1px solid transparent',
                     }}
                     onMouseEnter={(e) => {
-                      if (!isActive) e.currentTarget.style.background = 'rgba(168, 85, 247, 0.05)';
+                      if (!isActive) e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
                     }}
                     onMouseLeave={(e) => {
                       if (!isActive) e.currentTarget.style.background = 'transparent';
                     }}
                   >
+                    {/* Active left accent */}
+                    {isActive && (
+                      <div
+                        style={{
+                          position: 'absolute',
+                          left: 0,
+                          top: '50%',
+                          transform: 'translateY(-50%)',
+                          width: '3px',
+                          height: '20px',
+                          borderRadius: '0 4px 4px 0',
+                          background: 'var(--accent-blue)',
+                        }}
+                      />
+                    )}
                     <item.icon size={17} style={{ flexShrink: 0 }} />
-                    <span>{item.label}</span>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.label}</span>
+                    {isActive && (
+                      <ChevronRight size={13} style={{ marginLeft: 'auto', opacity: 0.4, flexShrink: 0 }} />
+                    )}
                   </div>
                 </Link>
               );
             })}
           </nav>
-        )}
 
-        {/* Hot Sectors */}
-        <div style={{ padding: '0 12px', marginTop: '16px', flex: 1, overflowY: 'auto' }} className="no-scrollbar">
-          <p style={{
-            padding: '0 12px',
-            marginBottom: '8px',
-            fontSize: '9px',
-            fontWeight: 600,
-            textTransform: 'uppercase',
-            letterSpacing: '0.15em',
-            color: 'var(--text-muted)',
-          }}>
-            Hot Sectors
-          </p>
-          {hotSectors.map((sector) => (
-            <Link key={sector.id} href={`/sector/${sector.id}`}>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '12px',
-                  padding: '8px 14px',
-                  borderRadius: '12px',
-                  fontSize: '14px',
-                  marginBottom: '2px',
-                  transition: 'all 0.2s ease',
-                  cursor: 'pointer',
-                  color: 'var(--text-secondary)',
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)')}
-                onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-              >
-                <span style={{ fontSize: '14px' }}>{sector.icon}</span>
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sector.label}</span>
-              </div>
-            </Link>
-          ))}
+          {/* Admin Navigation - only visible to admins */}
+          {isAdmin && (
+            <nav style={{ padding: '0 12px', marginTop: '12px', flexShrink: 0 }}>
+              <p style={{
+                padding: '0 12px',
+                marginBottom: '8px',
+                fontSize: '9px',
+                fontWeight: 600,
+                textTransform: 'uppercase',
+                letterSpacing: '0.15em',
+                color: '#a855f7',
+              }}>
+                🛡️ Admin
+              </p>
+              {adminItems.map((item) => {
+                const isActive = pathname === item.href;
+                return (
+                  <Link key={item.href} href={item.href}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '12px',
+                        padding: '9px 14px',
+                        borderRadius: '12px',
+                        fontSize: '12px',
+                        fontWeight: isActive ? 600 : 500,
+                        cursor: 'pointer',
+                        position: 'relative',
+                        transition: 'all 0.2s ease',
+                        color: isActive ? '#a855f7' : 'var(--text-secondary)',
+                        background: isActive ? 'rgba(168, 85, 247, 0.08)' : 'transparent',
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!isActive) e.currentTarget.style.background = 'rgba(168, 85, 247, 0.05)';
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!isActive) e.currentTarget.style.background = 'transparent';
+                      }}
+                    >
+                      <item.icon size={17} style={{ flexShrink: 0 }} />
+                      <span>{item.label}</span>
+                    </div>
+                  </Link>
+                );
+              })}
+            </nav>
+          )}
+
+          {/* Hot Sectors */}
+          <div style={{ padding: '0 12px', marginTop: '16px', paddingBottom: '20px', flexShrink: 0 }}>
+            <p style={{
+              padding: '0 12px',
+              marginBottom: '8px',
+              fontSize: '9px',
+              fontWeight: 600,
+              textTransform: 'uppercase',
+              letterSpacing: '0.15em',
+              color: 'var(--text-muted)',
+            }}>
+              Hot Sectors
+            </p>
+            {hotSectors.map((sector) => (
+              <Link key={sector.id} href={`/sector/${sector.id}`}>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    padding: '8px 14px',
+                    borderRadius: '12px',
+                    fontSize: '14px',
+                    marginBottom: '2px',
+                    transition: 'all 0.2s ease',
+                    cursor: 'pointer',
+                    color: 'var(--text-secondary)',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                >
+                  <span style={{ fontSize: '14px' }}>{sector.icon}</span>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sector.label}</span>
+                </div>
+              </Link>
+            ))}
+          </div>
         </div>
 
         {/* User Footer */}
