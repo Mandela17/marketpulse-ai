@@ -86,8 +86,11 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'No quote data returned' }, { status: 404 });
     }
 
-    const prevClose = q.ohlc?.close || q.close_price || (q.last_price && q.net_change != null ? q.last_price - q.net_change : 0);
-    const change = q.net_change ?? (prevClose > 0 ? q.last_price - prevClose : 0);
+    // Note: After market close, q.ohlc.close equals q.last_price (today's close), not yesterday's close.
+    // Derive true previous close from last_price - net_change whenever net_change is provided.
+    const derivedPrev = q.last_price && typeof q.net_change === 'number' ? q.last_price - q.net_change : 0;
+    const prevClose = derivedPrev > 0 ? derivedPrev : (q.close_price || q.ohlc?.close || 0);
+    const change = typeof q.net_change === 'number' ? q.net_change : (prevClose > 0 ? q.last_price - prevClose : 0);
     // Prefer API-provided percentage; compute only as fallback
     let changePercent = q.percentage_change ?? 0;
     if (changePercent === 0 && prevClose > 0 && change !== 0) {

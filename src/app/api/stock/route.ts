@@ -51,15 +51,26 @@ export async function GET(request: Request) {
               const upstoxData = await upstoxRes.json();
               const q = Object.values(upstoxData.data || {})[0] as any;
               if (q && q.last_price) {
+                const netChange = typeof q.net_change === 'number'
+                  ? q.net_change
+                  : (q.last_price - (q.close_price || q.ohlc?.close || q.last_price));
+                const derivedPrev = q.last_price - netChange;
+                const prevClose = q.close_price > 0
+                  ? q.close_price
+                  : (typeof q.net_change === 'number' && derivedPrev > 0
+                      ? derivedPrev
+                      : (q.ohlc?.close || q.last_price));
+                const changePercent = prevClose > 0 && netChange !== 0
+                  ? (netChange / prevClose) * 100
+                  : 0;
+
                 upstoxQuote = {
                   symbol,
                   name: symbol,
                   price: q.last_price,
-                  change: q.net_change ?? (q.last_price - (q.close_price || q.last_price)),
-                  changePercent: q.close_price > 0
-                    ? ((q.last_price - q.close_price) / q.close_price) * 100
-                    : 0,
-                  previousClose: q.close_price || q.last_price,
+                  change: Number(netChange.toFixed(2)),
+                  changePercent: Number(changePercent.toFixed(2)),
+                  previousClose: Number(prevClose.toFixed(2)),
                   dayHigh: q.ohlc?.high || q.last_price,
                   dayLow: q.ohlc?.low || q.last_price,
                   volume: q.volume || 0,
