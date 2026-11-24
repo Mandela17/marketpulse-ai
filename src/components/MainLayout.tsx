@@ -44,7 +44,6 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
           position: 'relative',
           background: 'var(--bg-primary)',
           overflow: 'hidden',
-          width: '100%',
           minWidth: 0,
         }}
       >

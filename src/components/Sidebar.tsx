@@ -110,11 +110,13 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
         className={`
           fixed inset-y-0 left-0 z-50
           transform transition-transform duration-300 ease-out
-          lg:translate-x-0 lg:sticky lg:top-0 lg:h-screen lg:max-h-screen
+          lg:translate-x-0 lg:static lg:transform-none lg:z-auto
           ${isOpen ? 'translate-x-0' : '-translate-x-full'}
         `}
         style={{
           width: 'var(--sidebar-width)',
+          minWidth: 'var(--sidebar-width)',
+          flexShrink: 0,
           height: '100dvh',
           maxHeight: '100dvh',
           display: 'flex',

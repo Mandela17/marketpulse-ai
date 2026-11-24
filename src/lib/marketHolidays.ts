@@ -181,3 +181,4 @@ export function getMarketStatus(date?: Date | string): MarketStatusInfo {
 export function isMarketOpenNow(): boolean {
   return getMarketStatus().isOpen;
 }
+
