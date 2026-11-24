@@ -1,6 +1,13 @@
 // Sector and Stock mapping for Indian markets
 // Priority: Energy, Power, Auto, Gold, EV + others
 
+import upstoxMap from './upstoxInstrumentsMap.json';
+
+// Pre-filter valid clean NSE equity tickers (3,300+ listed instruments)
+const ALL_NSE_TICKERS: string[] = Object.keys(upstoxMap as Record<string, string>).filter(
+  k => /^[A-Z0-9&-]+$/.test(k) && !k.endsWith('BEES') && !k.endsWith('ETF') && !/^[0-9]/.test(k)
+);
+
 export const SECTORS = {
   energy: {
     id: 'energy',
@@ -251,7 +258,7 @@ export const ALL_STOCKS: { symbol: string; name: string; sector: string }[] = [
   { symbol: 'DIVISLAB', name: 'Divi\'s Laboratories Ltd.', sector: 'pharma' },
   { symbol: 'DIXON', name: 'Dixon Technologies (India) Ltd.', sector: 'fmcg' },
   { symbol: 'DLF', name: 'DLF Ltd.', sector: 'realestate' },
-  { symbol: 'DMART', name: 'Avenue Supermarts Ltd.', sector: 'general' },
+  { symbol: 'DMART', name: 'Avenue Supermarts Ltd. (DMart)', sector: 'fmcg' },
   { symbol: 'DOMS', name: 'DOMS Industries Ltd.', sector: 'fmcg' },
   { symbol: 'DRREDDY', name: 'Dr. Reddy\'s Laboratories Ltd.', sector: 'pharma' },
   { symbol: 'ECLERX', name: 'eClerx Services Ltd.', sector: 'general' },
@@ -422,7 +429,7 @@ export const ALL_STOCKS: { symbol: string; name: string; sector: string }[] = [
   { symbol: 'MARICO', name: 'Marico Ltd.', sector: 'fmcg' },
   { symbol: 'MARUTI', name: 'Maruti Suzuki India Ltd.', sector: 'auto' },
   { symbol: 'MAXHEALTH', name: 'Max Healthcare Institute Ltd.', sector: 'pharma' },
-  { symbol: 'MAZDOCK', name: 'Mazagoan Dock Shipbuilders Ltd.', sector: 'it' },
+  { symbol: 'MAZDOCK', name: 'Mazagon Dock Shipbuilders Ltd.', sector: 'defense' },
   { symbol: 'MCX', name: 'Multi Commodity Exchange of India Ltd.', sector: 'banking' },
   { symbol: 'MEDANTA', name: 'Global Health Ltd.', sector: 'pharma' },
   { symbol: 'MEESHO', name: 'Meesho Ltd.', sector: 'general' },
@@ -485,7 +492,7 @@ export const ALL_STOCKS: { symbol: string; name: string; sector: string }[] = [
   { symbol: 'PIRAMALFIN', name: 'Piramal Finance Ltd.', sector: 'banking' },
   { symbol: 'PNB', name: 'Punjab National Bank', sector: 'banking' },
   { symbol: 'PNBHOUSING', name: 'PNB Housing Finance Ltd.', sector: 'banking' },
-  { symbol: 'POLICYBZR', name: 'PB Fintech Ltd.', sector: 'banking' },
+  { symbol: 'POLICYBZR', name: 'PB Fintech Ltd. (Policybazaar)', sector: 'banking' },
   { symbol: 'POLYCAB', name: 'Polycab India Ltd.', sector: 'it' },
   { symbol: 'POLYMED', name: 'Poly Medicure Ltd.', sector: 'pharma' },
   { symbol: 'POONAWALLA', name: 'Poonawalla Fincorp Ltd.', sector: 'banking' },
@@ -612,6 +619,8 @@ export const ALL_STOCKS: { symbol: string; name: string; sector: string }[] = [
   { symbol: 'ZFCVINDIA', name: 'ZF Commercial Vehicle Control Systems India Ltd.', sector: 'auto' },
   { symbol: 'ZYDUSLIFE', name: 'Zydus Lifesciences Ltd.', sector: 'pharma' },
   { symbol: 'ZYDUSWELL', name: 'Zydus Wellness Ltd.', sector: 'fmcg' },
+  { symbol: 'ZOMATO', name: 'Zomato Ltd. (Eternal)', sector: 'general' },
+  { symbol: 'ETERNAL', name: 'Eternal Ltd. (Zomato / Blinkit)', sector: 'general' },
 ];
 
 // Global regions and their impact on Indian sectors
@@ -633,17 +642,45 @@ export const GLOBAL_IMPACT_MAP: Record<string, { region: string; sectors: string
   ],
 };
 
+// Popular brand names, short names, and aliases mapped to canonical symbols
+export const BRAND_ALIASES: Record<string, { symbol: string; name: string; sector: string }> = {
+  'ZOMATO': { symbol: 'ZOMATO', name: 'Zomato Ltd. (Eternal)', sector: 'general' },
+  'ETERNAL': { symbol: 'ETERNAL', name: 'Eternal Ltd. (Zomato / Blinkit)', sector: 'general' },
+  'BLINKIT': { symbol: 'ZOMATO', name: 'Zomato Ltd. (Blinkit / Eternal)', sector: 'general' },
+  'MAZAGON': { symbol: 'MAZDOCK', name: 'Mazagon Dock Shipbuilders Ltd.', sector: 'defense' },
+  'MAZAGONDOCK': { symbol: 'MAZDOCK', name: 'Mazagon Dock Shipbuilders Ltd.', sector: 'defense' },
+  'POLICYBAZAAR': { symbol: 'POLICYBZR', name: 'PB Fintech Ltd. (Policybazaar)', sector: 'banking' },
+  'DMART': { symbol: 'DMART', name: 'Avenue Supermarts Ltd. (DMart)', sector: 'fmcg' },
+  'PAYTM': { symbol: 'PAYTM', name: 'One97 Communications Ltd. (Paytm)', sector: 'banking' },
+  'NYKAA': { symbol: 'NYKAA', name: 'FSN E-Commerce Ventures Ltd. (Nykaa)', sector: 'general' },
+  'L&T': { symbol: 'LT', name: 'Larsen & Toubro Ltd.', sector: 'it' },
+  'LARSEN': { symbol: 'LT', name: 'Larsen & Toubro Ltd.', sector: 'it' },
+  'SBI': { symbol: 'SBIN', name: 'State Bank of India', sector: 'banking' },
+  'AIRTEL': { symbol: 'BHARTIARTL', name: 'Bharti Airtel Ltd.', sector: 'it' },
+  'HUL': { symbol: 'HINDUNILVR', name: 'Hindustan Unilever Ltd.', sector: 'fmcg' },
+  'TATAMOTORS': { symbol: 'TMCV', name: 'Tata Motors CV Ltd. (Commercial Vehicles)', sector: 'auto' },
+  'TATA MOTORS': { symbol: 'TMCV', name: 'Tata Motors CV Ltd. (Commercial Vehicles)', sector: 'auto' },
+  'TATA MOTORS CV': { symbol: 'TMCV', name: 'Tata Motors CV Ltd. (Commercial Vehicles)', sector: 'auto' },
+  'TATA MOTORS PASSENGER': { symbol: 'TMPV', name: 'Tata Motors Passenger Vehicles Ltd.', sector: 'auto' },
+  'INDIGO': { symbol: 'INDIGO', name: 'InterGlobe Aviation Ltd. (IndiGo)', sector: 'aviation' },
+  'INTERGLOBE': { symbol: 'INDIGO', name: 'InterGlobe Aviation Ltd. (IndiGo)', sector: 'aviation' },
+};
+
 export function getStockBySymbol(symbol: string) {
   const clean = symbol.toUpperCase().trim();
   const exact = ALL_STOCKS.find(s => s.symbol.toUpperCase() === clean);
   if (exact) return exact;
 
-  // Handle legacy Tata Motors queries and aliases
-  if (clean === 'TATAMOTORS' || clean === 'TATA MOTORS') {
-    return ALL_STOCKS.find(s => s.symbol === 'TMCV') || {
-      symbol: 'TMCV',
-      name: 'Tata Motors CV Ltd.',
-      sector: 'auto',
+  if (BRAND_ALIASES[clean]) {
+    return BRAND_ALIASES[clean];
+  }
+
+  // Check if it exists in ALL_NSE_TICKERS
+  if (ALL_NSE_TICKERS.includes(clean)) {
+    return {
+      symbol: clean,
+      name: clean,
+      sector: 'general',
     };
   }
 
@@ -658,22 +695,69 @@ export function searchStocks(query: string) {
   const q = query.toLowerCase().trim();
   if (!q) return [];
   const cleanQ = q.replace(/[^a-z0-9]/g, '');
+  const upperQ = query.toUpperCase().trim();
+  const cleanUpper = cleanQ.toUpperCase();
 
-  return ALL_STOCKS.filter(s => {
+  const results: { symbol: string; name: string; sector: string }[] = [];
+  const seen = new Set<string>();
+
+  // 1. Check brand aliases
+  for (const [alias, stock] of Object.entries(BRAND_ALIASES)) {
+    const cleanAlias = alias.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (alias.toLowerCase().includes(q) || (cleanQ.length >= 2 && cleanAlias.includes(cleanQ))) {
+      if (!seen.has(stock.symbol)) {
+        seen.add(stock.symbol);
+        results.push(stock);
+      }
+    }
+  }
+
+  // 2. Exact match in curated ALL_STOCKS
+  for (const s of ALL_STOCKS) {
+    if (s.symbol.toUpperCase() === upperQ && !seen.has(s.symbol)) {
+      seen.add(s.symbol);
+      results.push(s);
+    }
+  }
+
+  // 3. Prefix match in curated ALL_STOCKS
+  for (const s of ALL_STOCKS) {
+    const sym = s.symbol.toLowerCase();
+    if (sym.startsWith(cleanQ) && !seen.has(s.symbol)) {
+      seen.add(s.symbol);
+      results.push(s);
+    }
+  }
+
+  // 4. Substring & normalized match in curated ALL_STOCKS (symbol or name)
+  for (const s of ALL_STOCKS) {
+    if (seen.has(s.symbol)) continue;
     const sym = s.symbol.toLowerCase();
     const name = s.name.toLowerCase();
     const cleanSym = sym.replace(/[^a-z0-9]/g, '');
     const cleanName = name.replace(/[^a-z0-9]/g, '');
 
-    // Direct match
-    if (sym.includes(q) || name.includes(q)) return true;
-    // Normalized alphanumeric match (handles spaces like "tatamotors" vs "tata motors")
-    if (cleanQ.length >= 2 && (cleanSym.includes(cleanQ) || cleanName.includes(cleanQ))) return true;
+    if (
+      sym.includes(q) ||
+      name.includes(q) ||
+      (cleanQ.length >= 2 && (cleanSym.includes(cleanQ) || cleanName.includes(cleanQ)))
+    ) {
+      seen.add(s.symbol);
+      results.push(s);
+    }
+  }
 
-    // Special aliases
-    if ((cleanQ === 'tatamotors' || cleanQ === 'tata') && (sym === 'TMCV' || sym === 'TMPV')) return true;
-    if ((cleanQ === 'indigo' || cleanQ === 'interglobe') && sym === 'INDIGO') return true;
+  // 5. Fallback across all 3,300+ NSE listed equity tickers from Upstox
+  if (results.length < 10 && cleanUpper.length >= 1) {
+    for (const ticker of ALL_NSE_TICKERS) {
+      if (seen.has(ticker)) continue;
+      if (ticker === cleanUpper || ticker.startsWith(cleanUpper)) {
+        seen.add(ticker);
+        results.push({ symbol: ticker, name: ticker, sector: 'general' });
+        if (results.length >= 10) break;
+      }
+    }
+  }
 
-    return false;
-  }).slice(0, 10);
+  return results.slice(0, 10);
 }

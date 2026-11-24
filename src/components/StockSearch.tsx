@@ -38,8 +38,8 @@ export default function StockSearch({ onClose }: { onClose?: () => void }) {
   }, [query]);
 
   const handleSelect = (symbol: string) => {
-    router.push(`/stock/${symbol}`);
-    onClose?.();
+    if (!symbol) return;
+    router.push(`/stock/${encodeURIComponent(symbol.toUpperCase().trim())}`);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -49,8 +49,13 @@ export default function StockSearch({ onClose }: { onClose?: () => void }) {
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setSelectedIndex((prev) => Math.max(prev - 1, 0));
-    } else if (e.key === 'Enter' && results[selectedIndex]) {
-      handleSelect(results[selectedIndex].symbol);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (results[selectedIndex]) {
+        handleSelect(results[selectedIndex].symbol);
+      } else if (query.trim()) {
+        handleSelect(query.trim().toUpperCase());
+      }
     } else if (e.key === 'Escape') {
       onClose?.();
     }
@@ -66,17 +71,27 @@ export default function StockSearch({ onClose }: { onClose?: () => void }) {
     <div className="w-full max-w-xl mx-auto">
       {/* Search Input */}
       <div className="relative">
-        <div className="flex items-center gap-3 px-4 py-3 rounded-xl"
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (results[selectedIndex]) {
+              handleSelect(results[selectedIndex].symbol);
+            } else if (query.trim()) {
+              handleSelect(query.trim().toUpperCase());
+            }
+          }}
+          className="flex items-center gap-3 px-4 py-3 rounded-xl"
           style={{
             background: 'var(--bg-card)',
             border: '1px solid var(--accent-blue)',
             boxShadow: '0 0 20px rgba(91, 140, 255, 0.15)',
-          }}>
+          }}
+        >
           <span className="text-lg">🔍</span>
           <input
             ref={inputRef}
             type="text"
-            placeholder="Search any stock... (e.g., RELIANCE, TATA, HDFC)"
+            placeholder="Search any stock... (e.g., RELIANCE, TATA, HDFC, ZOMATO)"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -84,13 +99,23 @@ export default function StockSearch({ onClose }: { onClose?: () => void }) {
             style={{ color: 'var(--text-primary)' }}
           />
           {query && (
-            <button onClick={() => setQuery('')}
-              className="text-sm px-2 py-0.5 rounded hover:opacity-80"
-              style={{ color: 'var(--text-muted)' }}>
+            <button
+              type="button"
+              onClick={() => setQuery('')}
+              className="text-sm px-2 py-0.5 rounded hover:opacity-80 cursor-pointer"
+              style={{ color: 'var(--text-muted)' }}
+            >
               ✕
             </button>
           )}
-        </div>
+          <button
+            type="submit"
+            className="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white transition-opacity hover:opacity-90 cursor-pointer"
+            style={{ background: 'var(--accent-blue)' }}
+          >
+            Search
+          </button>
+        </form>
 
         {/* Results dropdown */}
         {results.length > 0 && (

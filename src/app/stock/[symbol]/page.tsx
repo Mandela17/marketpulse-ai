@@ -124,7 +124,7 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
 
     stock = {
       symbol: decodedSymbol,
-      name: `${decodedSymbol} (Custom Stock)`,
+      name: decodedSymbol,
       sector,
     };
   }

@@ -79,6 +79,11 @@ export function getInstrumentKey(symbol: string): string | null {
   if (clean === 'TATAMOTORS' || clean === 'TATA MOTORS') {
     return (upstoxMap as Record<string, string>)['TMCV'] || SYMBOL_TO_INSTRUMENT_KEY['TMCV'] || 'NSE_EQ|INE1TAE01010';
   }
+
+  // Brand aliases
+  if (clean === 'ZOMATO') return (upstoxMap as Record<string, string>)['ETERNAL'] || 'NSE_EQ|INE758T01015';
+  if (clean === 'MAZAGON' || clean === 'MAZAGONDOCK') return (upstoxMap as Record<string, string>)['MAZDOCK'] || 'NSE_EQ|INE249Z01020';
+  if (clean === 'POLICYBAZAAR') return (upstoxMap as Record<string, string>)['POLICYBZR'] || 'NSE_EQ|INE417T01026';
   
   // 1. Try full equity / ETF map (9400+ entries)
   const fullMapVal = (upstoxMap as Record<string, string>)[clean];

@@ -16,14 +16,14 @@ export default function SearchPage() {
       </div>
 
       <div className="w-full max-w-xl animate-slide-up" style={{ animationDelay: '0.1s' }}>
-        <StockSearch onClose={() => router.push('/')} />
+        <StockSearch />
       </div>
 
       {/* Popular searches */}
       <div className="mt-8 text-center animate-slide-up" style={{ animationDelay: '0.2s' }}>
         <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>Popular searches</p>
         <div className="flex flex-wrap gap-2 justify-center">
-          {['RELIANCE', 'TATAMOTORS', 'HDFCBANK', 'ADANIGREEN', 'HAL', 'TITAN', 'TCS', 'NTPC'].map((sym) => (
+          {['RELIANCE', 'TMCV', 'INDIGO', 'TATAMOTORS', 'HDFCBANK', 'TCS', 'INFY', 'TITAN', 'HAL', 'ZOMATO', 'SUZLON'].map((sym) => (
             <button key={sym}
               onClick={() => router.push(`/stock/${sym}`)}
               className="text-xs px-3 py-1.5 rounded-full transition-all cursor-pointer"

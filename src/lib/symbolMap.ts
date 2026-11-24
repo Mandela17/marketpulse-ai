@@ -23,6 +23,15 @@ const YAHOO_TICKER_OVERRIDES: Record<string, string> = {
   'INDIGO':       'INDIGO.NS',
   'INTERGLOBE':   'INDIGO.NS',
 
+  // Zomato rebranded to Eternal
+  'ZOMATO':       'ETERNAL.NS',
+  'ETERNAL':      'ETERNAL.NS',
+
+  // Mazagon Dock & Policybazaar aliases
+  'MAZAGON':      'MAZDOCK.NS',
+  'MAZAGONDOCK':  'MAZDOCK.NS',
+  'POLICYBAZAAR': 'POLICYBZR.NS',
+
   // BSE-specific or renamed tickers
   'NIFTY':        '^NSEI',              // Index
   'BANKNIFTY':    '^NSEBANK',           // Index
