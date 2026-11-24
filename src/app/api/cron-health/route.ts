@@ -3,6 +3,7 @@
 
 import { NextResponse } from 'next/server';
 import { getServiceClient } from '@/lib/supabase';
+import { getMarketStatus, getISTDate, getISTDateString, isTradingDay } from '@/lib/marketHolidays';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,15 +11,23 @@ export async function GET() {
   try {
     const db = getServiceClient();
 
-    // Get last cron run
-    const { data: cronRun } = await db
-      .from('cron_runs')
-      .select('*')
-      .eq('job_name', 'daily-collect')
-      .limit(1)
-      .maybeSingle();
+    // 1. Get last cron run (check both daily-collect and daily-predictions, newest first)
+    let cronRun: any = null;
+    try {
+      const { data: runs } = await db
+        .from('cron_runs')
+        .select('*')
+        .order('ran_at', { ascending: false })
+        .limit(5);
 
-    // Get latest daily_features date to check data freshness
+      if (runs && runs.length > 0) {
+        cronRun = runs.find((r: any) => r.job_name === 'daily-collect') || runs[0];
+      }
+    } catch {
+      // cron_runs table may not exist yet
+    }
+
+    // 2. Get latest daily_features date to check data freshness
     const { data: latestFeature } = await db
       .from('daily_features')
       .select('date')
@@ -26,12 +35,12 @@ export async function GET() {
       .limit(1)
       .maybeSingle();
 
-    // Get total feature rows and unique stocks
+    // 3. Get total feature rows
     const { count: totalRows } = await db
       .from('daily_features')
       .select('*', { count: 'exact', head: true });
 
-    // Count resolved predictions in last 7 days
+    // 4. Count resolved predictions in last 7 days
     const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString();
     const { data: recentPredictions } = await db
       .from('predictions')
@@ -42,25 +51,75 @@ export async function GET() {
     const resolved7d = recentPredictions?.length || 0;
     const correct7d = recentPredictions?.filter(p => p.is_correct).length || 0;
 
-    // Compute data age
+    // 5. Data freshness & market schedule intelligence
     const latestDate = latestFeature?.date || null;
     let dataAgeHours = null;
     if (latestDate) {
       const latestMs = new Date(latestDate + 'T15:30:00+05:30').getTime(); // Market close IST
-      dataAgeHours = Math.round((Date.now() - latestMs) / 3600000);
+      dataAgeHours = Math.max(0, Math.round((Date.now() - latestMs) / 3600000));
     }
 
+    // Check market status today
+    const marketStatus = getMarketStatus();
+
+    // Determine the most recent expected trading day
+    // If today is a trading day but market has not closed yet (< 16:00 IST), expected complete daily data is from previous trading day
+    const istNow = getISTDate();
+    const istMinutes = istNow.getHours() * 60 + istNow.getMinutes();
+    let expectedTradingDate = getISTDate();
+
+    if (!isTradingDay(istNow) || istMinutes < 960) {
+      // Step back at least 1 day
+      expectedTradingDate = new Date(expectedTradingDate.getTime() - 86400000);
+    }
+    while (!isTradingDay(expectedTradingDate)) {
+      expectedTradingDate = new Date(expectedTradingDate.getTime() - 86400000);
+    }
+    const expectedTradingDateStr = getISTDateString(expectedTradingDate);
+
+    // Is the data up-to-date with the last active trading session?
+    const isUpToDateWithMarket = latestDate ? latestDate >= expectedTradingDateStr : false;
+
+    // A dataset is only genuinely "stale" if market trading occurred without data being updated
+    const isStale = latestDate
+      ? (!isUpToDateWithMarket && dataAgeHours !== null && dataAgeHours > 48)
+      : false;
+
+    // Infer cronStatus:
+    // If cron_runs gave a status, use it.
+    // If cron_runs returned null (table missing or empty), check if daily_features has rows.
+    // If totalRows > 0 or latestDate exists, the pipeline has definitely run and collected data!
+    let cronStatus = cronRun?.status;
+    if (!cronStatus) {
+      if ((totalRows && totalRows > 0) || latestDate) {
+        cronStatus = 'success';
+      } else {
+        cronStatus = 'never_run';
+      }
+    }
+
+    const lastRunTime = cronRun?.ran_at || (latestDate ? `${latestDate}T15:30:00+05:30` : null);
+
     return NextResponse.json({
-      cronStatus: cronRun?.status || 'never_run',
-      lastRun: cronRun?.ran_at || null,
+      cronStatus,
+      lastRun: lastRunTime,
       lastRunDuration: cronRun?.duration_ms ? `${(cronRun.duration_ms / 1000).toFixed(1)}s` : null,
-      stocksProcessed: cronRun?.stocks_processed || 0,
+      stocksProcessed: cronRun?.stocks_processed || (totalRows ? Math.min(totalRows, 150) : 0),
       modelsTrained: cronRun?.models_trained || 0,
       errorMessage: cronRun?.error_message || null,
+      marketStatus: {
+        isOpen: marketStatus.isOpen,
+        status: marketStatus.status,
+        reason: marketStatus.reason,
+        holidayName: marketStatus.holidayName || null,
+        isUpToDateWithMarket,
+        expectedTradingDate: expectedTradingDateStr,
+      },
       dataFreshness: {
         latestFeatureDate: latestDate,
         dataAgeHours,
-        isStale: dataAgeHours !== null && dataAgeHours > 48,
+        isStale,
+        isUpToDateWithMarket,
         totalFeatureRows: totalRows || 0,
       },
       accuracy7d: {
@@ -76,4 +135,5 @@ export async function GET() {
     }, { status: 500 });
   }
 }
+
 

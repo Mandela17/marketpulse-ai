@@ -176,3 +176,29 @@ CREATE POLICY "Service read user_roles" ON user_roles FOR SELECT USING (true);
 CREATE POLICY "Service insert user_roles" ON user_roles FOR INSERT WITH CHECK (true);
 CREATE POLICY "Service update user_roles" ON user_roles FOR UPDATE USING (true);
 
+-- ─── 6. Cron Runs Monitoring Table ───────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS cron_runs (
+  id                   BIGSERIAL PRIMARY KEY,
+  job_name             TEXT NOT NULL,
+  ran_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  status               TEXT NOT NULL CHECK (status IN ('success', 'failed', 'running')),
+  duration_ms          INTEGER,
+  stocks_processed     INTEGER DEFAULT 0,
+  models_trained       INTEGER DEFAULT 0,
+  predictions_resolved INTEGER DEFAULT 0,
+  articles_saved       INTEGER DEFAULT 0,
+  error_message        TEXT,
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(job_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cron_runs_job_name ON cron_runs(job_name);
+CREATE INDEX IF NOT EXISTS idx_cron_runs_ran_at ON cron_runs(ran_at DESC);
+
+ALTER TABLE cron_runs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public read cron_runs" ON cron_runs FOR SELECT USING (true);
+CREATE POLICY "Service write cron_runs" ON cron_runs FOR INSERT WITH CHECK (true);
+CREATE POLICY "Service update cron_runs" ON cron_runs FOR UPDATE USING (true);
+
+

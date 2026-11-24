@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { AlertTriangle, CheckCircle, RefreshCw, Database, Clock, Activity } from 'lucide-react';
+import { AlertTriangle, CheckCircle, RefreshCw, Database, Clock, Activity, Calendar } from 'lucide-react';
 
 interface CronHealth {
   cronStatus: string;
@@ -10,10 +10,19 @@ interface CronHealth {
   stocksProcessed: number;
   modelsTrained: number;
   errorMessage: string | null;
+  marketStatus?: {
+    isOpen: boolean;
+    status: string;
+    reason: string;
+    holidayName: string | null;
+    isUpToDateWithMarket: boolean;
+    expectedTradingDate: string;
+  };
   dataFreshness: {
     latestFeatureDate: string | null;
     dataAgeHours: number | null;
     isStale: boolean;
+    isUpToDateWithMarket?: boolean;
     totalFeatureRows: number;
   };
   accuracy7d: {
@@ -44,14 +53,19 @@ export default function DataStalenessWidget() {
   if (loading) return null; // Don't show skeleton — keep dashboard clean
   if (error || !health) return null; // Silently fail — not critical
 
-  const { dataFreshness, cronStatus, accuracy7d } = health;
+  const { dataFreshness, cronStatus, accuracy7d, marketStatus } = health;
   const isStale = dataFreshness.isStale;
   const isError = cronStatus === 'failed';
-  const isNeverRun = cronStatus === 'never_run';
-  const ageHours = dataFreshness.dataAgeHours;
 
-  // Don't show banner if everything is healthy and data < 24 hours old
-  if (!isStale && !isError && !isNeverRun && ageHours !== null && ageHours < 24) {
+  // Only genuinely "never run" if status is never_run AND no data exists in daily_features
+  const isNeverRun = cronStatus === 'never_run' && dataFreshness.totalFeatureRows === 0 && !dataFreshness.latestFeatureDate;
+  const ageHours = dataFreshness.dataAgeHours;
+  const isMarketClosed = marketStatus?.isOpen === false;
+  const isUpToDate = dataFreshness.isUpToDateWithMarket ?? (ageHours !== null && ageHours < 24);
+
+  // If everything is healthy, no errors, and data is up-to-date with market (or market is closed on holiday/weekend):
+  // Hide banner to keep dashboard pristine
+  if (!isStale && !isError && !isNeverRun && (isUpToDate || (isMarketClosed && ageHours !== null && ageHours < 72))) {
     return null;
   }
 
@@ -68,8 +82,8 @@ export default function DataStalenessWidget() {
     borderColor = 'rgba(59,130,246,0.25)';
     iconColor = '#60a5fa';
     StatusIcon = Database;
-    statusText = 'Pipeline Not Yet Run';
-    statusDetail = 'The data collection cron has never run. Models will train after the first scheduled run (8:30 AM IST).';
+    statusText = 'Pipeline Initializing';
+    statusDetail = 'No historical feature records found. Daily data collection will run at the next scheduled time (8:30 AM IST).';
   } else if (isError) {
     bgGrad = 'linear-gradient(135deg, rgba(239,68,68,0.08), rgba(239,68,68,0.04))';
     borderColor = 'rgba(239,68,68,0.25)';
@@ -78,7 +92,7 @@ export default function DataStalenessWidget() {
     statusText = 'Pipeline Error';
     statusDetail = health.errorMessage
       ? `Last run failed: ${health.errorMessage.substring(0, 120)}`
-      : 'The last cron run failed. Predictions may use stale data.';
+      : 'The last cron run failed. Predictions may use previous session data.';
   } else if (isStale) {
     bgGrad = 'linear-gradient(135deg, rgba(251,191,36,0.08), rgba(251,191,36,0.04))';
     borderColor = 'rgba(251,191,36,0.25)';
@@ -86,16 +100,18 @@ export default function DataStalenessWidget() {
     StatusIcon = AlertTriangle;
     statusText = 'Data May Be Stale';
     statusDetail = ageHours !== null
-      ? `Last data update was ${ageHours} hours ago. Predictions may be less reliable.`
+      ? `Last data update was ${ageHours} hours ago. Market traded without new feature updates.`
       : 'Unable to determine data freshness.';
   } else {
-    // 24-48 hour range — info banner
+    // 24-48 hour range on active trading days
     bgGrad = 'linear-gradient(135deg, rgba(59,130,246,0.06), rgba(59,130,246,0.03))';
     borderColor = 'rgba(59,130,246,0.2)';
     iconColor = '#60a5fa';
     StatusIcon = Clock;
-    statusText = 'Data Aging';
-    statusDetail = `Data is ${ageHours} hours old. Next refresh at 8:30 AM IST.`;
+    statusText = 'Awaiting Market Refresh';
+    statusDetail = marketStatus?.reason
+      ? `${marketStatus.reason} • Next scheduled refresh at 8:30 AM IST.`
+      : `Data is ${ageHours} hours old. Next refresh at 8:30 AM IST.`;
   }
 
   return (
@@ -113,6 +129,14 @@ export default function DataStalenessWidget() {
 
       {/* Quick stats pills */}
       <div className="flex items-center gap-2 flex-wrap shrink-0">
+        {marketStatus?.holidayName && (
+          <span className="text-[10px] px-2 py-1 rounded-md font-semibold flex items-center gap-1"
+            style={{ background: 'rgba(234,179,8,0.12)', color: '#eab308' }}
+          >
+            <Calendar size={10} />
+            {marketStatus.holidayName}
+          </span>
+        )}
         {ageHours !== null && (
           <span className="text-[10px] px-2 py-1 rounded-md font-semibold flex items-center gap-1"
             style={{
@@ -147,4 +171,3 @@ export default function DataStalenessWidget() {
     </div>
   );
 }
-
