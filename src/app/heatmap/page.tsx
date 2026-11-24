@@ -27,7 +27,7 @@ const NIFTY50_STOCKS: { symbol: string; name: string; sector: string; weight: nu
   { symbol: 'ADANIENT', name: 'Adani Ent.', sector: 'Energy', weight: 1.0 },
   // Auto
   { symbol: 'MARUTI', name: 'Maruti', sector: 'Auto', weight: 1.6 },
-  { symbol: 'TATAMOTORS', name: 'Tata Motors', sector: 'Auto', weight: 1.4 },
+  { symbol: 'TMCV', name: 'Tata Motors CV', sector: 'Auto', weight: 1.4 },
   { symbol: 'M&M', name: 'M&M', sector: 'Auto', weight: 2.3 },
   { symbol: 'BAJAJ-AUTO', name: 'Bajaj Auto', sector: 'Auto', weight: 1.0 },
   { symbol: 'EICHERMOT', name: 'Eicher Motors', sector: 'Auto', weight: 0.8 },
@@ -47,6 +47,8 @@ const NIFTY50_STOCKS: { symbol: string; name: string; sector: string; weight: nu
   { symbol: 'JSWSTEEL', name: 'JSW Steel', sector: 'Metals', weight: 0.9 },
   { symbol: 'HINDALCO', name: 'Hindalco', sector: 'Metals', weight: 0.7 },
   { symbol: 'COALINDIA', name: 'Coal India', sector: 'Metals', weight: 0.8 },
+  // Aviation
+  { symbol: 'INDIGO', name: 'IndiGo', sector: 'Aviation', weight: 1.5 },
   // Telecom & Media
   { symbol: 'BHARTIARTL', name: 'Bharti Airtel', sector: 'Telecom', weight: 3.5 },
   // Conglomerate / Others

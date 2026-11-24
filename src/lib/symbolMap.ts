@@ -12,8 +12,16 @@ const YAHOO_TICKER_OVERRIDES: Record<string, string> = {
   'L&T':          'LT.NS',              // L&T → LT on Yahoo
   'M&MFIN':       'M%26MFIN.NS',
 
-  // Tata Motors — DVR shares sometimes confuse Yahoo
-  'TATAMOTORS':   'TATAMOTORS.NS',      // This IS correct, but Yahoo sometimes has issues
+  // Tata Motors — Demerged into Commercial Vehicles (TMCV) and Passenger Vehicles (TMPV)
+  // TATAMOTORS.NS is delisted on Yahoo Finance, so map to TMCV.NS as default
+  'TATAMOTORS':   'TMCV.NS',
+  'TATA MOTORS':  'TMCV.NS',
+  'TMCV':         'TMCV.NS',
+  'TMPV':         'TMPV.NS',
+
+  // Aviation
+  'INDIGO':       'INDIGO.NS',
+  'INTERGLOBE':   'INDIGO.NS',
 
   // BSE-specific or renamed tickers
   'NIFTY':        '^NSEI',              // Index

@@ -206,6 +206,7 @@ export default function StockPage({ params }: { params: Promise<{ symbol: string
       if (newsRes.status === 'fulfilled' && newsRes.value?.articles) {
         const related = newsRes.value.articles.filter((a: NewsArticle) =>
           a.relatedStocks.includes(decodedSymbol) ||
+          (stock && a.relatedStocks.includes(stock.symbol)) ||
           (stock && a.relatedSectors.includes(stock.sector))
         );
         setNewsArticles(related.slice(0, 8));

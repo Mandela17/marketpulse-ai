@@ -20,10 +20,15 @@ export const SYMBOL_TO_INSTRUMENT_KEY: Record<string, string> = {
 
   // Automobile
   'MARUTI':      'NSE_EQ|INE585B01010',
-  'TATAMOTORS':  'NSE_EQ|INE155A01022',
+  'TATAMOTORS':  'NSE_EQ|INE1TAE01010',
+  'TMCV':        'NSE_EQ|INE1TAE01010',
+  'TMPV':        'NSE_EQ|INE155A01022',
   'M&M':         'NSE_EQ|INE101A01026',
   'BAJAJ-AUTO':  'NSE_EQ|INE917I01010',
   'HEROMOTOCO':  'NSE_EQ|INE158A01026',
+
+  // Aviation & Travel
+  'INDIGO':      'NSE_EQ|INE646L01027',
 
   // Gold & Precious Metals
   'TITAN':       'NSE_EQ|INE280A01028',
@@ -69,6 +74,11 @@ import upstoxMap from './upstoxInstrumentsMap.json';
 // Get the Upstox instrument key for a symbol, checking the full NSE map first
 export function getInstrumentKey(symbol: string): string | null {
   const clean = symbol.toUpperCase().trim();
+
+  // Alias legacy Tata Motors queries to TMCV
+  if (clean === 'TATAMOTORS' || clean === 'TATA MOTORS') {
+    return (upstoxMap as Record<string, string>)['TMCV'] || SYMBOL_TO_INSTRUMENT_KEY['TMCV'] || 'NSE_EQ|INE1TAE01010';
+  }
   
   // 1. Try full equity / ETF map (9400+ entries)
   const fullMapVal = (upstoxMap as Record<string, string>)[clean];

@@ -13,7 +13,7 @@ export const maxDuration = 60; // Vercel Hobby max
 // The daily cron handles all 25
 const KEY_STOCKS = [
   'RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'ICICIBANK',
-  'SBIN', 'BHARTIARTL', 'LT', 'TATAMOTORS', 'ITC',
+  'SBIN', 'BHARTIARTL', 'LT', 'TMCV', 'INDIGO', 'ITC',
 ];
 
 export async function GET(request: Request) {
@@ -26,7 +26,7 @@ export async function GET(request: Request) {
   
   const ALL_STOCKS = [
     'RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'ICICIBANK',
-    'SBIN', 'BHARTIARTL', 'LT', 'TATAMOTORS', 'ITC',
+    'SBIN', 'BHARTIARTL', 'LT', 'TMCV', 'INDIGO', 'ITC',
     'BAJFINANCE', 'KOTAKBANK', 'AXISBANK', 'HINDUNILVR', 'MARUTI',
     'SUNPHARMA', 'WIPRO', 'HCLTECH', 'NTPC', 'ONGC',
     'TATASTEEL', 'TITAN', 'ADANIENT', 'DRREDDY', 'CIPLA',

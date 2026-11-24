@@ -227,19 +227,76 @@ export function detectSectors(article: RawArticle): string[] {
   return matchedSectors;
 }
 
+// Common aliases and company names used in financial news headlines and articles
+export const STOCK_ALIASES: Record<string, string[]> = {
+  'TMCV': ['TMCV', 'TATA MOTORS', 'TATAMOTORS', 'TATA COMMERCIAL', 'TATA MOTORS CV'],
+  'TMPV': ['TMPV', 'TATA PASSENGER', 'TATA MOTORS PASSENGER'],
+  'INDIGO': ['INDIGO', 'INTERGLOBE', 'INTERGLOBE AVIATION'],
+  'SBIN': ['SBIN', 'STATE BANK OF INDIA', 'SBI'],
+  'LT': ['L&T', 'LARSEN & TOUBRO', 'LARSEN AND TOUBRO', 'LARSEN'],
+  'HINDUNILVR': ['HINDUNILVR', 'HUL', 'HINDUSTAN UNILEVER'],
+  'BHARTIARTL': ['BHARTIARTL', 'BHARTI AIRTEL', 'AIRTEL'],
+  'M&M': ['M&M', 'MAHINDRA & MAHINDRA', 'MAHINDRA AND MAHINDRA', 'MAHINDRA'],
+  'BAJAJ-AUTO': ['BAJAJ-AUTO', 'BAJAJ AUTO'],
+  'MARUTI': ['MARUTI', 'MARUTI SUZUKI'],
+  'RELIANCE': ['RELIANCE', 'RIL', 'RELIANCE INDUSTRIES'],
+  'TCS': ['TCS', 'TATA CONSULTANCY'],
+  'INFY': ['INFY', 'INFOSYS'],
+  'HDFCBANK': ['HDFCBANK', 'HDFC BANK'],
+  'ICICIBANK': ['ICICIBANK', 'ICICI BANK'],
+  'KOTAKBANK': ['KOTAKBANK', 'KOTAK MAHINDRA', 'KOTAK BANK'],
+  'AXISBANK': ['AXISBANK', 'AXIS BANK'],
+  'ITC': ['ITC'],
+  'SUNPHARMA': ['SUNPHARMA', 'SUN PHARMA', 'SUN PHARMACEUTICAL'],
+  'DRREDDY': ['DRREDDY', 'DR. REDDY', 'DR REDDY'],
+  'CIPLA': ['CIPLA'],
+  'TITAN': ['TITAN', 'TITAN COMPANY'],
+  'NTPC': ['NTPC'],
+  'POWERGRID': ['POWERGRID', 'POWER GRID'],
+  'TATAPOWER': ['TATAPOWER', 'TATA POWER'],
+  'ADANIGREEN': ['ADANIGREEN', 'ADANI GREEN'],
+  'JSWENERGY': ['JSWENERGY', 'JSW ENERGY'],
+  'TATASTEEL': ['TATASTEEL', 'TATA STEEL'],
+  'JSWSTEEL': ['JSWSTEEL', 'JSW STEEL'],
+  'HINDALCO': ['HINDALCO'],
+  'VEDL': ['VEDL', 'VEDANTA'],
+  'COALINDIA': ['COALINDIA', 'COAL INDIA'],
+  'BPCL': ['BPCL', 'BHARAT PETROLEUM'],
+  'ONGC': ['ONGC'],
+  'IOC': ['IOC', 'INDIAN OIL'],
+  'GAIL': ['GAIL'],
+};
+
 // Detect which stocks are mentioned in an article
 export function detectStocks(article: RawArticle): string[] {
-  const text = `${article.title} ${article.description}`.toUpperCase();
+  const text = ` ${article.title} ${article.description} `.toUpperCase();
   const matchedStocks = new Set<string>();
-  
-  for (const sector of Object.values(SECTORS)) {
-    for (const stock of sector.stocks) {
-      if (text.includes(stock)) {
-        matchedStocks.add(stock);
+
+  // 1. Check alias dictionary first (handles company names, short forms, tickers)
+  for (const [canonicalSymbol, aliases] of Object.entries(STOCK_ALIASES)) {
+    for (const alias of aliases) {
+      const escaped = alias.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+      const regex = new RegExp(`(^|[^A-Z0-9])${escaped}([^A-Z0-9]|$)`, 'i');
+      if (regex.test(text)) {
+        matchedStocks.add(canonicalSymbol);
+        break;
       }
     }
   }
-  
+
+  // 2. Also check any sector stocks not covered by aliases
+  for (const sector of Object.values(SECTORS)) {
+    for (const stock of sector.stocks) {
+      if (!matchedStocks.has(stock)) {
+        const escaped = stock.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+        const regex = new RegExp(`(^|[^A-Z0-9])${escaped}([^A-Z0-9]|$)`, 'i');
+        if (regex.test(text)) {
+          matchedStocks.add(stock);
+        }
+      }
+    }
+  }
+
   return Array.from(matchedStocks);
 }
 

@@ -205,6 +205,16 @@ const SHAREHOLDING_DATA: StockShareholding[] = [
     ],
   },
   {
+    symbol: 'INDIGO',
+    companyName: 'InterGlobe Aviation Ltd',
+    history: [
+      { quarter: 'Mar 2026', promoter: 51.78, fii: 24.52, dii: 14.82, mutualFund: 9.35, retail: 6.82, others: 2.06 },
+      { quarter: 'Dec 2025', promoter: 51.78, fii: 24.15, dii: 14.95, mutualFund: 9.20, retail: 7.05, others: 2.07 },
+      { quarter: 'Sep 2025', promoter: 51.85, fii: 23.80, dii: 15.12, mutualFund: 9.05, retail: 7.15, others: 2.08 },
+      { quarter: 'Jun 2025', promoter: 51.85, fii: 23.45, dii: 15.30, mutualFund: 8.92, retail: 7.32, others: 2.08 },
+    ],
+  },
+  {
     symbol: 'MARUTI',
     companyName: 'Maruti Suzuki India Ltd',
     history: [
@@ -871,7 +881,22 @@ const SHAREHOLDING_DATA: StockShareholding[] = [
  */
 export function getShareholdingData(symbol: string): StockShareholding | null {
   const clean = symbol.toUpperCase().trim();
-  return SHAREHOLDING_DATA.find(s => s.symbol === clean) || null;
+  const direct = SHAREHOLDING_DATA.find(s => s.symbol === clean);
+  if (direct) return direct;
+
+  // Alias Tata Motors commercial/passenger vehicles
+  if (clean === 'TMCV' || clean === 'TMPV' || clean === 'TATA MOTORS') {
+    const tata = SHAREHOLDING_DATA.find(s => s.symbol === 'TATAMOTORS');
+    if (tata) {
+      return {
+        ...tata,
+        symbol: clean,
+        companyName: clean === 'TMCV' ? 'Tata Motors CV Ltd' : tata.companyName,
+      };
+    }
+  }
+
+  return null;
 }
 
 /**

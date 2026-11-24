@@ -98,6 +98,14 @@ export const SECTORS = {
     globalExposure: 'Interest rates, urbanization, govt housing schemes, cement/steel prices',
     keywords: ['real estate', 'property', 'housing', 'construction', 'infrastructure', 'cement'],
   },
+  aviation: {
+    id: 'aviation',
+    name: 'Aviation & Travel',
+    icon: '✈️',
+    stocks: ['INDIGO', 'SPICEJET'],
+    globalExposure: 'ATF/crude oil prices, passenger traffic, rupee-dollar exchange rate, airport tariffs',
+    keywords: ['aviation', 'airline', 'flight', 'indigo', 'interglobe', 'airport', 'passenger traffic', 'airfare', 'DGCA', 'crude'],
+  },
 };
 
 // All unique stocks across sectors
@@ -336,7 +344,7 @@ export const ALL_STOCKS: { symbol: string; name: string; sector: string }[] = [
   { symbol: 'INDIACEM', name: 'India Cements Ltd.', sector: 'realestate' },
   { symbol: 'INDIAMART', name: 'Indiamart Intermesh Ltd.', sector: 'general' },
   { symbol: 'INDIANB', name: 'Indian Bank', sector: 'banking' },
-  { symbol: 'INDIGO', name: 'InterGlobe Aviation Ltd.', sector: 'general' },
+  { symbol: 'INDIGO', name: 'InterGlobe Aviation Ltd. (IndiGo)', sector: 'aviation' },
   { symbol: 'INDUSINDBK', name: 'IndusInd Bank Ltd.', sector: 'banking' },
   { symbol: 'INDUSTOWER', name: 'Indus Towers Ltd.', sector: 'it' },
   { symbol: 'INFY', name: 'Infosys Ltd.', sector: 'it' },
@@ -563,7 +571,7 @@ export const ALL_STOCKS: { symbol: string; name: string; sector: string }[] = [
   { symbol: 'TIMKEN', name: 'Timken India Ltd.', sector: 'it' },
   { symbol: 'TITAGARH', name: 'Titagarh Rail Systems Ltd.', sector: 'it' },
   { symbol: 'TITAN', name: 'Titan Company Ltd.', sector: 'gold' },
-  { symbol: 'TMCV', name: 'Tata Motors Ltd.', sector: 'ev' },
+  { symbol: 'TMCV', name: 'Tata Motors CV Ltd. (Commercial Vehicles)', sector: 'auto' },
   { symbol: 'TMPV', name: 'Tata Motors Passenger Vehicles Ltd.', sector: 'auto' },
   { symbol: 'TORNTPHARM', name: 'Torrent Pharmaceuticals Ltd.', sector: 'pharma' },
   { symbol: 'TORNTPOWER', name: 'Torrent Power Ltd.', sector: 'power' },
@@ -626,7 +634,20 @@ export const GLOBAL_IMPACT_MAP: Record<string, { region: string; sectors: string
 };
 
 export function getStockBySymbol(symbol: string) {
-  return ALL_STOCKS.find(s => s.symbol.toLowerCase() === symbol.toLowerCase());
+  const clean = symbol.toUpperCase().trim();
+  const exact = ALL_STOCKS.find(s => s.symbol.toUpperCase() === clean);
+  if (exact) return exact;
+
+  // Handle legacy Tata Motors queries and aliases
+  if (clean === 'TATAMOTORS' || clean === 'TATA MOTORS') {
+    return ALL_STOCKS.find(s => s.symbol === 'TMCV') || {
+      symbol: 'TMCV',
+      name: 'Tata Motors CV Ltd.',
+      sector: 'auto',
+    };
+  }
+
+  return undefined;
 }
 
 export function getStocksBySector(sectorId: string) {
@@ -634,8 +655,25 @@ export function getStocksBySector(sectorId: string) {
 }
 
 export function searchStocks(query: string) {
-  const q = query.toLowerCase();
-  return ALL_STOCKS.filter(
-    s => s.symbol.toLowerCase().includes(q) || s.name.toLowerCase().includes(q)
-  ).slice(0, 10);
+  const q = query.toLowerCase().trim();
+  if (!q) return [];
+  const cleanQ = q.replace(/[^a-z0-9]/g, '');
+
+  return ALL_STOCKS.filter(s => {
+    const sym = s.symbol.toLowerCase();
+    const name = s.name.toLowerCase();
+    const cleanSym = sym.replace(/[^a-z0-9]/g, '');
+    const cleanName = name.replace(/[^a-z0-9]/g, '');
+
+    // Direct match
+    if (sym.includes(q) || name.includes(q)) return true;
+    // Normalized alphanumeric match (handles spaces like "tatamotors" vs "tata motors")
+    if (cleanQ.length >= 2 && (cleanSym.includes(cleanQ) || cleanName.includes(cleanQ))) return true;
+
+    // Special aliases
+    if ((cleanQ === 'tatamotors' || cleanQ === 'tata') && (sym === 'TMCV' || sym === 'TMPV')) return true;
+    if ((cleanQ === 'indigo' || cleanQ === 'interglobe') && sym === 'INDIGO') return true;
+
+    return false;
+  }).slice(0, 10);
 }
