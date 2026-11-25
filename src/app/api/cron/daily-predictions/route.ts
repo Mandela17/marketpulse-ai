@@ -42,22 +42,32 @@ async function runPredictionPipeline() {
     const closingPrices: Record<string, { todayClose: number; prevClose: number }> = {};
     let fetchedCount = 0;
 
+    // Include any symbols from pending unresolved predictions (not just KEY_STOCKS)
+    const db = getServiceClient();
+    const { data: pendingRows } = await db
+      .from('predictions')
+      .select('symbol')
+      .is('resolved_at', null);
+    const symbolsToFetch = Array.from(
+      new Set([...KEY_STOCKS, ...(pendingRows || []).map((r: any) => String(r.symbol)).filter(Boolean)])
+    );
+
     // Fetch today's closing prices for all stocks (batches of 8, minimal delay)
-    for (let i = 0; i < KEY_STOCKS.length; i += 8) {
-      const batch = KEY_STOCKS.slice(i, i + 8);
+    for (let i = 0; i < symbolsToFetch.length; i += 8) {
+      const batch = symbolsToFetch.slice(i, i + 8);
       await Promise.all(batch.map(async (symbol) => {
         try {
           const quote = await fetchStockPrice(symbol);
           if (quote && quote.price > 0) {
             closingPrices[symbol] = {
               todayClose: quote.price,
-              previousClose: quote.previousClose || quote.price,
-            } as any;
+              prevClose: quote.previousClose || quote.price,
+            };
             fetchedCount++;
           }
         } catch {}
       }));
-      if (i + 8 < KEY_STOCKS.length) {
+      if (i + 8 < symbolsToFetch.length) {
         await new Promise(r => setTimeout(r, 100));
       }
     }

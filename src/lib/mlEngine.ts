@@ -623,9 +623,8 @@ export async function trainAndSaveModel(symbol: string): Promise<{
       const histContext = history.slice(0, i);
       const fv = extractFeatures(row, prevRow, undefined, histContext);
 
-      // Skip rows where >30% of features are zero/default (likely missing data)
-      const nullCount = fv.features.filter(f => f === 0).length;
-      if (nullCount / fv.features.length > 0.4) continue;
+      // Skip incomplete rows (e.g. un-computed backfill) rather than counting optional alt-data zeros
+      if (!(row.close > 0 && row.rsi != null && row.ema20 != null)) continue;
 
       // Use threshold-based labels: skip flat days (<0.3% move) — they're noise
       const returnPct = (nextRow.close - row.close) / row.close;
@@ -824,9 +823,8 @@ export async function generatePrediction(
       const histContext = history.slice(0, i);
       const fv = extractFeatures(row, prevRow, undefined, histContext);
 
-      // Skip rows where >40% of features are zero/default (likely missing data from backfill)
-      const nullCount = fv.features.filter(f => f === 0).length;
-      if (nullCount / fv.features.length > 0.4) continue;
+      // Skip incomplete rows (e.g. un-computed backfill) rather than counting optional alt-data zeros
+      if (!(row.close > 0 && row.rsi != null && row.ema20 != null)) continue;
 
       // Threshold-based labels: skip flat days (<0.3% move) — they're noise the model can't learn from
       const returnPct = (nextRow.close - row.close) / row.close;

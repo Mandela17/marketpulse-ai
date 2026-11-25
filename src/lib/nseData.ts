@@ -104,6 +104,7 @@ export async function fetchDeliveryData(symbol: string): Promise<DeliveryData | 
           'Accept-Language': 'en-US,en;q=0.9',
         },
         next: { revalidate: 1800 },
+        signal: AbortSignal.timeout(4000),
       }
     );
 
@@ -166,6 +167,7 @@ export async function fetchRealPCR(symbol: string): Promise<RealPCRData | null> 
           'Accept-Language': 'en-US,en;q=0.9',
         },
         next: { revalidate: 1800 },
+        signal: AbortSignal.timeout(4000),
       }
     );
 
@@ -231,6 +233,60 @@ export function isFnOStock(symbol: string): boolean {
 
 // ─── Save daily features to Supabase ─────────────────────────────────
 
+function buildDailyFeatureRow(f: {
+  symbol: string;
+  date: string;
+  close: number;
+  open?: number;
+  high?: number;
+  low?: number;
+  volume?: number;
+  rsi?: number;
+  macdHist?: number;
+  ema20?: number;
+  ema50?: number;
+  bollingerUpper?: number;
+  bollingerLower?: number;
+  volumeRatio?: number;
+  sentimentScore?: number;
+  articleCount?: number;
+  pcr?: number;
+  deliveryPct?: number;
+  niftyClose?: number;
+  indiaVix?: number;
+  fiiNet?: number;
+  diiNet?: number;
+}) {
+  const num = (v?: number) => (v !== undefined && v !== null && Number.isFinite(v) ? v : undefined);
+  const int = (v?: number) => (v !== undefined && v !== null && Number.isFinite(v) ? Math.round(v) : undefined);
+  const sent = int(f.sentimentScore);
+
+  return {
+    symbol: f.symbol,
+    date: f.date,
+    close: f.close,
+    open: num(f.open),
+    high: num(f.high),
+    low: num(f.low),
+    volume: int(f.volume),
+    rsi: num(f.rsi),
+    macd_hist: num(f.macdHist),
+    ema20: num(f.ema20),
+    ema50: num(f.ema50),
+    bollinger_upper: num(f.bollingerUpper),
+    bollinger_lower: num(f.bollingerLower),
+    volume_ratio: num(f.volumeRatio),
+    sentiment_score: sent !== undefined ? Math.max(0, Math.min(100, sent)) : undefined,
+    article_count: int(f.articleCount),
+    pcr: num(f.pcr),
+    delivery_pct: num(f.deliveryPct),
+    nifty_close: num(f.niftyClose),
+    india_vix: num(f.indiaVix),
+    fii_net: num(f.fiiNet),
+    dii_net: num(f.diiNet),
+  };
+}
+
 export async function saveDailyFeaturesBatch(items: Array<{
   symbol: string;
   date: string;
@@ -258,37 +314,30 @@ export async function saveDailyFeaturesBatch(items: Array<{
   if (!items || items.length === 0) return true;
   try {
     const db = getServiceClient();
-    const rows = items.map(f => ({
-      symbol: f.symbol,
-      date: f.date,
-      close: f.close,
-      open: f.open,
-      high: f.high,
-      low: f.low,
-      volume: f.volume,
-      rsi: f.rsi,
-      macd_hist: f.macdHist,
-      ema20: f.ema20,
-      ema50: f.ema50,
-      bollinger_upper: f.bollingerUpper,
-      bollinger_lower: f.bollingerLower,
-      volume_ratio: f.volumeRatio,
-      sentiment_score: f.sentimentScore,
-      article_count: f.articleCount,
-      pcr: f.pcr,
-      delivery_pct: f.deliveryPct,
-      nifty_close: f.niftyClose,
-      india_vix: f.indiaVix,
-      fii_net: f.fiiNet,
-      dii_net: f.diiNet,
-    }));
+    const rows = items.map(buildDailyFeatureRow).filter((r) => Number.isFinite(r.close) && r.close > 0);
+    if (rows.length === 0) return false;
 
-    // Insert in chunks of 200 to stay safely under payload limits
+    let anySaved = false;
+
+    // Insert in chunks of 200; fall back per-row if any single row causes a DB error
     for (let i = 0; i < rows.length; i += 200) {
       const chunk = rows.slice(i, i + 200);
-      await db.from('daily_features').upsert(chunk, { onConflict: 'symbol,date' });
+      const { error } = await db.from('daily_features').upsert(chunk, { onConflict: 'symbol,date' });
+      if (!error) {
+        anySaved = true;
+      } else {
+        console.warn(`[NSE] Bulk daily features chunk failed (${error.code}: ${error.message}) — falling back per-row`);
+        for (const row of chunk) {
+          const { error: rowErr } = await db.from('daily_features').upsert(row, { onConflict: 'symbol,date' });
+          if (rowErr) {
+            console.warn(`[NSE] Row save failed for ${row.symbol} (${row.date}): ${rowErr.message}`);
+          } else {
+            anySaved = true;
+          }
+        }
+      }
     }
-    return true;
+    return anySaved;
   } catch (err) {
     console.warn(`[NSE] Bulk daily features save failed:`, err);
     return false;
@@ -321,32 +370,14 @@ export async function saveDailyFeatures(features: {
 }): Promise<boolean> {
   try {
     const db = getServiceClient();
-    await db.from('daily_features').upsert({
-      symbol: features.symbol,
-      date: features.date,
-      close: features.close,
-      open: features.open,
-      high: features.high,
-      low: features.low,
-      volume: features.volume,
-      rsi: features.rsi,
-      macd_hist: features.macdHist,
-      ema20: features.ema20,
-      ema50: features.ema50,
-      bollinger_upper: features.bollingerUpper,
-      bollinger_lower: features.bollingerLower,
-      volume_ratio: features.volumeRatio,
-      sentiment_score: features.sentimentScore,
-      article_count: features.articleCount,
-      pcr: features.pcr,
-      delivery_pct: features.deliveryPct,
-      nifty_close: features.niftyClose,
-      india_vix: features.indiaVix,
-      fii_net: features.fiiNet,
-      dii_net: features.diiNet,
-    }, {
+    const row = buildDailyFeatureRow(features);
+    const { error } = await db.from('daily_features').upsert(row, {
       onConflict: 'symbol,date',
     });
+    if (error) {
+      console.warn(`[NSE] Daily features save failed for ${features.symbol}: ${error.message}`);
+      return false;
+    }
     return true;
   } catch (err) {
     console.warn(`[NSE] Daily features save failed for ${features.symbol}:`, err);
@@ -363,11 +394,11 @@ export async function getHistoricalFeatures(symbol: string, days: number = 90): 
       .from('daily_features')
       .select('*')
       .eq('symbol', symbol)
-      .order('date', { ascending: true })
+      .order('date', { ascending: false })
       .limit(days);
 
     if (error || !data) return [];
-    return data;
+    return data.reverse();
   } catch {
     return [];
   }

@@ -8,6 +8,8 @@
 import { NextResponse, after } from 'next/server';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 120;
+import { getISTDateString } from '@/lib/marketHolidays';
 import { fetchAllNews } from '@/lib/newsAggregator';
 import { analyzeArticlesBatch, computeSectorSentiments } from '@/lib/sentimentEngine';
 import { SECTORS } from '@/lib/sectorData';
@@ -112,7 +114,7 @@ async function persistArticles(articles: NewsArticle[]) {
 // Save sector sentiment snapshots
 async function persistSectorSentiments(sectorSentiments: Record<string, any>) {
   const db = getServiceClient();
-  const today = new Date().toISOString().split('T')[0];
+  const today = getISTDateString();
   let saved = 0;
   
   for (const [sectorId, data] of Object.entries(sectorSentiments)) {
@@ -138,7 +140,7 @@ async function persistSectorSentiments(sectorSentiments: Record<string, any>) {
 // Save per-stock sentiment snapshots
 async function persistStockSentiments(articles: NewsArticle[]) {
   const db = getServiceClient();
-  const today = new Date().toISOString().split('T')[0];
+  const today = getISTDateString();
   
   const stockScores: Record<string, { total: number; weight: number; count: number }> = {};
   
@@ -195,7 +197,7 @@ async function collectDailyFeatures(
   fiiNet: number,
   diiNet: number,
 ): Promise<number> {
-  const today = new Date().toISOString().split('T')[0];
+  const today = getISTDateString();
   const allFeatures: any[] = [];
 
   // Process in parallel batches of 8 for fast completion
@@ -245,9 +247,13 @@ async function collectDailyFeatures(
     }
   }
 
-  // 1 single bulk DB upsert for all 39 stocks!
+  // 1 single bulk DB upsert for all stocks (with per-row fallback on error)
   if (allFeatures.length > 0) {
-    await saveDailyFeaturesBatch(allFeatures);
+    const ok = await saveDailyFeaturesBatch(allFeatures);
+    if (!ok) {
+      console.error('[Cron] ❌ saveDailyFeaturesBatch failed to persist any rows!');
+      return 0;
+    }
   }
 
   return allFeatures.length;
@@ -258,22 +264,26 @@ async function collectDailyFeatures(
 async function resolvePredictions(): Promise<{ resolved: number; correct: number }> {
   try {
     const db = getServiceClient();
-    // Fast check: skip if there are no pending unresolved predictions
-    const { count: pendingCount } = await db
+    // Fetch distinct pending unresolved symbols (not limited to KEY_STOCKS)
+    const { data: pendingRows } = await db
       .from('predictions')
-      .select('*', { count: 'exact', head: true })
+      .select('symbol')
       .is('resolved_at', null);
 
-    if (!pendingCount || pendingCount === 0) {
+    const pendingSymbols = Array.from(
+      new Set((pendingRows || []).map((r: any) => String(r.symbol)).filter(Boolean))
+    );
+
+    if (pendingSymbols.length === 0) {
       console.log('[Cron] No pending predictions to resolve — skipping price fetches');
       return { resolved: 0, correct: 0 };
     }
 
-    // Fetch closing prices for key stocks
+    // Fetch closing prices for pending symbols
     const closingPrices: Record<string, { todayClose: number; prevClose: number }> = {};
 
-    for (let i = 0; i < KEY_STOCKS.length; i += 10) {
-      const batch = KEY_STOCKS.slice(i, i + 10);
+    for (let i = 0; i < pendingSymbols.length; i += 10) {
+      const batch = pendingSymbols.slice(i, i + 10);
       const promises = batch.map(async (symbol) => {
         try {
           const ohlcv = await withRetry(
@@ -291,7 +301,7 @@ async function resolvePredictions(): Promise<{ resolved: number; correct: number
         } catch {}
       });
       await Promise.all(promises);
-      if (i + 10 < KEY_STOCKS.length) {
+      if (i + 10 < pendingSymbols.length) {
         await new Promise(resolve => setTimeout(resolve, 50));
       }
     }
@@ -348,14 +358,13 @@ async function runPipeline() {
       console.log(`[Cron] 💰 FII/DII: FII net ₹${fiiDiiData.fiiNet}Cr, DII net ₹${fiiDiiData.diiNet}Cr`);
     }
 
-    // Step 5: Compute per-stock sentiment scores for feature collection
+    // Step 5: Compute per-stock sentiment scores for feature collection (always integer 0-100)
     const stockSentiments: Record<string, number> = {};
     for (const article of analyzedArticles) {
       for (const stock of (article.relatedStocks || [])) {
         if (!stockSentiments[stock]) stockSentiments[stock] = 50;
-        const w = article.decayedWeight ?? article.weight ?? 1.0;
-        stockSentiments[stock] = stockSentiments[stock] * 0.7 +
-          Math.round(Math.max(0, Math.min(100, (article.sentiment + 1) * 50))) * 0.3;
+        const articleScore = Math.round(Math.max(0, Math.min(100, (article.sentiment + 1) * 50)));
+        stockSentiments[stock] = Math.round(stockSentiments[stock] * 0.7 + articleScore * 0.3);
       }
     }
 
@@ -501,7 +510,7 @@ async function runPipeline() {
 
     // Save cron health status
     try {
-      await db.from('cron_runs').upsert({
+      const { error: cronLogErr } = await db.from('cron_runs').upsert({
         job_name: 'daily-collect',
         ran_at: new Date().toISOString(),
         status: 'success',
@@ -511,6 +520,9 @@ async function runPipeline() {
         predictions_resolved: resolution.resolved,
         articles_saved: articlesSaved,
       }, { onConflict: 'job_name' });
+      if (cronLogErr) {
+        console.warn('[Cron] Failed to save cron health status:', cronLogErr.message);
+      }
     } catch {
       console.warn('[Cron] Failed to save cron health status (table may not exist yet)');
     }

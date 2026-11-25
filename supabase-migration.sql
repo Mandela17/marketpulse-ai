@@ -201,4 +201,21 @@ CREATE POLICY "Public read cron_runs" ON cron_runs FOR SELECT USING (true);
 CREATE POLICY "Service write cron_runs" ON cron_runs FOR INSERT WITH CHECK (true);
 CREATE POLICY "Service update cron_runs" ON cron_runs FOR UPDATE USING (true);
 
+-- ─── 7. Frozen GBDT Models Table ─────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS frozen_models (
+  symbol              TEXT PRIMARY KEY,
+  model_json          JSONB NOT NULL,
+  training_samples    INTEGER DEFAULT 0,
+  training_accuracy   NUMERIC(6,2) DEFAULT 0,
+  validation_accuracy NUMERIC(6,2) DEFAULT 0,
+  model_version       TEXT DEFAULT 'v6-multitf-zscore',
+  trained_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE frozen_models ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public read frozen_models" ON frozen_models FOR SELECT USING (true);
+CREATE POLICY "Service write frozen_models" ON frozen_models FOR INSERT WITH CHECK (true);
+CREATE POLICY "Service update frozen_models" ON frozen_models FOR UPDATE USING (true);
+
 

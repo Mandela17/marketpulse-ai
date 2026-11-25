@@ -85,7 +85,7 @@ export async function fetchHistoricalOHLCV(symbol: string, days: number = 60): P
   else if (days <= 3650) range = '10y';
   else range = 'max';
 
-  const encodedSym = encodeURIComponent(nseSym);
+  const encodedSym = nseSym.includes('%') ? nseSym : encodeURIComponent(nseSym);
   const endpoints = [
     `https://query1.finance.yahoo.com/v8/finance/chart/${encodedSym}?interval=1d&range=${range}`,
     `https://query2.finance.yahoo.com/v8/finance/chart/${encodedSym}?interval=1d&range=${range}`,

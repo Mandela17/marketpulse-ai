@@ -3,7 +3,7 @@
 
 import { NextResponse } from 'next/server';
 import { getServiceClient } from '@/lib/supabase';
-import { getMarketStatus, getISTDate, getISTDateString, isTradingDay } from '@/lib/marketHolidays';
+import { getMarketStatus, NSE_BSE_HOLIDAYS } from '@/lib/marketHolidays';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,28 +62,66 @@ export async function GET() {
     // Check market status today
     const marketStatus = getMarketStatus();
 
-    // Determine the most recent expected trading day
-    // If today is a trading day but market has not closed yet (< 16:00 IST), expected complete daily data is from previous trading day
-    const istNow = getISTDate();
-    const istMinutes = istNow.getHours() * 60 + istNow.getMinutes();
-    let expectedTradingDate = getISTDate();
+    // Determine the most recent expected trading day with COMPLETE data.
+    // Use plain UTC-based IST calculation to avoid double-offset bugs on UTC servers.
+    const nowMs = Date.now();
+    const istNowMs = nowMs + 5.5 * 3600000;
+    const istNowDate = new Date(istNowMs);
+    const istHour = istNowDate.getUTCHours();
+    const istMin = istNowDate.getUTCMinutes();
+    const istMinutes = istHour * 60 + istMin;
 
-    if (!isTradingDay(istNow) || istMinutes < 960) {
-      // Step back at least 1 day
-      expectedTradingDate = new Date(expectedTradingDate.getTime() - 86400000);
+    // Build today's date string in IST directly from UTC millis
+    const istYear = istNowDate.getUTCFullYear();
+    const istMonth = String(istNowDate.getUTCMonth() + 1).padStart(2, '0');
+    const istDay = String(istNowDate.getUTCDate()).padStart(2, '0');
+    const todayISTStr = `${istYear}-${istMonth}-${istDay}`;
+
+    // If today is not a trading day, or market hasn't closed yet (< 16:00 IST / 960 min),
+    // the latest expected complete data is from the previous trading day.
+    let expectedMs = istNowMs;
+    const todayDow = istNowDate.getUTCDay();
+    const todayIsTrading = todayDow >= 1 && todayDow <= 5 && !NSE_BSE_HOLIDAYS[todayISTStr];
+
+    if (!todayIsTrading || istMinutes < 960) {
+      expectedMs -= 86400000; // step back one day
     }
-    while (!isTradingDay(expectedTradingDate)) {
-      expectedTradingDate = new Date(expectedTradingDate.getTime() - 86400000);
+    // Walk backwards past weekends and holidays
+    for (let i = 0; i < 10; i++) {
+      const d = new Date(expectedMs);
+      const dow = d.getUTCDay();
+      const ds = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+      if (dow >= 1 && dow <= 5 && !NSE_BSE_HOLIDAYS[ds]) {
+        break;
+      }
+      expectedMs -= 86400000;
     }
-    const expectedTradingDateStr = getISTDateString(expectedTradingDate);
+    const expD = new Date(expectedMs);
+    const expectedTradingDateStr = `${expD.getUTCFullYear()}-${String(expD.getUTCMonth() + 1).padStart(2, '0')}-${String(expD.getUTCDate()).padStart(2, '0')}`;
 
     // Is the data up-to-date with the last active trading session?
     const isUpToDateWithMarket = latestDate ? latestDate >= expectedTradingDateStr : false;
 
-    // A dataset is only genuinely "stale" if market trading occurred without data being updated
-    const isStale = latestDate
-      ? (!isUpToDateWithMarket && dataAgeHours !== null && dataAgeHours > 48)
-      : false;
+    // Count how many trading days elapsed since the latest data date using pure IST YYYY-MM-DD math
+    let tradingDayGap = 0;
+    if (latestDate && !isUpToDateWithMarket) {
+      const [ly, lm, ld] = latestDate.split('-').map(Number);
+      const [ey, em, ed] = expectedTradingDateStr.split('-').map(Number);
+      let walkUtcMs = Date.UTC(ly, lm - 1, ld) + 86400000;
+      const expUtcMs = Date.UTC(ey, em - 1, ed);
+      while (walkUtcMs <= expUtcMs && tradingDayGap < 30) {
+        const wd = new Date(walkUtcMs);
+        const wdStr = `${wd.getUTCFullYear()}-${String(wd.getUTCMonth() + 1).padStart(2, '0')}-${String(wd.getUTCDate()).padStart(2, '0')}`;
+        const wdDow = wd.getUTCDay();
+        if (wdDow >= 1 && wdDow <= 5 && !NSE_BSE_HOLIDAYS[wdStr]) {
+          tradingDayGap++;
+        }
+        walkUtcMs += 86400000;
+      }
+    }
+
+    // Data is stale only if we missed 1+ actual trading days of data
+    const isStale = !isUpToDateWithMarket && tradingDayGap >= 1;
 
     // Infer cronStatus:
     // If cron_runs gave a status, use it.
