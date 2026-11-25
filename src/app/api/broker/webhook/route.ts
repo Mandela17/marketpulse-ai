@@ -7,8 +7,10 @@ import {
   saveUpstoxToken,
   saveUpstoxAnalyticsToken,
   parseUpstoxExpiry,
+  sanitizeUpstoxToken,
   updatePendingTokenRequestStatus,
 } from '@/lib/upstoxTokenStore';
+import { verifyUpstoxTokenLive } from '@/lib/upstoxTrade';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,48 +50,34 @@ export async function POST(request: Request) {
     return NextResponse.json({ received: true, status: 'rejected' });
   }
 
-  const accessToken = typeof payload?.access_token === 'string' ? payload.access_token.trim() : '';
-  const extendedToken =
-    typeof payload?.extended_token === 'string' ? payload.extended_token.trim() : '';
+  const accessToken = sanitizeUpstoxToken(payload?.access_token);
+  const extendedToken = sanitizeUpstoxToken(payload?.extended_token);
 
   if (!accessToken || accessToken.length < 10) {
     return NextResponse.json({ received: true, ignored: true, reason: 'No access_token in payload' });
   }
 
-  // Verify the token live with Upstox before persisting (prevents unauthenticated spoofed writes)
-  let verifiedUserId = String(payload?.user_id || 'upstox_user');
-  try {
-    const profileRes = await fetch('https://api.upstox.com/v2/user/profile', {
-      headers: {
-        Accept: 'application/json',
-        Authorization: `Bearer ${accessToken}`,
-      },
-      signal: AbortSignal.timeout(6000),
-    });
-
-    if (profileRes.status === 401) {
-      console.warn('[Upstox Webhook] Rejected unverified access_token (Upstox returned 401)');
-      return NextResponse.json({ error: 'Token verification failed' }, { status: 401 });
-    }
-
-    if (profileRes.ok) {
-      const profileJson = await profileRes.json();
-      if (profileJson?.data?.user_id) {
-        verifiedUserId = String(profileJson.data.user_id);
-      }
-    }
-  } catch (err: any) {
-    console.warn('[Upstox Webhook] Profile verification error (continuing):', err?.message);
+  // Verify the token live with Upstox (with Snipy proxy fallback) before persisting
+  const check = await verifyUpstoxTokenLive(accessToken, 'trading');
+  if (!check.valid && !check.networkError) {
+    console.warn('[Upstox Webhook] Rejected unverified access_token:', check.errorCode, check.message);
+    return NextResponse.json({ error: check.message || 'Token verification failed' }, { status: 401 });
   }
 
-  const tradingExpiry = parseUpstoxExpiry(payload?.expires_at, accessToken, 'trading');
-  const savedTrading = await saveUpstoxToken(accessToken, verifiedUserId, tradingExpiry, 'trading');
+  const verifiedUserId =
+    check.userId && check.userId !== 'admin'
+      ? check.userId
+      : String(payload?.user_id || 'upstox_user');
+
+  const tokenKind = check.tokenKind;
+  const tradingExpiry = parseUpstoxExpiry(payload?.expires_at, check.sanitizedToken, tokenKind);
+  const savedTrading = await saveUpstoxToken(check.sanitizedToken, verifiedUserId, tradingExpiry, tokenKind);
 
   if (extendedToken && extendedToken.length > 10) {
     await saveUpstoxAnalyticsToken(extendedToken, verifiedUserId);
   }
 
-  if (savedTrading) {
+  if (savedTrading && tokenKind === 'trading') {
     await updatePendingTokenRequestStatus('approved');
   }
 

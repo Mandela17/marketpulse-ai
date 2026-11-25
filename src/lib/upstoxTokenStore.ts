@@ -29,10 +29,30 @@ export const PENDING_REQUEST_PROVIDER = 'upstox_pending_request';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/** Clean accidental Bearer prefix, surrounding quotes, and line-breaks from pasted tokens. */
+export function sanitizeUpstoxToken(rawToken: string | null | undefined): string {
+  if (!rawToken || typeof rawToken !== 'string') return '';
+  let s = rawToken.trim();
+  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+    s = s.slice(1, -1).trim();
+  }
+  s = s.replace(/^Bearer\s+/i, '').trim();
+  // Upstox tokens never contain whitespace; strip wrapped newlines/spaces from copy-paste
+  return s.replace(/[\r\n\t\s]+/g, '');
+}
+
+/** Normalize epoch seconds vs epoch milliseconds into epoch milliseconds. */
+function toEpochMs(raw: any): number {
+  const num = Number(raw);
+  if (!Number.isFinite(num) || num <= 0) return 0;
+  return num > 1e12 ? num : num * 1000;
+}
+
 /** Decode base64url JWT payload without verifying signature (for reading `exp`/`iat` metadata). */
 export function decodeJwtPayload(token: string): Record<string, any> | null {
   try {
-    const parts = token.split('.');
+    const clean = sanitizeUpstoxToken(token);
+    const parts = clean.split('.');
     if (parts.length !== 3 || !parts[1]) return null;
     const json = Buffer.from(parts[1], 'base64url').toString('utf8');
     const parsed = JSON.parse(json);
@@ -45,33 +65,40 @@ export function decodeJwtPayload(token: string): Record<string, any> | null {
 /** Extract ISO expiry string from JWT `exp` claim if present. */
 export function getJwtExpiryIso(token: string): string | null {
   const payload = decodeJwtPayload(token);
-  const exp = Number(payload?.exp);
-  if (!Number.isFinite(exp) || exp <= 0) return null;
-  return new Date(exp * 1000).toISOString();
+  const expMs = toEpochMs(payload?.exp);
+  if (!expMs) return null;
+  return new Date(expMs).toISOString();
 }
 
 /** Extract JWT `iat` in ms if present. */
 export function getJwtIssuedAtMs(token: string): number {
   const payload = decodeJwtPayload(token);
-  const iat = Number(payload?.iat);
-  return Number.isFinite(iat) && iat > 0 ? iat * 1000 : 0;
+  return toEpochMs(payload?.iat);
+}
+
+/** Best-effort user identifier from JWT claims (`sub` / `user_id`), if embedded. */
+export function getJwtUserId(token: string): string | null {
+  const payload = decodeJwtPayload(token);
+  const raw = payload?.user_id || payload?.sub || payload?.email;
+  return typeof raw === 'string' && raw.trim() ? raw.trim() : null;
 }
 
 /** True when `token` carries a JWT `exp` claim that has already passed (with optional skew). */
 export function isJwtExpired(token: string | null | undefined, skewSeconds = 30): boolean {
-  if (!token) return true;
-  const payload = decodeJwtPayload(token);
-  const exp = Number(payload?.exp);
-  if (!Number.isFinite(exp) || exp <= 0) return false;
-  return exp * 1000 <= Date.now() + skewSeconds * 1000;
+  const clean = sanitizeUpstoxToken(token);
+  if (!clean) return true;
+  const payload = decodeJwtPayload(clean);
+  const expMs = toEpochMs(payload?.exp);
+  if (!expMs) return false;
+  return expMs <= Date.now() + skewSeconds * 1000;
 }
 
 /** True when JWT expires more than 48 hours from now (typical for 1-year Analytics / extended tokens). */
 export function isLongLivedToken(token: string): boolean {
   const payload = decodeJwtPayload(token);
-  const exp = Number(payload?.exp);
-  if (!Number.isFinite(exp) || exp <= 0) return false;
-  return exp * 1000 - Date.now() > 48 * 60 * 60 * 1000;
+  const expMs = toEpochMs(payload?.exp);
+  if (!expMs) return false;
+  return expMs - Date.now() > 48 * 60 * 60 * 1000;
 }
 
 /** Compute next 3:30 AM IST (= 22:00 UTC) cutoff strictly in the future. */

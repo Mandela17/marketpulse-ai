@@ -44,6 +44,7 @@ export default function BrokerPage() {
   const [analyticsTokenInput, setAnalyticsTokenInput] = useState('');
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'connected' | 'error' | 'checking'>('checking');
   const [errorMessage, setErrorMessage] = useState('');
+  const [tradingSaveMsg, setTradingSaveMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [analyticsSaveMsg, setAnalyticsSaveMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [savingAnalytics, setSavingAnalytics] = useState(false);
 
@@ -229,28 +230,44 @@ export default function BrokerPage() {
     }));
     setSaveStatus('idle');
     setErrorMessage('');
+    setTradingSaveMsg(null);
+    setAnalyticsSaveMsg(null);
+  };
+
+  const sanitizePastedToken = (raw: string) => {
+    let s = raw.trim();
+    if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+      s = s.slice(1, -1).trim();
+    }
+    return s.replace(/^Bearer\s+/i, '').replace(/[\r\n\t\s]+/g, '');
   };
 
   const handleSaveToken = async () => {
-    if (!accessTokenInput || accessTokenInput.length < 10) {
-      setErrorMessage('Please paste a valid access token from Upstox Developer Dashboard');
+    const clean = sanitizePastedToken(accessTokenInput);
+    if (!clean || clean.length < 10) {
+      const msg = 'Please paste a valid access token from Upstox Developer Dashboard';
+      setErrorMessage(msg);
+      setTradingSaveMsg({ type: 'error', text: msg });
       setSaveStatus('error');
       return;
     }
 
     setSaveStatus('saving');
     setErrorMessage('');
+    setTradingSaveMsg(null);
 
     try {
       const res = await fetch('/api/broker/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accessToken: accessTokenInput, source: 'manual', tokenType: 'trading' }),
+        body: JSON.stringify({ accessToken: clean, source: 'manual', tokenType: 'trading' }),
       });
       const data = await res.json();
 
-      if (data.error) {
-        setErrorMessage(data.error);
+      if (!res.ok || data.error) {
+        const msg = data.error || 'Failed to validate Upstox token';
+        setErrorMessage(msg);
+        setTradingSaveMsg({ type: 'error', text: msg });
         setSaveStatus('error');
       } else {
         const updated: BrokerConfig = {
@@ -258,22 +275,29 @@ export default function BrokerPage() {
           apiKey: process.env.NEXT_PUBLIC_UPSTOX_CLIENT_ID || config.apiKey,
           apiSecret: '••••••••••',
           connected: true,
-          accessToken: data.tokenType === 'trading' ? accessTokenInput : undefined,
+          accessToken: data.tokenType === 'trading' ? clean : undefined,
         };
         saveBrokerConfig(updated);
         setConfig(updated);
         setSaveStatus('connected');
         setAccessTokenInput('');
+        setTradingSaveMsg({
+          type: 'success',
+          text: data.message || 'Upstox token connected and verified!',
+        });
         checkServerToken();
       }
     } catch (err: any) {
-      setErrorMessage(err.message || 'Network error');
+      const msg = err.message || 'Network error';
+      setErrorMessage(msg);
+      setTradingSaveMsg({ type: 'error', text: msg });
       setSaveStatus('error');
     }
   };
 
   const handleSaveAnalyticsToken = async () => {
-    if (!analyticsTokenInput || analyticsTokenInput.trim().length < 10) {
+    const clean = sanitizePastedToken(analyticsTokenInput);
+    if (!clean || clean.length < 10) {
       setAnalyticsSaveMsg({ type: 'error', text: 'Paste a valid 1-year Analytics token from Upstox My Apps → Analytics.' });
       return;
     }
@@ -285,7 +309,7 @@ export default function BrokerPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          accessToken: analyticsTokenInput.trim(),
+          accessToken: clean,
           source: 'analytics_manual',
           tokenType: 'analytics',
         }),
@@ -317,6 +341,8 @@ export default function BrokerPage() {
       setAnalyticsTokenInput('');
       setSaveStatus('idle');
       setErrorMessage('');
+      setTradingSaveMsg(null);
+      setAnalyticsSaveMsg(null);
     } else if (scope === 'trading') {
       const current = getBrokerConfig();
       saveBrokerConfig({ ...current, accessToken: undefined });
@@ -720,6 +746,11 @@ export default function BrokerPage() {
                 {saveStatus === 'saving' ? '⏳ Verifying...' : '🔗 Connect'}
               </button>
             </div>
+            {tradingSaveMsg && (
+              <p className={`text-xs mt-2 font-semibold ${tradingSaveMsg.type === 'success' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {tradingSaveMsg.text}
+              </p>
+            )}
           </div>
 
           {/* Method D: OAuth Flow */}

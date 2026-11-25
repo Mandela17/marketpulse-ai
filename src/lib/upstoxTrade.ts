@@ -14,6 +14,9 @@ import {
   isJwtExpired,
   isLongLivedToken,
   getJwtIssuedAtMs,
+  getJwtExpiryIso,
+  getJwtUserId,
+  sanitizeUpstoxToken,
   type UpstoxTokenKind,
 } from './upstoxTokenStore';
 
@@ -211,9 +214,13 @@ export function normalizeUpstoxError(status: number, body: any): {
   return { code, message: rawMsg, hint };
 }
 
+export function hasStaticProxyConfigured(): boolean {
+  return Boolean(process.env.ZERO_IP_API_KEY?.trim() && process.env.ZERO_IP_IPV6?.trim());
+}
+
 function shouldUseStaticProxy(url: string, mode: TradingMode): boolean {
   if (mode !== 'live') return false;
-  if (!process.env.ZERO_IP_API_KEY || !process.env.ZERO_IP_IPV6) return false;
+  if (!hasStaticProxyConfigured()) return false;
   return url.includes('api-hft.upstox.com') || url.includes('/v2/order/');
 }
 
@@ -335,11 +342,15 @@ async function proxiedHttpsJson(
 export async function upstoxJsonRequest(
   url: string,
   token: string,
-  options: Omit<RequestInit, 'mode'> & { mode?: TradingMode } = {}
+  options: Omit<RequestInit, 'mode'> & {
+    mode?: TradingMode;
+    invalidateOn401?: boolean;
+    forceStaticProxy?: boolean;
+  } = {}
 ): Promise<{ ok: boolean; status: number; data: any; error?: ReturnType<typeof normalizeUpstoxError> }> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10000);
-  const { mode = 'live', ...fetchOpts } = options;
+  const { mode = 'live', invalidateOn401 = true, forceStaticProxy = false, ...fetchOpts } = options;
 
   const extraHeaders: Record<string, string> = {};
   if (mode === 'live' && process.env.UPSTOX_ALGO_NAME) {
@@ -361,7 +372,10 @@ export async function upstoxJsonRequest(
     let ok = false;
     let json: any = null;
 
-    if (shouldUseStaticProxy(url, mode)) {
+    const useProxy =
+      (forceStaticProxy && hasStaticProxyConfigured()) || shouldUseStaticProxy(url, mode);
+
+    if (useProxy) {
       const bodyStr = typeof fetchOpts.body === 'string' ? fetchOpts.body : undefined;
       const proxied = await proxiedHttpsJson(
         url,
@@ -384,7 +398,7 @@ export async function upstoxJsonRequest(
       json = await res.json().catch(() => null);
     }
 
-    if (status === 401 && mode === 'live') {
+    if (status === 401 && mode === 'live' && invalidateOn401) {
       await invalidateUpstoxTokens({ token });
     }
 
@@ -411,6 +425,189 @@ export async function upstoxJsonRequest(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export interface VerifyUpstoxTokenResult {
+  valid: boolean;
+  networkError?: boolean;
+  expiredByJwt?: boolean;
+  tokenKind: UpstoxTokenKind;
+  autoDetectedAnalytics?: boolean;
+  sanitizedToken: string;
+  userId: string;
+  httpStatus: number;
+  errorCode?: string;
+  upstoxMessage?: string;
+  message?: string;
+}
+
+const NIFTY_QUOTE_URL = `https://api.upstox.com/v2/market-quote/quotes?instrument_key=${encodeURIComponent('NSE_INDEX|Nifty 50')}`;
+const USER_PROFILE_URL = 'https://api.upstox.com/v2/user/profile';
+
+/**
+ * Live-verify a candidate Upstox token against Upstox APIs without falsely invalidating stored tokens.
+ * - Analytics tokens (or long-lived JWTs) validate via market-quote first so static-IP/user-scope 401/403 never causes false failures.
+ * - Trading tokens validate via user/profile (with Snipy static proxy fallback if configured), and fall back to market-quote
+ *   so an accidentally pasted Analytics token is auto-detected instead of rejected as invalid/expired.
+ */
+export async function verifyUpstoxTokenLive(
+  rawToken: string,
+  preferredKind: UpstoxTokenKind = 'trading'
+): Promise<VerifyUpstoxTokenResult> {
+  const cleanToken = sanitizeUpstoxToken(rawToken);
+  if (!cleanToken || cleanToken.length < 10) {
+    return {
+      valid: false,
+      tokenKind: preferredKind,
+      sanitizedToken: cleanToken,
+      userId: 'admin',
+      httpStatus: 400,
+      message: 'Valid access token required',
+    };
+  }
+
+  const detectedLongLived = isLongLivedToken(cleanToken);
+  const jwtUser = getJwtUserId(cleanToken);
+
+  if (isJwtExpired(cleanToken, 0)) {
+    const expIso = getJwtExpiryIso(cleanToken);
+    const expIst = expIso
+      ? new Date(expIso).toLocaleString('en-IN', {
+          timeZone: 'Asia/Kolkata',
+          day: 'numeric',
+          month: 'short',
+          hour: '2-digit',
+          minute: '2-digit',
+        })
+      : '';
+    return {
+      valid: false,
+      expiredByJwt: true,
+      tokenKind: detectedLongLived ? 'analytics' : preferredKind,
+      sanitizedToken: cleanToken,
+      userId: jwtUser || 'admin',
+      httpStatus: 401,
+      errorCode: 'JWT_EXPIRED',
+      message: expIst
+        ? `Token expired at ${expIst} IST. Generate a fresh token in Upstox My Apps or use 1-Tap Phone Approval.`
+        : 'This Upstox token has expired. Generate a fresh token in Upstox My Apps.',
+    };
+  }
+
+  const expectedKind: UpstoxTokenKind =
+    preferredKind === 'analytics' || detectedLongLived ? 'analytics' : 'trading';
+
+  // Analytics / long-lived path: validate against market-quote first (user/profile returns 401/403 without Static IP)
+  if (expectedKind === 'analytics') {
+    const quoteRes = await upstoxJsonRequest(NIFTY_QUOTE_URL, cleanToken, { invalidateOn401: false });
+    if (quoteRes.ok) {
+      let resolvedUser = jwtUser || 'upstox_analytics';
+      const profileOpt = await upstoxJsonRequest(USER_PROFILE_URL, cleanToken, {
+        invalidateOn401: false,
+      });
+      if (profileOpt.ok) {
+        resolvedUser = profileOpt.data?.data?.user_id || profileOpt.data?.data?.email || resolvedUser;
+      }
+      return {
+        valid: true,
+        tokenKind: 'analytics',
+        autoDetectedAnalytics: preferredKind !== 'analytics' && detectedLongLived,
+        sanitizedToken: cleanToken,
+        userId: resolvedUser,
+        httpStatus: 200,
+      };
+    }
+
+    if (quoteRes.status === 429 || quoteRes.status >= 500) {
+      return {
+        valid: true,
+        networkError: true,
+        tokenKind: 'analytics',
+        autoDetectedAnalytics: preferredKind !== 'analytics' && detectedLongLived,
+        sanitizedToken: cleanToken,
+        userId: jwtUser || 'upstox_analytics',
+        httpStatus: 200,
+      };
+    }
+
+    const code = quoteRes.error?.code || `HTTP_${quoteRes.status}`;
+    const msg = quoteRes.error?.message || 'Unauthorized';
+    return {
+      valid: false,
+      tokenKind: 'analytics',
+      sanitizedToken: cleanToken,
+      userId: jwtUser || 'upstox_analytics',
+      httpStatus: quoteRes.status === 401 || quoteRes.status === 403 ? 401 : quoteRes.status,
+      errorCode: code,
+      upstoxMessage: msg,
+      message: `Upstox rejected Analytics token (${code}: ${msg}). Make sure it is the latest token from My Apps -> Analytics (generating a new token revokes the old one).`,
+    };
+  }
+
+  // Trading path: test user/profile directly, then Snipy Static IP proxy if configured
+  let profileRes = await upstoxJsonRequest(USER_PROFILE_URL, cleanToken, { invalidateOn401: false });
+  if (!profileRes.ok && (profileRes.status === 401 || profileRes.status === 403) && hasStaticProxyConfigured()) {
+    const proxiedProfile = await upstoxJsonRequest(USER_PROFILE_URL, cleanToken, {
+      invalidateOn401: false,
+      forceStaticProxy: true,
+    });
+    if (proxiedProfile.ok) {
+      profileRes = proxiedProfile;
+    }
+  }
+
+  if (profileRes.ok) {
+    const resolvedUser =
+      profileRes.data?.data?.user_id || profileRes.data?.data?.email || jwtUser || 'admin';
+    return {
+      valid: true,
+      tokenKind: 'trading',
+      sanitizedToken: cleanToken,
+      userId: resolvedUser,
+      httpStatus: 200,
+    };
+  }
+
+  if (profileRes.status === 429 || profileRes.status >= 500) {
+    return {
+      valid: true,
+      networkError: true,
+      tokenKind: 'trading',
+      sanitizedToken: cleanToken,
+      userId: jwtUser || 'admin',
+      httpStatus: 200,
+    };
+  }
+
+  // Fallback check on market-quote: catches valid Analytics / read-only tokens pasted into the Trading input
+  if (profileRes.status === 401 || profileRes.status === 403) {
+    const quoteFallback = await upstoxJsonRequest(NIFTY_QUOTE_URL, cleanToken, {
+      invalidateOn401: false,
+    });
+    if (quoteFallback.ok) {
+      return {
+        valid: true,
+        tokenKind: 'analytics',
+        autoDetectedAnalytics: true,
+        sanitizedToken: cleanToken,
+        userId: jwtUser || 'upstox_analytics',
+        httpStatus: 200,
+      };
+    }
+  }
+
+  const code = profileRes.error?.code || `HTTP_${profileRes.status}`;
+  const msg = profileRes.error?.message || 'Unauthorized';
+  return {
+    valid: false,
+    tokenKind: 'trading',
+    sanitizedToken: cleanToken,
+    userId: jwtUser || 'admin',
+    httpStatus: profileRes.status === 401 || profileRes.status === 403 ? 401 : profileRes.status,
+    errorCode: code,
+    upstoxMessage: msg,
+    message: `Upstox rejected token (${code}: ${msg}). Note: saving Static IP or generating a newer token in Upstox My Apps automatically revokes earlier tokens.`,
+  };
 }
 
 export function validatePlaceOrderInput(body: any): {

@@ -31,23 +31,44 @@ export async function GET(request: Request) {
   }
 
   try {
+    const isAnalytics = tokenKind === 'analytics';
+    if (isAnalytics) {
+      const probe = await upstoxJsonRequest('https://api.upstox.com/v2/user/profile', token, {
+        invalidateOn401: false,
+      });
+      if (!probe.ok && (probe.status === 401 || probe.status === 403)) {
+        return NextResponse.json(
+          {
+            connected: false,
+            analyticsActive: true,
+            tokenKind,
+            error:
+              '1-year Analytics token is active for market quotes, but Upstox requires daily 1-tap approval (Trading token) to load Demat Holdings & place orders.',
+          },
+          { status: 403 }
+        );
+      }
+    }
+
+    const reqOpts = isAnalytics ? { invalidateOn401: false } : undefined;
     const [profileRes, fundsRes, holdingsRes, positionsRes, ordersRes, tradesRes, ipRes] =
       await Promise.all([
-        upstoxJsonRequest('https://api.upstox.com/v2/user/profile', token),
-        upstoxJsonRequest('https://api.upstox.com/v2/user/get-funds-and-margin?segment=SEC', token),
-        upstoxJsonRequest('https://api.upstox.com/v2/portfolio/long-term-holdings', token),
-        upstoxJsonRequest('https://api.upstox.com/v2/portfolio/short-term-positions', token),
-        upstoxJsonRequest('https://api.upstox.com/v2/order/retrieve-all', token),
-        upstoxJsonRequest('https://api.upstox.com/v2/order/trades/get-trades-for-day', token),
-        upstoxJsonRequest('https://api.upstox.com/v2/user/ip', token),
+        upstoxJsonRequest('https://api.upstox.com/v2/user/profile', token, reqOpts),
+        upstoxJsonRequest('https://api.upstox.com/v2/user/get-funds-and-margin?segment=SEC', token, reqOpts),
+        upstoxJsonRequest('https://api.upstox.com/v2/portfolio/long-term-holdings', token, reqOpts),
+        upstoxJsonRequest('https://api.upstox.com/v2/portfolio/short-term-positions', token, reqOpts),
+        upstoxJsonRequest('https://api.upstox.com/v2/order/retrieve-all', token, reqOpts),
+        upstoxJsonRequest('https://api.upstox.com/v2/order/trades/get-trades-for-day', token, reqOpts),
+        upstoxJsonRequest('https://api.upstox.com/v2/user/ip', token, reqOpts),
       ]);
 
     // If token was rejected by Upstox on core endpoints
     if (
-      profileRes.status === 401 ||
-      holdingsRes.status === 401 ||
-      positionsRes.status === 401 ||
-      ordersRes.status === 401
+      !isAnalytics &&
+      (profileRes.status === 401 ||
+        holdingsRes.status === 401 ||
+        positionsRes.status === 401 ||
+        ordersRes.status === 401)
     ) {
       return NextResponse.json(
         {
@@ -59,12 +80,11 @@ export async function GET(request: Request) {
       );
     }
 
-    // Analytics tokens without account permissions / static IP may get 403 on personal endpoints
+    // Analytics tokens without account permissions / static IP may get 401/403 on personal endpoints
     const accountForbidden =
-      tokenKind === 'analytics' &&
-      profileRes.status === 403 &&
-      holdingsRes.status === 403 &&
-      ordersRes.status === 403;
+      isAnalytics &&
+      (profileRes.status === 401 || profileRes.status === 403) &&
+      (holdingsRes.status === 401 || holdingsRes.status === 403);
     if (accountForbidden) {
       return NextResponse.json(
         {

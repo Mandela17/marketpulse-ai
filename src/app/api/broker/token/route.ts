@@ -7,10 +7,10 @@ import {
   getUpstoxTradingToken,
   getUpstoxAnalyticsToken,
   invalidateUpstoxTokens,
-  isLongLivedToken,
   parseUpstoxExpiry,
   type UpstoxTokenKind,
 } from '@/lib/upstoxTokenStore';
+import { verifyUpstoxTokenLive } from '@/lib/upstoxTrade';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,36 +32,41 @@ export async function GET() {
       });
     }
 
-    // Verify active trading token if present (analytics token validated via market-quote fallback)
+    let tradingConnected = Boolean(trading);
     if (trading) {
-      try {
-        const testRes = await fetch('https://api.upstox.com/v2/user/get-funds-and-margin', {
-          headers: { Accept: 'application/json', Authorization: `Bearer ${trading.accessToken}` },
-        });
-        if (testRes.status === 401) {
-          await invalidateUpstoxTokens({ token: trading.accessToken });
-          if (!analytics) {
-            return NextResponse.json({
-              connected: false,
-              tradingConnected: false,
-              analyticsConnected: false,
-              reason: 'Trading token expired or revoked by Upstox',
-            });
-          }
+      const check = await verifyUpstoxTokenLive(trading.accessToken, 'trading');
+      if (!check.valid && !check.networkError && check.tokenKind === 'trading') {
+        await invalidateUpstoxTokens({ token: trading.accessToken });
+        tradingConnected = false;
+        if (!analytics) {
+          return NextResponse.json({
+            connected: false,
+            tradingConnected: false,
+            analyticsConnected: false,
+            reason: check.message || 'Trading token expired or revoked by Upstox',
+          });
         }
-      } catch {
-        // Network error — keep existing DB validity state
       }
+    }
+
+    const effectiveActive = tradingConnected && trading ? trading : analytics;
+    if (!effectiveActive) {
+      return NextResponse.json({
+        connected: false,
+        tradingConnected: false,
+        analyticsConnected: false,
+        reason: 'No active token',
+      });
     }
 
     return NextResponse.json({
       connected: true,
       verified: true,
-      tradingConnected: Boolean(trading),
+      tradingConnected,
       analyticsConnected: Boolean(analytics),
-      userId: active.userId,
-      expiresAt: active.expiresAt,
-      updatedAt: active.updatedAt,
+      userId: effectiveActive.userId,
+      expiresAt: effectiveActive.expiresAt,
+      updatedAt: effectiveActive.updatedAt,
     });
   } catch (err: any) {
     return NextResponse.json({ connected: false, error: err.message }, { status: 500 });
@@ -77,43 +82,22 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Valid access token required' }, { status: 400 });
     }
 
-    const cleanToken = accessToken.trim();
-    const detectedLongLived = isLongLivedToken(cleanToken);
-    const effectiveType: UpstoxTokenKind =
-      tokenType === 'analytics' || detectedLongLived ? 'analytics' : 'trading';
+    const preferredKind: UpstoxTokenKind = tokenType === 'analytics' ? 'analytics' : 'trading';
+    const check = await verifyUpstoxTokenLive(accessToken, preferredKind);
 
-    let userId = 'admin';
-    try {
-      const profileRes = await fetch('https://api.upstox.com/v2/user/profile', {
-        headers: {
-          Accept: 'application/json',
-          Authorization: `Bearer ${cleanToken}`,
+    if (!check.valid) {
+      return NextResponse.json(
+        {
+          error: check.message || 'Invalid or expired access token',
+          code: check.errorCode,
+          upstoxMessage: check.upstoxMessage,
         },
-      });
-
-      if (profileRes.status === 401) {
-        return NextResponse.json({ error: 'Invalid or expired access token' }, { status: 401 });
-      }
-
-      if (profileRes.ok) {
-        const profile = await profileRes.json();
-        userId = profile.data?.user_id || profile.data?.email || 'admin';
-      } else if (profileRes.status === 403 && effectiveType === 'analytics') {
-        // Analytics tokens without static IP may get 403 on user/profile while market-quote works
-        const quoteCheck = await fetch(
-          `https://api.upstox.com/v2/market-quote/quotes?instrument_key=${encodeURIComponent('NSE_INDEX|Nifty 50')}`,
-          { headers: { Accept: 'application/json', Authorization: `Bearer ${cleanToken}` } }
-        );
-        if (quoteCheck.status === 401) {
-          return NextResponse.json({ error: 'Invalid or expired Analytics token' }, { status: 401 });
-        }
-      }
-    } catch {
-      // Transient Upstox network error — allow save
+        { status: check.httpStatus || 401 }
+      );
     }
 
-    const expiryIso = parseUpstoxExpiry(undefined, cleanToken, effectiveType);
-    const saved = await saveUpstoxToken(cleanToken, userId, expiryIso, effectiveType);
+    const expiryIso = parseUpstoxExpiry(undefined, check.sanitizedToken, check.tokenKind);
+    const saved = await saveUpstoxToken(check.sanitizedToken, check.userId, expiryIso, check.tokenKind);
 
     if (!saved) {
       return NextResponse.json({ error: 'Failed to store token in database' }, { status: 500 });
@@ -121,14 +105,16 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
-      tokenType: effectiveType,
-      autoDetectedAnalytics: tokenType !== 'analytics' && detectedLongLived,
-      userId,
+      tokenType: check.tokenKind,
+      autoDetectedAnalytics: Boolean(check.autoDetectedAnalytics),
+      userId: check.userId,
       expiresAt: expiryIso,
       source: source || 'manual',
       message:
-        effectiveType === 'analytics'
-          ? '1-year Analytics token stored. Market quotes, NIFTY/SENSEX & charts stay connected continuously.'
+        check.tokenKind === 'analytics'
+          ? check.autoDetectedAnalytics
+            ? 'Detected 1-year / read-only Analytics token and saved under Analytics (quotes, NIFTY/SENSEX & charts stay connected continuously).'
+            : '1-year Analytics token stored. Market quotes, NIFTY/SENSEX & charts stay connected continuously.'
           : 'Trading token stored (valid until 3:30 AM IST).',
     });
   } catch (err: any) {

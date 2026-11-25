@@ -12,6 +12,7 @@ import {
   getPendingTokenRequest,
   invalidateUpstoxTokens,
 } from '@/lib/upstoxTokenStore';
+import { verifyUpstoxTokenLive } from '@/lib/upstoxTrade';
 import { getServiceClient } from '@/lib/supabase';
 
 function resolveWebhookUrl(request: Request): string {
@@ -36,44 +37,23 @@ export async function GET(request: Request) {
     let tradingApiReachable = false;
 
     if (tradingToken) {
-      try {
-        const testRes = await fetch('https://api.upstox.com/v2/user/profile', {
-          headers: {
-            Accept: 'application/json',
-            Authorization: `Bearer ${tradingToken.accessToken}`,
-          },
-          signal: AbortSignal.timeout(5000),
-        });
-        tradingApiReachable = testRes.ok;
-        if (testRes.status === 401) {
-          await invalidateUpstoxTokens({ token: tradingToken.accessToken });
-          tradingValid = false;
-        }
-      } catch {
-        // Transient network issue — treat DB token as valid until Upstox rejects
-        tradingApiReachable = true;
+      const check = await verifyUpstoxTokenLive(tradingToken.accessToken, 'trading');
+      if (!check.valid && !check.networkError) {
+        await invalidateUpstoxTokens({ token: tradingToken.accessToken });
+        tradingValid = false;
+      } else if (check.tokenKind !== 'trading') {
+        tradingValid = false;
+      } else {
+        tradingApiReachable = !check.networkError;
       }
     }
 
     let analyticsValid = Boolean(analyticsToken);
     if (analyticsToken && !tradingValid) {
-      try {
-        const qTest = await fetch(
-          `https://api.upstox.com/v2/market-quote/quotes?instrument_key=${encodeURIComponent('NSE_INDEX|Nifty 50')}`,
-          {
-            headers: {
-              Accept: 'application/json',
-              Authorization: `Bearer ${analyticsToken.accessToken}`,
-            },
-            signal: AbortSignal.timeout(5000),
-          }
-        );
-        if (qTest.status === 401) {
-          await invalidateUpstoxTokens({ token: analyticsToken.accessToken });
-          analyticsValid = false;
-        }
-      } catch {
-        // Keep DB validity state on transient error
+      const check = await verifyUpstoxTokenLive(analyticsToken.accessToken, 'analytics');
+      if (!check.valid && !check.networkError) {
+        await invalidateUpstoxTokens({ token: analyticsToken.accessToken });
+        analyticsValid = false;
       }
     }
 
