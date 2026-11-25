@@ -20,11 +20,23 @@ import {
   ExternalLink,
   Zap,
   Lock,
+  TrendingUp,
+  TrendingDown,
+  ArrowRight,
+  ChevronDown,
+  Clock,
+  CircleDot,
+  BarChart3,
+  DollarSign,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { getBrokerConfig } from '@/lib/brokerApi';
 import { searchStocks } from '@/lib/sectorData';
 import { isMarketOpenNow } from '@/lib/marketHolidays';
+
+/* ───────────────────────────────────────────────────
+   TYPE DEFINITIONS
+   ─────────────────────────────────────────────────── */
 
 type TradingMode = 'live' | 'sandbox';
 type AccountTab = 'holdings' | 'positions' | 'orders' | 'trades' | 'sandboxLog';
@@ -125,6 +137,10 @@ interface SandboxLogEntry {
   timestamp: string;
 }
 
+/* ───────────────────────────────────────────────────
+   CONSTANTS & HELPERS
+   ─────────────────────────────────────────────────── */
+
 const SANDBOX_TOKEN_KEY = 'marketpulse_upstox_sandbox_token';
 const SANDBOX_LOG_KEY = 'marketpulse_upstox_sandbox_orders';
 
@@ -144,16 +160,16 @@ function isOrderEditable(status: string): boolean {
   );
 }
 
-function statusBadgeStyle(status: string): { bg: string; color: string } {
+function statusBadgeClass(status: string): string {
   const s = status.toLowerCase();
-  if (s === 'complete' || s === 'executed') {
-    return { bg: 'rgba(0,214,143,0.15)', color: '#00d68f' };
-  }
-  if (s.includes('reject') || s.includes('cancel')) {
-    return { bg: 'rgba(255,77,106,0.15)', color: '#ff4d6a' };
-  }
-  return { bg: 'rgba(251,191,36,0.15)', color: '#fbbf24' };
+  if (s === 'complete' || s === 'executed') return 'status-badge-success';
+  if (s.includes('reject') || s.includes('cancel')) return 'status-badge-error';
+  return 'status-badge-warning';
 }
+
+/* ───────────────────────────────────────────────────
+   MAIN COMPONENT
+   ─────────────────────────────────────────────────── */
 
 function LiveTradeContent() {
   const { session } = useAuth();
@@ -301,7 +317,7 @@ function LiveTradeContent() {
     }
   }, []);
 
-  // Fetch Upstox Account Portfolio (Holdings, Positions, Orders, Trades, Funds, Static IP)
+  // Fetch Upstox Account Portfolio
   const fetchAccount = useCallback(async () => {
     if (!session?.access_token) return;
     setLoadingAccount(true);
@@ -604,480 +620,726 @@ function LiveTradeContent() {
     (t) => !tableSearch || t.symbol.toLowerCase().includes(tableSearch.toLowerCase())
   );
 
-  return (
-    <div className="w-full max-w-7xl mx-auto pb-12 animate-fade-in">
-      {/* ─── Header & Mode Switcher ─── */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-5">
-        <div>
-          <div className="flex items-center gap-2.5 flex-wrap">
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-white">⚡ Live Trade &amp; Upstox Portfolio</h1>
-            <span
-              className="text-[10px] font-bold px-2.5 py-0.5 rounded-full"
-              style={{
-                background: mode === 'live' ? 'rgba(255,77,106,0.16)' : 'rgba(245,158,11,0.16)',
-                color: mode === 'live' ? '#ff4d6a' : '#fbbf24',
-                border: `1px solid ${mode === 'live' ? 'rgba(255,77,106,0.35)' : 'rgba(245,158,11,0.35)'}`,
-              }}
-            >
-              {mode === 'live' ? '🔴 LIVE EXCHANGE ORDERS' : '🛡️ SANDBOX TEST MODE'}
-            </span>
-          </div>
-          <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
-            Direct Buy/Sell execution via Upstox V3 HFT API alongside live Demat Holdings, Positions &amp; Order Book
-          </p>
-        </div>
+  const marketOpen = isMarketOpenNow();
 
-        {/* Mode Switcher + Sync Controls */}
-        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-          <div
-            className="flex items-center rounded-xl p-1"
-            style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}
-          >
+  /* ═══════════════════════════════════════════════════
+     RENDER
+     ═══════════════════════════════════════════════════ */
+
+  return (
+    <>
+      {/* Inline styles for trade-page-specific effects */}
+      <style>{`
+        .trade-kpi-card {
+          position: relative;
+          overflow: hidden;
+          border-radius: 16px;
+          padding: 20px;
+          background: linear-gradient(145deg, rgba(15,23,42,0.9), rgba(15,23,42,0.6));
+          border: 1px solid rgba(255,255,255,0.06);
+          backdrop-filter: blur(12px);
+          transition: all 0.2s ease;
+        }
+        .trade-kpi-card:hover {
+          border-color: rgba(255,255,255,0.12);
+          transform: translateY(-1px);
+        }
+        .trade-kpi-card::before {
+          content: '';
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          height: 3px;
+          border-radius: 16px 16px 0 0;
+        }
+        .kpi-accent-blue::before { background: linear-gradient(90deg, #3b82f6, #60a5fa); }
+        .kpi-accent-purple::before { background: linear-gradient(90deg, #8b5cf6, #a78bfa); }
+        .kpi-accent-green::before { background: linear-gradient(90deg, #00d68f, #34d399); }
+        .kpi-accent-amber::before { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+
+        .trade-tab-btn {
+          padding: 10px 18px;
+          border-radius: 12px;
+          font-size: 12px;
+          font-weight: 700;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          white-space: nowrap;
+          border: 1px solid transparent;
+          position: relative;
+        }
+        .trade-tab-btn.active {
+          background: rgba(59,130,246,0.15);
+          color: #60a5fa;
+          border-color: rgba(59,130,246,0.3);
+        }
+        .trade-tab-btn.active::after {
+          content: '';
+          position: absolute;
+          bottom: -1px;
+          left: 20%;
+          right: 20%;
+          height: 2px;
+          background: #60a5fa;
+          border-radius: 2px;
+        }
+        .trade-tab-btn:not(.active) {
+          background: rgba(255,255,255,0.02);
+          color: var(--text-muted);
+        }
+        .trade-tab-btn:not(.active):hover {
+          background: rgba(255,255,255,0.05);
+          color: var(--text-secondary);
+        }
+
+        .trade-table th {
+          padding: 14px 16px;
+          font-size: 10px;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          color: var(--text-muted);
+          border-bottom: 1px solid var(--border-color);
+        }
+        .trade-table td {
+          padding: 14px 16px;
+          font-size: 12px;
+          border-bottom: 1px solid rgba(255,255,255,0.03);
+        }
+        .trade-table tbody tr {
+          transition: background 0.15s ease;
+        }
+        .trade-table tbody tr:hover {
+          background: rgba(59,130,246,0.04);
+        }
+        .trade-table tbody tr:nth-child(even) {
+          background: rgba(255,255,255,0.01);
+        }
+        .trade-table tbody tr:nth-child(even):hover {
+          background: rgba(59,130,246,0.04);
+        }
+
+        .order-ticket {
+          border-radius: 20px;
+          padding: 24px;
+          background: linear-gradient(165deg, rgba(15,23,42,0.95), rgba(15,23,42,0.8));
+          backdrop-filter: blur(16px);
+          box-shadow: 0 20px 60px rgba(0,0,0,0.4), 0 0 1px rgba(255,255,255,0.1) inset;
+        }
+
+        .buy-sell-toggle {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 4px;
+          padding: 4px;
+          border-radius: 14px;
+          background: rgba(0,0,0,0.3);
+        }
+        .buy-sell-toggle button {
+          padding: 12px;
+          border-radius: 10px;
+          font-size: 13px;
+          font-weight: 900;
+          letter-spacing: 0.1em;
+          cursor: pointer;
+          transition: all 0.25s cubic-bezier(0.4,0,0.2,1);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+        }
+
+        .trade-input {
+          width: 100%;
+          padding: 10px 14px;
+          border-radius: 12px;
+          font-size: 13px;
+          font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
+          font-weight: 700;
+          color: white;
+          background: rgba(0,0,0,0.3);
+          border: 1px solid rgba(255,255,255,0.08);
+          outline: none;
+          transition: border-color 0.2s;
+        }
+        .trade-input:focus {
+          border-color: rgba(59,130,246,0.5);
+        }
+        .trade-input:disabled {
+          opacity: 0.4;
+        }
+        .trade-input::placeholder {
+          color: rgba(148,163,184,0.5);
+        }
+
+        .option-chip {
+          padding: 8px 12px;
+          border-radius: 10px;
+          font-size: 11px;
+          font-weight: 700;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          text-align: center;
+          border: 1px solid transparent;
+        }
+
+        .status-badge-success {
+          background: rgba(0,214,143,0.12);
+          color: #00d68f;
+          border: 1px solid rgba(0,214,143,0.25);
+        }
+        .status-badge-error {
+          background: rgba(255,77,106,0.12);
+          color: #ff4d6a;
+          border: 1px solid rgba(255,77,106,0.25);
+        }
+        .status-badge-warning {
+          background: rgba(251,191,36,0.12);
+          color: #fbbf24;
+          border: 1px solid rgba(251,191,36,0.25);
+        }
+
+        .pnl-positive { color: #00d68f; }
+        .pnl-negative { color: #ff4d6a; }
+
+        .trade-modal-overlay {
+          position: fixed;
+          inset: 0;
+          z-index: 50;
+          background: rgba(0,0,0,0.8);
+          backdrop-filter: blur(8px);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 16px;
+        }
+        .trade-modal {
+          width: 100%;
+          max-width: 440px;
+          border-radius: 20px;
+          padding: 28px;
+          background: linear-gradient(165deg, #0f172a, #1e293b);
+          border: 1px solid rgba(255,255,255,0.08);
+          box-shadow: 0 25px 80px rgba(0,0,0,0.6);
+          animation: modalIn 0.2s ease-out;
+        }
+        @keyframes modalIn {
+          from { opacity: 0; transform: scale(0.95) translateY(10px); }
+          to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+
+        .empty-state-icon {
+          width: 56px;
+          height: 56px;
+          border-radius: 16px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin: 0 auto 16px;
+          background: rgba(59,130,246,0.08);
+          border: 1px solid rgba(59,130,246,0.15);
+        }
+
+        .qty-chip {
+          flex: 1;
+          padding: 5px;
+          border-radius: 8px;
+          font-size: 10px;
+          font-weight: 700;
+          cursor: pointer;
+          background: rgba(255,255,255,0.04);
+          color: var(--text-muted);
+          transition: all 0.15s;
+          border: 1px solid rgba(255,255,255,0.04);
+        }
+        .qty-chip:hover {
+          background: rgba(59,130,246,0.1);
+          color: #60a5fa;
+          border-color: rgba(59,130,246,0.2);
+        }
+      `}</style>
+
+      <div className="w-full max-w-7xl mx-auto pb-12 animate-fade-in">
+
+        {/* ═══════════════════════════════════════════
+            HEADER
+           ═══════════════════════════════════════════ */}
+        <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 mb-6">
+          <div>
+            <div className="flex items-center gap-3 flex-wrap mb-1">
+              <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
+                Trading Terminal
+              </h1>
+              <div
+                className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider"
+                style={{
+                  background: mode === 'live'
+                    ? 'linear-gradient(135deg, rgba(255,77,106,0.15), rgba(255,77,106,0.08))'
+                    : 'linear-gradient(135deg, rgba(245,158,11,0.15), rgba(245,158,11,0.08))',
+                  color: mode === 'live' ? '#ff4d6a' : '#fbbf24',
+                  border: `1px solid ${mode === 'live' ? 'rgba(255,77,106,0.3)' : 'rgba(245,158,11,0.3)'}`,
+                }}
+              >
+                <CircleDot size={8} className={mode === 'live' ? 'animate-pulse' : ''} />
+                {mode === 'live' ? 'Live Exchange' : 'Sandbox Mode'}
+              </div>
+              <div
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold"
+                style={{
+                  background: marketOpen ? 'rgba(0,214,143,0.08)' : 'rgba(148,163,184,0.08)',
+                  color: marketOpen ? '#00d68f' : '#94a3b8',
+                  border: `1px solid ${marketOpen ? 'rgba(0,214,143,0.2)' : 'rgba(148,163,184,0.15)'}`,
+                }}
+              >
+                <Clock size={9} />
+                {marketOpen ? 'Market Open' : 'Market Closed'}
+              </div>
+            </div>
+            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+              Execute orders via Upstox V3 HFT API · Holdings, Positions & Order Book
+            </p>
+          </div>
+
+          {/* Mode Switcher + Sync */}
+          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+            <div
+              className="flex items-center rounded-xl p-1"
+              style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.06)' }}
+            >
+              <button
+                type="button"
+                onClick={() => setMode('live')}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold cursor-pointer transition-all"
+                style={{
+                  background: mode === 'live' ? 'rgba(255,77,106,0.18)' : 'transparent',
+                  color: mode === 'live' ? '#ff4d6a' : 'var(--text-muted)',
+                }}
+              >
+                <Zap size={12} />
+                Live
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode('sandbox')}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold cursor-pointer transition-all"
+                style={{
+                  background: mode === 'sandbox' ? 'rgba(245,158,11,0.18)' : 'transparent',
+                  color: mode === 'sandbox' ? '#fbbf24' : 'var(--text-muted)',
+                }}
+              >
+                <ShieldCheck size={12} />
+                Sandbox
+              </button>
+            </div>
+
             <button
               type="button"
-              onClick={() => setMode('live')}
-              className="px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-all"
+              onClick={fetchAccount}
+              disabled={loadingAccount}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold cursor-pointer transition-all hover:brightness-125 disabled:opacity-50"
               style={{
-                background: mode === 'live' ? 'rgba(255,77,106,0.2)' : 'transparent',
-                color: mode === 'live' ? '#ff4d6a' : 'var(--text-muted)',
+                background: 'linear-gradient(135deg, rgba(59,130,246,0.2), rgba(59,130,246,0.1))',
+                color: '#60a5fa',
+                border: '1px solid rgba(59,130,246,0.3)',
               }}
             >
-              Live Account
+              <RefreshCw size={13} className={loadingAccount ? 'animate-spin' : ''} />
+              Sync
             </button>
+          </div>
+        </div>
+
+        {/* ═══════════════════════════════════════════
+            CONNECTION / COMPLIANCE BANNERS
+           ═══════════════════════════════════════════ */}
+        {!connected && !loadingAccount && (
+          <div
+            className="mb-5 p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+            style={{
+              background: 'linear-gradient(135deg, rgba(245,158,11,0.08), rgba(245,158,11,0.03))',
+              border: '1px solid rgba(245,158,11,0.25)',
+            }}
+          >
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-xl" style={{ background: 'rgba(245,158,11,0.12)' }}>
+                <AlertTriangle size={18} style={{ color: '#fbbf24' }} />
+              </div>
+              <div>
+                <p className="font-bold text-white text-sm">Upstox Not Connected</p>
+                <p style={{ color: 'var(--text-secondary)' }}>{accountError || 'Connect your Upstox account to start trading'}</p>
+              </div>
+            </div>
+            <Link
+              href="/broker"
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-white shrink-0 text-center text-sm transition-all hover:brightness-110"
+              style={{ background: 'linear-gradient(135deg, #8b5cf6, #6366f1)' }}
+            >
+              Connect Upstox
+              <ArrowRight size={14} />
+            </Link>
+          </div>
+        )}
+
+        {mode === 'live' && connected && staticIp && !staticIp.configured && (
+          <div
+            className="mb-5 px-5 py-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+            style={{
+              background: 'linear-gradient(135deg, rgba(245,158,11,0.06), rgba(245,158,11,0.02))',
+              border: '1px solid rgba(245,158,11,0.2)',
+            }}
+          >
+            <div className="flex items-start gap-3">
+              <div className="p-2 rounded-xl shrink-0 mt-0.5" style={{ background: 'rgba(245,158,11,0.1)' }}>
+                <ShieldAlert size={16} style={{ color: '#fbbf24' }} />
+              </div>
+              <div>
+                <p className="font-bold text-amber-300 text-sm">Static IP Not Configured</p>
+                <p className="mt-0.5 leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+                  Portfolio & order book work normally, but SEBI rules require a registered server IP for live orders.
+                  Register your IP at{' '}
+                  <a href="https://account.upstox.com/developer/apps" target="_blank" rel="noopener noreferrer" className="underline text-blue-400">
+                    Upstox Developer Apps
+                  </a>{' '}
+                  or switch to Sandbox for risk-free testing.
+                </p>
+              </div>
+            </div>
             <button
               type="button"
               onClick={() => setMode('sandbox')}
-              className="px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-all"
-              style={{
-                background: mode === 'sandbox' ? 'rgba(245,158,11,0.2)' : 'transparent',
-                color: mode === 'sandbox' ? '#fbbf24' : 'var(--text-muted)',
-              }}
+              className="px-4 py-2 rounded-xl font-bold shrink-0 cursor-pointer transition-all hover:brightness-110"
+              style={{ background: 'rgba(245,158,11,0.15)', color: '#fbbf24', border: '1px solid rgba(245,158,11,0.3)' }}
             >
-              Sandbox Test
+              Switch to Sandbox
             </button>
           </div>
+        )}
 
-          <button
-            type="button"
-            onClick={fetchAccount}
-            disabled={loadingAccount}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold cursor-pointer transition-all hover:brightness-125 disabled:opacity-50"
+        {mode === 'live' && connected && staticIp?.configured && (
+          <div
+            className="mb-5 px-5 py-3 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
             style={{
-              background: 'linear-gradient(135deg, rgba(59,130,246,0.25), rgba(59,130,246,0.12))',
-              color: '#60a5fa',
-              border: '1px solid rgba(59,130,246,0.4)',
+              background: 'linear-gradient(135deg, rgba(0,214,143,0.06), rgba(0,214,143,0.02))',
+              border: '1px solid rgba(0,214,143,0.2)',
             }}
           >
-            <RefreshCw size={13} className={loadingAccount ? 'animate-spin' : ''} />
-            <span>Sync Upstox</span>
-          </button>
-        </div>
-      </div>
-
-      {/* ─── Connection & Compliance Banners ─── */}
-      {!connected && !loadingAccount && (
-        <div
-          className="mb-5 p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
-          style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)' }}
-        >
-          <div className="flex items-center gap-2.5">
-            <AlertTriangle size={16} style={{ color: '#fbbf24', flexShrink: 0 }} />
-            <div>
-              <p className="font-bold text-white">Upstox Live Account Not Connected</p>
-              <p style={{ color: 'var(--text-secondary)' }}>{accountError}</p>
+            <div className="flex items-center gap-2.5 text-emerald-300">
+              <ShieldCheck size={16} />
+              <span className="font-semibold">
+                <strong>{profile?.userName || profile?.userId || 'Upstox Live'}</strong>
+                {' '}connected · Static IP Active ({staticIp.primaryIp || staticIp.secondaryIp})
+              </span>
             </div>
-          </div>
-          <Link
-            href="/broker"
-            className="px-4 py-2 rounded-lg font-bold text-white shrink-0 text-center"
-            style={{ background: 'linear-gradient(135deg, #8b5cf6, #6366f1)' }}
-          >
-            Connect Upstox →
-          </Link>
-        </div>
-      )}
-
-      {mode === 'live' && connected && staticIp && !staticIp.configured && (
-        <div
-          className="mb-5 px-4 py-3 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
-          style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)' }}
-        >
-          <div className="flex items-start gap-2.5">
-            <ShieldAlert size={16} style={{ color: '#fbbf24', flexShrink: 0, marginTop: 2 }} />
-            <div>
-              <p className="font-bold text-amber-300">Static IP Not Registered on Upstox (`GET /v2/user/ip` is empty)</p>
-              <p className="mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-                Portfolio, Holdings, Positions &amp; Order Book work normally, but SEBI/Upstox rules reject live order placement unless your server IP is registered under{' '}
-                <a href="https://account.upstox.com/developer/apps" target="_blank" rel="noopener noreferrer" className="underline text-blue-400">
-                  Upstox Developer Apps
-                </a>
-                . Switch to <strong>Sandbox Test</strong> mode anytime for risk-free order testing.
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setMode('sandbox')}
-            className="px-3 py-1.5 rounded-lg font-bold shrink-0 cursor-pointer"
-            style={{ background: 'rgba(245,158,11,0.18)', color: '#fbbf24' }}
-          >
-            Switch to Sandbox
-          </button>
-        </div>
-      )}
-
-      {mode === 'live' && connected && staticIp?.configured && (
-        <div
-          className="mb-5 px-4 py-2 rounded-xl flex items-center justify-between text-xs"
-          style={{ background: 'rgba(0,214,143,0.08)', border: '1px solid rgba(0,214,143,0.25)' }}
-        >
-          <div className="flex items-center gap-2 text-emerald-300">
-            <ShieldCheck size={15} />
-            <span>
-              <strong>{profile?.userName || profile?.userId || 'Upstox Live'}</strong> connected · Static IP Active (
-              {staticIp.primaryIp || staticIp.secondaryIp})
+            <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+              POA/DDPI: {profile?.poa ? 'Enabled' : 'Standard (TPIN/EDIS for CNC Sell)'}
             </span>
           </div>
-          <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-            POA/DDPI: {profile?.poa ? 'Enabled' : 'Standard (TPIN/EDIS for CNC Sell)'}
-          </span>
-        </div>
-      )}
+        )}
 
-      {/* Sandbox Token Config Box */}
-      {mode === 'sandbox' && (
-        <div
-          className="mb-5 p-4 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs"
-          style={{ background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.25)' }}
-        >
-          <div className="flex-1">
-            <p className="font-bold text-amber-300">Upstox Sandbox Token (Risk-Free Order Testing)</p>
-            <p className="mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-              Orders sent to <code className="text-amber-200">sandbox.upstox.com</code> — zero real money or Static IP needed. Create a Sandbox App in Upstox My Apps to generate a sandbox token.
-            </p>
+        {/* Sandbox Token Config */}
+        {mode === 'sandbox' && (
+          <div
+            className="mb-5 p-5 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs"
+            style={{
+              background: 'linear-gradient(135deg, rgba(245,158,11,0.06), rgba(245,158,11,0.02))',
+              border: '1px solid rgba(245,158,11,0.2)',
+            }}
+          >
+            <div className="flex-1">
+              <p className="font-bold text-amber-300 text-sm">Sandbox Access Token</p>
+              <p className="mt-1 leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+                Orders route to <code className="text-amber-200/80 bg-amber-500/10 px-1.5 py-0.5 rounded">sandbox.upstox.com</code> — no real money or Static IP needed.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 w-full md:w-auto">
+              <input
+                type="password"
+                value={sandboxTokenInput}
+                onChange={(e) => setSandboxTokenInput(e.target.value)}
+                placeholder="Paste sandbox token..."
+                className="trade-input md:w-64"
+              />
+              <button
+                type="button"
+                onClick={saveSandboxTok}
+                className="px-4 py-2.5 rounded-xl font-bold cursor-pointer shrink-0 transition-all hover:brightness-110"
+                style={{ background: '#fbbf24', color: '#000' }}
+              >
+                Save
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-2 w-full md:w-auto">
-            <input
-              type="password"
-              value={sandboxTokenInput}
-              onChange={(e) => setSandboxTokenInput(e.target.value)}
-              placeholder="Paste Sandbox access token..."
-              className="px-3 py-2 rounded-lg text-xs bg-slate-900 border border-slate-700 text-white w-full md:w-64 outline-none"
-            />
+        )}
+
+        {/* Order Feedback Toast */}
+        {orderFeedback && (
+          <div
+            className="mb-5 p-4 rounded-2xl flex items-start justify-between gap-3 text-xs animate-fade-in-up"
+            style={{
+              background: orderFeedback.type === 'success'
+                ? 'linear-gradient(135deg, rgba(0,214,143,0.1), rgba(0,214,143,0.04))'
+                : 'linear-gradient(135deg, rgba(255,77,106,0.1), rgba(255,77,106,0.04))',
+              border: `1px solid ${orderFeedback.type === 'success' ? 'rgba(0,214,143,0.3)' : 'rgba(255,77,106,0.3)'}`,
+            }}
+          >
+            <div className="flex items-start gap-3">
+              {orderFeedback.type === 'success' ? (
+                <CheckCircle2 size={18} style={{ color: '#00d68f', flexShrink: 0, marginTop: 1 }} />
+              ) : (
+                <XCircle size={18} style={{ color: '#ff4d6a', flexShrink: 0, marginTop: 1 }} />
+              )}
+              <div>
+                <p className="font-bold text-white text-sm">{orderFeedback.message}</p>
+                {orderFeedback.hint && <p className="mt-1 text-slate-300">{orderFeedback.hint}</p>}
+              </div>
+            </div>
             <button
               type="button"
-              onClick={saveSandboxTok}
-              className="px-3.5 py-2 rounded-lg font-bold cursor-pointer shrink-0"
-              style={{ background: '#fbbf24', color: '#000' }}
+              onClick={() => setOrderFeedback(null)}
+              className="text-slate-400 hover:text-white cursor-pointer p-1"
             >
-              Save Token
+              ✕
             </button>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Order Execution Feedback Toast */}
-      {orderFeedback && (
-        <div
-          className="mb-5 p-4 rounded-xl flex items-start justify-between gap-3 text-xs animate-fade-in-up"
-          style={{
-            background: orderFeedback.type === 'success' ? 'rgba(0,214,143,0.12)' : 'rgba(255,77,106,0.12)',
-            border: `1px solid ${orderFeedback.type === 'success' ? 'rgba(0,214,143,0.35)' : 'rgba(255,77,106,0.35)'}`,
-          }}
-        >
-          <div className="flex items-start gap-2.5">
-            {orderFeedback.type === 'success' ? (
-              <CheckCircle2 size={16} style={{ color: '#00d68f', flexShrink: 0, marginTop: 1 }} />
-            ) : (
-              <XCircle size={16} style={{ color: '#ff4d6a', flexShrink: 0, marginTop: 1 }} />
-            )}
-            <div>
-              <p className="font-bold text-white">{orderFeedback.message}</p>
-              {orderFeedback.hint && <p className="mt-1 text-slate-300">{orderFeedback.hint}</p>}
+        {/* ═══════════════════════════════════════════
+            ACCOUNT SUMMARY KPIs
+           ═══════════════════════════════════════════ */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          {/* Available Cash */}
+          <div className="trade-kpi-card kpi-accent-blue">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                Available Margin
+              </span>
+              <div className="p-1.5 rounded-lg" style={{ background: 'rgba(59,130,246,0.12)' }}>
+                <Wallet size={14} style={{ color: '#60a5fa' }} />
+              </div>
             </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setOrderFeedback(null)}
-            className="text-slate-400 hover:text-white cursor-pointer"
-          >
-            ✕
-          </button>
-        </div>
-      )}
-
-      {/* ─── Account Summary KPIs ─── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-        <div className="glass-card-static rounded-xl p-4">
-          <div className="flex items-center justify-between text-[10px] uppercase font-bold tracking-wider" style={{ color: 'var(--text-muted)' }}>
-            <span>Available Cash / Margin</span>
-            <Wallet size={13} style={{ color: '#60a5fa' }} />
-          </div>
-          {funds?.available ? (
-            <>
-              <p className="text-xl font-black text-white mt-1.5 tabular-nums">₹{fmtInr(funds.availableMargin)}</p>
-              <p className="text-[10px] mt-0.5 tabular-nums" style={{ color: 'var(--text-muted)' }}>
-                Used Margin: ₹{fmtInr(funds.usedMargin)}
-              </p>
-            </>
-          ) : (
-            <>
-              <p className="text-sm font-bold text-amber-400 mt-2">Settlement Window</p>
-              <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                {funds?.notice || 'Available 5:30 AM – 12:00 AM IST'}
-              </p>
-            </>
-          )}
-        </div>
-
-        <div className="glass-card-static rounded-xl p-4">
-          <div className="flex items-center justify-between text-[10px] uppercase font-bold tracking-wider" style={{ color: 'var(--text-muted)' }}>
-            <span>Demat Holdings</span>
-            <Briefcase size={13} style={{ color: '#a78bfa' }} />
-          </div>
-          <p className="text-xl font-black text-white mt-1.5 tabular-nums">
-            ₹{fmtInr(summary?.totalCurrentValue || 0)}
-          </p>
-          <p
-            className="text-[11px] font-bold mt-0.5 tabular-nums"
-            style={{ color: (summary?.totalHoldingsPnl || 0) >= 0 ? '#00d68f' : '#ff4d6a' }}
-          >
-            {(summary?.totalHoldingsPnl || 0) >= 0 ? '+' : ''}₹{fmtInr(summary?.totalHoldingsPnl || 0)} (
-            {summary?.totalHoldingsPnlPercent || 0}%)
-          </p>
-        </div>
-
-        <div className="glass-card-static rounded-xl p-4">
-          <div className="flex items-center justify-between text-[10px] uppercase font-bold tracking-wider" style={{ color: 'var(--text-muted)' }}>
-            <span>Day Positions P&amp;L</span>
-            <Activity size={13} style={{ color: '#00d68f' }} />
-          </div>
-          {(() => {
-            const totalPosPnl = (summary?.positionsUnrealised || 0) + (summary?.positionsRealised || 0);
-            return (
+            {funds?.available ? (
               <>
-                <p
-                  className="text-xl font-black mt-1.5 tabular-nums"
-                  style={{ color: totalPosPnl >= 0 ? '#00d68f' : '#ff4d6a' }}
-                >
-                  {totalPosPnl >= 0 ? '+' : ''}₹{fmtInr(totalPosPnl)}
-                </p>
-                <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                  Open Positions: {summary?.openPositionsCount || 0}
+                <p className="text-xl font-black text-white tabular-nums">₹{fmtInr(funds.availableMargin)}</p>
+                <p className="text-[10px] mt-1 tabular-nums" style={{ color: 'var(--text-muted)' }}>
+                  Used: ₹{fmtInr(funds.usedMargin)}
                 </p>
               </>
-            );
-          })()}
-        </div>
-
-        <div className="glass-card-static rounded-xl p-4">
-          <div className="flex items-center justify-between text-[10px] uppercase font-bold tracking-wider" style={{ color: 'var(--text-muted)' }}>
-            <span>Today&apos;s Orders &amp; Trades</span>
-            <FileCheck2 size={13} style={{ color: '#fbbf24' }} />
-          </div>
-          <p className="text-xl font-black text-white mt-1.5 tabular-nums">{orders.length} Orders</p>
-          <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
-            Open: {summary?.openOrdersCount || 0} · Executed Trades: {trades.length}
-          </p>
-        </div>
-      </div>
-
-      {/* ─── Main 2-Column Workspace: Account Tables (Left) + Order Ticket (Right) ─── */}
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
-        {/* LEFT COLUMN: Holdings / Positions / Orders / Trades */}
-        <div className="xl:col-span-8 space-y-4">
-          {/* Tabs + Search */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-              {(
-                [
-                  { id: 'holdings', label: `Holdings (${holdings.length})` },
-                  { id: 'positions', label: `Positions (${positions.length})` },
-                  { id: 'orders', label: `Orders (${orders.length})` },
-                  { id: 'trades', label: `Trades (${trades.length})` },
-                  ...(mode === 'sandbox' ? [{ id: 'sandboxLog', label: `Sandbox Log (${sandboxOrders.length})` }] : []),
-                ] as { id: AccountTab; label: string }[]
-              ).map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => setActiveTab(t.id)}
-                  className="px-3.5 py-2 rounded-xl text-xs font-bold shrink-0 cursor-pointer transition-all"
-                  style={{
-                    background: activeTab === t.id ? 'rgba(59,130,246,0.2)' : 'rgba(255,255,255,0.03)',
-                    color: activeTab === t.id ? '#60a5fa' : 'var(--text-muted)',
-                    border: `1px solid ${activeTab === t.id ? 'rgba(59,130,246,0.35)' : 'var(--border-subtle)'}`,
-                  }}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-
-            <div
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs sm:w-52"
-              style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}
-            >
-              <Search size={13} style={{ color: 'var(--text-muted)' }} />
-              <input
-                type="text"
-                placeholder="Filter symbol..."
-                value={tableSearch}
-                onChange={(e) => setTableSearch(e.target.value)}
-                className="bg-transparent outline-none w-full text-white"
-              />
-            </div>
-          </div>
-
-          {/* Account Tables Container */}
-          <div
-            className="rounded-2xl overflow-hidden shadow-xl"
-            style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}
-          >
-            {/* TAB 1: DEMAT HOLDINGS */}
-            {activeTab === 'holdings' && (
-              filteredHoldings.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs text-left">
-                    <thead>
-                      <tr className="border-b" style={{ borderColor: 'var(--border-color)', color: 'var(--text-muted)' }}>
-                        <th className="px-4 py-3 font-semibold uppercase text-[10px]">Stock</th>
-                        <th className="px-3 py-3 text-right font-semibold uppercase text-[10px]">Qty</th>
-                        <th className="px-3 py-3 text-right font-semibold uppercase text-[10px]">Avg Buy</th>
-                        <th className="px-3 py-3 text-right font-semibold uppercase text-[10px]">LTP</th>
-                        <th className="px-3 py-3 text-right font-semibold uppercase text-[10px]">Overall P&amp;L</th>
-                        <th className="px-4 py-3 text-right font-semibold uppercase text-[10px]">Trade</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredHoldings.map((h) => (
-                        <tr key={h.isin + h.symbol} className="border-b hover:bg-white/[0.02]" style={{ borderColor: 'var(--border-subtle)' }}>
-                          <td className="px-4 py-3">
-                            <Link href={`/stock/${h.symbol}`} className="font-bold text-blue-400 hover:underline">
-                              {h.symbol}
-                            </Link>
-                            <p className="text-[10px] truncate max-w-[160px]" style={{ color: 'var(--text-muted)' }}>
-                              {h.companyName}
-                            </p>
-                          </td>
-                          <td className="px-3 py-3 text-right font-mono font-bold text-white">
-                            {h.totalQuantity}
-                            {h.t1Quantity > 0 && <span className="text-[9px] text-amber-400 block">({h.t1Quantity} T1)</span>}
-                          </td>
-                          <td className="px-3 py-3 text-right font-mono text-slate-300">₹{fmtInr(h.averagePrice)}</td>
-                          <td className="px-3 py-3 text-right font-mono">
-                            <span className="font-bold text-white">₹{fmtInr(h.lastPrice)}</span>
-                            <span className="block text-[10px]" style={{ color: h.dayChangePercent >= 0 ? '#00d68f' : '#ff4d6a' }}>
-                              {h.dayChangePercent >= 0 ? '+' : ''}{h.dayChangePercent.toFixed(2)}%
-                            </span>
-                          </td>
-                          <td className="px-3 py-3 text-right font-mono">
-                            <span className="font-bold" style={{ color: h.pnl >= 0 ? '#00d68f' : '#ff4d6a' }}>
-                              {h.pnl >= 0 ? '+' : ''}₹{fmtInr(h.pnl)}
-                            </span>
-                            <span className="block text-[10px]" style={{ color: h.pnl >= 0 ? '#00d68f' : '#ff4d6a' }}>
-                              {h.pnlPercent >= 0 ? '+' : ''}{h.pnlPercent.toFixed(2)}%
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-right whitespace-nowrap">
-                            <div className="inline-flex gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => selectStockForOrder(h.symbol, h.companyName, 'BUY', 1)}
-                                className="px-2 py-1 rounded text-[10px] font-bold cursor-pointer"
-                                style={{ background: 'rgba(0,214,143,0.14)', color: '#00d68f' }}
-                              >
-                                +Buy
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => selectStockForOrder(h.symbol, h.companyName, 'SELL', h.quantity || h.totalQuantity)}
-                                className="px-2 py-1 rounded text-[10px] font-bold cursor-pointer"
-                                style={{ background: 'rgba(255,77,106,0.14)', color: '#ff4d6a' }}
-                              >
-                                Sell
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="p-10 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
-                  <p className="text-2xl mb-2">📦</p>
-                  <p className="font-semibold text-white">No Long-Term Demat Holdings Found</p>
-                  <p className="mt-1">Your Upstox Demat holdings will sync automatically here once settled in your account.</p>
-                </div>
-              )
+            ) : (
+              <>
+                <p className="text-sm font-bold text-amber-400 mt-1">Settlement Window</p>
+                <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                  {funds?.notice || '5:30 AM – 12:00 AM IST'}
+                </p>
+              </>
             )}
+          </div>
 
-            {/* TAB 2: OPEN / DAY POSITIONS */}
-            {activeTab === 'positions' && (
-              <div>
-                {positions.some((p) => p.quantity !== 0) && mode === 'live' && (
-                  <div className="p-3 border-b flex items-center justify-between" style={{ borderColor: 'var(--border-color)' }}>
-                    <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                      {positions.filter((p) => p.quantity !== 0).length} open position(s)
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setShowExitAllConfirm(true)}
-                      className="px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer"
-                      style={{ background: 'rgba(255,77,106,0.15)', color: '#ff4d6a', border: '1px solid rgba(255,77,106,0.3)' }}
+          {/* Demat Holdings */}
+          <div className="trade-kpi-card kpi-accent-purple">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                Holdings Value
+              </span>
+              <div className="p-1.5 rounded-lg" style={{ background: 'rgba(139,92,246,0.12)' }}>
+                <Briefcase size={14} style={{ color: '#a78bfa' }} />
+              </div>
+            </div>
+            <p className="text-xl font-black text-white tabular-nums">
+              ₹{fmtInr(summary?.totalCurrentValue || 0)}
+            </p>
+            <div className="flex items-center gap-1.5 mt-1">
+              {(summary?.totalHoldingsPnl || 0) >= 0 ? (
+                <TrendingUp size={11} className="pnl-positive" />
+              ) : (
+                <TrendingDown size={11} className="pnl-negative" />
+              )}
+              <span
+                className="text-[11px] font-bold tabular-nums"
+                style={{ color: (summary?.totalHoldingsPnl || 0) >= 0 ? '#00d68f' : '#ff4d6a' }}
+              >
+                {(summary?.totalHoldingsPnl || 0) >= 0 ? '+' : ''}₹{fmtInr(summary?.totalHoldingsPnl || 0)} ({summary?.totalHoldingsPnlPercent || 0}%)
+              </span>
+            </div>
+          </div>
+
+          {/* Day Positions P&L */}
+          <div className="trade-kpi-card kpi-accent-green">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                Day P&L
+              </span>
+              <div className="p-1.5 rounded-lg" style={{ background: 'rgba(0,214,143,0.12)' }}>
+                <Activity size={14} style={{ color: '#00d68f' }} />
+              </div>
+            </div>
+            {(() => {
+              const totalPosPnl = (summary?.positionsUnrealised || 0) + (summary?.positionsRealised || 0);
+              return (
+                <>
+                  <p
+                    className="text-xl font-black tabular-nums"
+                    style={{ color: totalPosPnl >= 0 ? '#00d68f' : '#ff4d6a' }}
+                  >
+                    {totalPosPnl >= 0 ? '+' : ''}₹{fmtInr(totalPosPnl)}
+                  </p>
+                  <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>
+                    {summary?.openPositionsCount || 0} open position{(summary?.openPositionsCount || 0) !== 1 ? 's' : ''}
+                  </p>
+                </>
+              );
+            })()}
+          </div>
+
+          {/* Today's Orders */}
+          <div className="trade-kpi-card kpi-accent-amber">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                Orders & Trades
+              </span>
+              <div className="p-1.5 rounded-lg" style={{ background: 'rgba(245,158,11,0.12)' }}>
+                <FileCheck2 size={14} style={{ color: '#fbbf24' }} />
+              </div>
+            </div>
+            <p className="text-xl font-black text-white tabular-nums">{orders.length}</p>
+            <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>
+              {summary?.openOrdersCount || 0} pending · {trades.length} executed
+            </p>
+          </div>
+        </div>
+
+        {/* ═══════════════════════════════════════════
+            MAIN 2-COL WORKSPACE
+           ═══════════════════════════════════════════ */}
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+
+          {/* ─── LEFT: Portfolio Tables ─── */}
+          <div className="xl:col-span-8 space-y-4">
+            {/* Tabs + Search Bar */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                {(
+                  [
+                    { id: 'holdings', label: 'Holdings', count: holdings.length, icon: Briefcase },
+                    { id: 'positions', label: 'Positions', count: positions.length, icon: Activity },
+                    { id: 'orders', label: 'Orders', count: orders.length, icon: FileCheck2 },
+                    { id: 'trades', label: 'Trades', count: trades.length, icon: BarChart3 },
+                    ...(mode === 'sandbox' ? [{ id: 'sandboxLog' as const, label: 'Sandbox', count: sandboxOrders.length, icon: ShieldCheck }] : []),
+                  ] as { id: AccountTab; label: string; count: number; icon: typeof Briefcase }[]
+                ).map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => setActiveTab(t.id)}
+                    className={`trade-tab-btn ${activeTab === t.id ? 'active' : ''}`}
+                  >
+                    {t.label}
+                    <span
+                      className="ml-1.5 px-1.5 py-0.5 rounded-md text-[9px] font-bold"
+                      style={{
+                        background: activeTab === t.id ? 'rgba(59,130,246,0.2)' : 'rgba(255,255,255,0.06)',
+                        color: activeTab === t.id ? '#93c5fd' : 'var(--text-muted)',
+                      }}
                     >
-                      Square Off All Positions
-                    </button>
-                  </div>
-                )}
-                {filteredPositions.length > 0 ? (
+                      {t.count}
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+              <div
+                className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs sm:w-56"
+                style={{ background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.06)' }}
+              >
+                <Search size={14} style={{ color: 'var(--text-muted)' }} />
+                <input
+                  type="text"
+                  placeholder="Filter symbol..."
+                  value={tableSearch}
+                  onChange={(e) => setTableSearch(e.target.value)}
+                  className="bg-transparent outline-none w-full text-white text-xs"
+                />
+              </div>
+            </div>
+
+            {/* Table Container */}
+            <div
+              className="rounded-2xl overflow-hidden"
+              style={{
+                background: 'linear-gradient(165deg, rgba(15,23,42,0.9), rgba(15,23,42,0.6))',
+                border: '1px solid rgba(255,255,255,0.06)',
+                boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+              }}
+            >
+              {/* TAB: HOLDINGS */}
+              {activeTab === 'holdings' && (
+                filteredHoldings.length > 0 ? (
                   <div className="overflow-x-auto">
-                    <table className="w-full text-xs text-left">
+                    <table className="w-full text-left trade-table">
                       <thead>
-                        <tr className="border-b" style={{ borderColor: 'var(--border-color)', color: 'var(--text-muted)' }}>
-                          <th className="px-4 py-3 font-semibold uppercase text-[10px]">Instrument</th>
-                          <th className="px-3 py-3 text-center font-semibold uppercase text-[10px]">Product</th>
-                          <th className="px-3 py-3 text-right font-semibold uppercase text-[10px]">Net Qty</th>
-                          <th className="px-3 py-3 text-right font-semibold uppercase text-[10px]">Avg Price</th>
-                          <th className="px-3 py-3 text-right font-semibold uppercase text-[10px]">LTP</th>
-                          <th className="px-3 py-3 text-right font-semibold uppercase text-[10px]">P&amp;L</th>
-                          <th className="px-4 py-3 text-right font-semibold uppercase text-[10px]">Action</th>
+                        <tr>
+                          <th className="pl-5">Stock</th>
+                          <th className="text-right">Qty</th>
+                          <th className="text-right">Avg Buy</th>
+                          <th className="text-right">LTP</th>
+                          <th className="text-right">P&L</th>
+                          <th className="text-right pr-5">Action</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {filteredPositions.map((p, idx) => (
-                          <tr key={`${p.instrumentToken}-${p.product}-${idx}`} className="border-b" style={{ borderColor: 'var(--border-subtle)' }}>
-                            <td className="px-4 py-3 font-bold text-white">{p.symbol}</td>
-                            <td className="px-3 py-3 text-center">
-                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-300">
-                                {p.product === 'I' ? 'MIS' : p.product === 'D' ? 'CNC' : p.product}
+                        {filteredHoldings.map((h) => (
+                          <tr key={h.isin + h.symbol}>
+                            <td className="pl-5">
+                              <Link href={`/stock/${h.symbol}`} className="font-bold text-blue-400 hover:text-blue-300 transition-colors">
+                                {h.symbol}
+                              </Link>
+                              <p className="text-[10px] truncate max-w-[180px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                                {h.companyName}
+                              </p>
+                            </td>
+                            <td className="text-right font-mono font-bold text-white">
+                              {h.totalQuantity}
+                              {h.t1Quantity > 0 && (
+                                <span className="text-[9px] text-amber-400 block mt-0.5">{h.t1Quantity} T1</span>
+                              )}
+                            </td>
+                            <td className="text-right font-mono text-slate-300">₹{fmtInr(h.averagePrice)}</td>
+                            <td className="text-right">
+                              <span className="font-mono font-bold text-white">₹{fmtInr(h.lastPrice)}</span>
+                              <span
+                                className="block text-[10px] font-semibold mt-0.5"
+                                style={{ color: h.dayChangePercent >= 0 ? '#00d68f' : '#ff4d6a' }}
+                              >
+                                {h.dayChangePercent >= 0 ? '↑' : '↓'} {Math.abs(h.dayChangePercent).toFixed(2)}%
                               </span>
                             </td>
-                            <td className="px-3 py-3 text-right font-mono font-bold text-white">{p.quantity}</td>
-                            <td className="px-3 py-3 text-right font-mono text-slate-300">₹{fmtInr(p.averagePrice || p.buyPrice)}</td>
-                            <td className="px-3 py-3 text-right font-mono text-white">₹{fmtInr(p.lastPrice)}</td>
-                            <td className="px-3 py-3 text-right font-mono font-bold" style={{ color: p.pnl >= 0 ? '#00d68f' : '#ff4d6a' }}>
-                              {p.pnl >= 0 ? '+' : ''}₹{fmtInr(p.pnl)}
+                            <td className="text-right">
+                              <span className="font-mono font-bold" style={{ color: h.pnl >= 0 ? '#00d68f' : '#ff4d6a' }}>
+                                {h.pnl >= 0 ? '+' : ''}₹{fmtInr(h.pnl)}
+                              </span>
+                              <span className="block text-[10px] font-semibold mt-0.5" style={{ color: h.pnl >= 0 ? '#00d68f' : '#ff4d6a' }}>
+                                {h.pnlPercent >= 0 ? '+' : ''}{h.pnlPercent.toFixed(2)}%
+                              </span>
                             </td>
-                            <td className="px-4 py-3 text-right">
-                              {p.quantity !== 0 && (
+                            <td className="text-right pr-5">
+                              <div className="inline-flex gap-1.5">
                                 <button
                                   type="button"
-                                  onClick={() =>
-                                    selectStockForOrder(
-                                      p.symbol,
-                                      p.symbol,
-                                      p.quantity > 0 ? 'SELL' : 'BUY',
-                                      Math.abs(p.quantity)
-                                    )
-                                  }
-                                  className="px-2.5 py-1 rounded text-[10px] font-bold cursor-pointer"
-                                  style={{ background: 'rgba(255,77,106,0.14)', color: '#ff4d6a' }}
+                                  onClick={() => selectStockForOrder(h.symbol, h.companyName, 'BUY', 1)}
+                                  className="px-3 py-1.5 rounded-lg text-[10px] font-bold cursor-pointer transition-all hover:brightness-125"
+                                  style={{ background: 'rgba(0,214,143,0.12)', color: '#00d68f', border: '1px solid rgba(0,214,143,0.2)' }}
                                 >
-                                  Exit
+                                  Buy
                                 </button>
-                              )}
+                                <button
+                                  type="button"
+                                  onClick={() => selectStockForOrder(h.symbol, h.companyName, 'SELL', h.quantity || h.totalQuantity)}
+                                  className="px-3 py-1.5 rounded-lg text-[10px] font-bold cursor-pointer transition-all hover:brightness-125"
+                                  style={{ background: 'rgba(255,77,106,0.12)', color: '#ff4d6a', border: '1px solid rgba(255,77,106,0.2)' }}
+                                >
+                                  Sell
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -1085,756 +1347,901 @@ function LiveTradeContent() {
                     </table>
                   </div>
                 ) : (
-                  <div className="p-10 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
-                    <p className="text-2xl mb-2">⚡</p>
-                    <p className="font-semibold text-white">No Open or Day Positions</p>
-                    <p className="mt-1">Intraday and current-day F&amp;O/Equity positions appear here automatically.</p>
+                  <div className="p-14 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
+                    <div className="empty-state-icon">
+                      <Briefcase size={22} style={{ color: '#60a5fa' }} />
+                    </div>
+                    <p className="font-bold text-white text-sm">No Holdings Found</p>
+                    <p className="mt-2 max-w-xs mx-auto leading-relaxed">Your Demat holdings will appear here once settled in your account.</p>
                   </div>
-                )}
-              </div>
-            )}
+                )
+              )}
 
-            {/* TAB 3: ORDER BOOK */}
-            {activeTab === 'orders' && (
-              filteredOrders.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs text-left">
-                    <thead>
-                      <tr className="border-b" style={{ borderColor: 'var(--border-color)', color: 'var(--text-muted)' }}>
-                        <th className="px-4 py-3 font-semibold uppercase text-[10px]">Symbol / Side</th>
-                        <th className="px-3 py-3 text-right font-semibold uppercase text-[10px]">Qty</th>
-                        <th className="px-3 py-3 text-right font-semibold uppercase text-[10px]">Price</th>
-                        <th className="px-3 py-3 text-center font-semibold uppercase text-[10px]">Status</th>
-                        <th className="px-4 py-3 text-right font-semibold uppercase text-[10px]">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredOrders.map((o) => {
-                        const badge = statusBadgeStyle(o.status);
-                        const canEdit = isOrderEditable(o.status);
-                        return (
-                          <tr key={o.orderId} className="border-b" style={{ borderColor: 'var(--border-subtle)' }}>
-                            <td className="px-4 py-3">
-                              <div className="flex items-center gap-1.5">
+              {/* TAB: POSITIONS */}
+              {activeTab === 'positions' && (
+                <div>
+                  {positions.some((p) => p.quantity !== 0) && mode === 'live' && (
+                    <div className="px-5 py-3 border-b flex items-center justify-between" style={{ borderColor: 'var(--border-color)' }}>
+                      <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                        {positions.filter((p) => p.quantity !== 0).length} open position(s)
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowExitAllConfirm(true)}
+                        className="px-4 py-2 rounded-xl text-xs font-bold cursor-pointer transition-all hover:brightness-110"
+                        style={{ background: 'rgba(255,77,106,0.12)', color: '#ff4d6a', border: '1px solid rgba(255,77,106,0.25)' }}
+                      >
+                        Square Off All
+                      </button>
+                    </div>
+                  )}
+                  {filteredPositions.length > 0 ? (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left trade-table">
+                        <thead>
+                          <tr>
+                            <th className="pl-5">Instrument</th>
+                            <th className="text-center">Product</th>
+                            <th className="text-right">Net Qty</th>
+                            <th className="text-right">Avg Price</th>
+                            <th className="text-right">LTP</th>
+                            <th className="text-right">P&L</th>
+                            <th className="text-right pr-5">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredPositions.map((p, idx) => (
+                            <tr key={`${p.instrumentToken}-${p.product}-${idx}`}>
+                              <td className="pl-5 font-bold text-white">{p.symbol}</td>
+                              <td className="text-center">
                                 <span
-                                  className="text-[9px] font-black px-1.5 py-0.5 rounded"
-                                  style={{
-                                    background: o.transactionType === 'BUY' ? 'rgba(0,214,143,0.16)' : 'rgba(255,77,106,0.16)',
-                                    color: o.transactionType === 'BUY' ? '#00d68f' : '#ff4d6a',
-                                  }}
+                                  className="px-2.5 py-1 rounded-lg text-[10px] font-bold"
+                                  style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-secondary)' }}
                                 >
-                                  {o.transactionType}
+                                  {p.product === 'I' ? 'MIS' : p.product === 'D' ? 'CNC' : p.product}
                                 </span>
-                                <span className="font-bold text-white">{o.symbol}</span>
-                                <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                                  {o.orderType} · {o.product} {o.isAmo ? '· AMO' : ''}
+                              </td>
+                              <td className="text-right font-mono font-bold text-white">{p.quantity}</td>
+                              <td className="text-right font-mono text-slate-300">₹{fmtInr(p.averagePrice || p.buyPrice)}</td>
+                              <td className="text-right font-mono text-white">₹{fmtInr(p.lastPrice)}</td>
+                              <td className="text-right font-mono font-bold" style={{ color: p.pnl >= 0 ? '#00d68f' : '#ff4d6a' }}>
+                                {p.pnl >= 0 ? '+' : ''}₹{fmtInr(p.pnl)}
+                              </td>
+                              <td className="text-right pr-5">
+                                {p.quantity !== 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      selectStockForOrder(p.symbol, p.symbol, p.quantity > 0 ? 'SELL' : 'BUY', Math.abs(p.quantity))
+                                    }
+                                    className="px-3 py-1.5 rounded-lg text-[10px] font-bold cursor-pointer transition-all hover:brightness-125"
+                                    style={{ background: 'rgba(255,77,106,0.12)', color: '#ff4d6a', border: '1px solid rgba(255,77,106,0.2)' }}
+                                  >
+                                    Exit
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="p-14 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
+                      <div className="empty-state-icon">
+                        <Activity size={22} style={{ color: '#60a5fa' }} />
+                      </div>
+                      <p className="font-bold text-white text-sm">No Open Positions</p>
+                      <p className="mt-2 max-w-xs mx-auto leading-relaxed">Intraday and F&O positions appear here automatically.</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* TAB: ORDERS */}
+              {activeTab === 'orders' && (
+                filteredOrders.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left trade-table">
+                      <thead>
+                        <tr>
+                          <th className="pl-5">Symbol / Side</th>
+                          <th className="text-right">Qty</th>
+                          <th className="text-right">Price</th>
+                          <th className="text-center">Status</th>
+                          <th className="text-right pr-5">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredOrders.map((o) => {
+                          const badgeCls = statusBadgeClass(o.status);
+                          const canEdit = isOrderEditable(o.status);
+                          return (
+                            <tr key={o.orderId}>
+                              <td className="pl-5">
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className="text-[9px] font-black px-2 py-0.5 rounded-md"
+                                    style={{
+                                      background: o.transactionType === 'BUY' ? 'rgba(0,214,143,0.12)' : 'rgba(255,77,106,0.12)',
+                                      color: o.transactionType === 'BUY' ? '#00d68f' : '#ff4d6a',
+                                      border: `1px solid ${o.transactionType === 'BUY' ? 'rgba(0,214,143,0.2)' : 'rgba(255,77,106,0.2)'}`,
+                                    }}
+                                  >
+                                    {o.transactionType}
+                                  </span>
+                                  <span className="font-bold text-white">{o.symbol}</span>
+                                  <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                                    {o.orderType} · {o.product} {o.isAmo ? '· AMO' : ''}
+                                  </span>
+                                </div>
+                                <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>
+                                  {o.orderTimestamp} · <span className="font-mono">#{o.orderId}</span>
+                                </p>
+                                {o.statusMessage && (
+                                  <p className="text-[10px] mt-0.5 text-amber-300">{o.statusMessage}</p>
+                                )}
+                              </td>
+                              <td className="text-right font-mono text-white">
+                                {o.filledQuantity}/{o.quantity}
+                              </td>
+                              <td className="text-right font-mono text-slate-200">
+                                ₹{fmtInr(o.averagePrice > 0 ? o.averagePrice : o.price)}
+                              </td>
+                              <td className="text-center">
+                                <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold uppercase inline-block ${badgeCls}`}>
+                                  {o.status}
                                 </span>
-                              </div>
-                              <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                                {o.orderTimestamp} · #{o.orderId}
-                              </p>
-                              {o.statusMessage && (
-                                <p className="text-[10px] mt-0.5 text-amber-300">{o.statusMessage}</p>
-                              )}
-                            </td>
-                            <td className="px-3 py-3 text-right font-mono text-white">
-                              {o.filledQuantity}/{o.quantity}
-                            </td>
-                            <td className="px-3 py-3 text-right font-mono text-slate-200">
-                              ₹{fmtInr(o.averagePrice > 0 ? o.averagePrice : o.price)}
-                            </td>
-                            <td className="px-3 py-3 text-center">
+                              </td>
+                              <td className="text-right pr-5 whitespace-nowrap">
+                                {canEdit ? (
+                                  <div className="inline-flex gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingOrder(o);
+                                        setModQty(String(o.quantity));
+                                        setModPrice(String(o.price || ''));
+                                        setModTrigger(String(o.triggerPrice || ''));
+                                        setModType((o.orderType as OrderType) || 'LIMIT');
+                                      }}
+                                      className="p-2 rounded-lg cursor-pointer transition-all hover:brightness-125"
+                                      style={{ background: 'rgba(59,130,246,0.1)', color: '#60a5fa', border: '1px solid rgba(59,130,246,0.2)' }}
+                                      title="Modify"
+                                    >
+                                      <Edit3 size={12} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCancelOrder(o.orderId)}
+                                      className="p-2 rounded-lg cursor-pointer transition-all hover:brightness-125"
+                                      style={{ background: 'rgba(255,77,106,0.1)', color: '#ff4d6a', border: '1px solid rgba(255,77,106,0.2)' }}
+                                      title="Cancel"
+                                    >
+                                      <Trash2 size={12} />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>—</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="p-14 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
+                    <div className="empty-state-icon">
+                      <FileCheck2 size={22} style={{ color: '#60a5fa' }} />
+                    </div>
+                    <p className="font-bold text-white text-sm">No Orders Today</p>
+                    <p className="mt-2 max-w-xs mx-auto leading-relaxed">Use the order ticket to place your first trade.</p>
+                  </div>
+                )
+              )}
+
+              {/* TAB: TRADES */}
+              {activeTab === 'trades' && (
+                filteredTrades.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left trade-table">
+                      <thead>
+                        <tr>
+                          <th className="pl-5">Symbol</th>
+                          <th className="text-center">Side</th>
+                          <th className="text-right">Qty</th>
+                          <th className="text-right">Fill Price</th>
+                          <th className="text-right pr-5">Time</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredTrades.map((t) => (
+                          <tr key={t.tradeId}>
+                            <td className="pl-5 font-bold text-white">{t.symbol}</td>
+                            <td className="text-center">
                               <span
-                                className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase"
-                                style={{ background: badge.bg, color: badge.color }}
+                                className="text-[10px] font-black px-2 py-0.5 rounded-md"
+                                style={{
+                                  background: t.transactionType === 'BUY' ? 'rgba(0,214,143,0.12)' : 'rgba(255,77,106,0.12)',
+                                  color: t.transactionType === 'BUY' ? '#00d68f' : '#ff4d6a',
+                                }}
                               >
-                                {o.status}
+                                {t.transactionType}
                               </span>
                             </td>
-                            <td className="px-4 py-3 text-right whitespace-nowrap">
-                              {canEdit ? (
-                                <div className="inline-flex gap-1.5">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setEditingOrder(o);
-                                      setModQty(String(o.quantity));
-                                      setModPrice(String(o.price || ''));
-                                      setModTrigger(String(o.triggerPrice || ''));
-                                      setModType((o.orderType as OrderType) || 'LIMIT');
-                                    }}
-                                    className="p-1.5 rounded bg-slate-800 text-blue-400 hover:brightness-125 cursor-pointer"
-                                    title="Modify order"
-                                  >
-                                    <Edit3 size={12} />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleCancelOrder(o.orderId)}
-                                    className="p-1.5 rounded bg-rose-500/15 text-rose-400 hover:brightness-125 cursor-pointer"
-                                    title="Cancel order"
-                                  >
-                                    <Trash2 size={12} />
-                                  </button>
-                                </div>
-                              ) : (
-                                <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>—</span>
-                              )}
+                            <td className="text-right font-mono text-white">{t.quantity}</td>
+                            <td className="text-right font-mono text-white">₹{fmtInr(t.averagePrice)}</td>
+                            <td className="text-right pr-5 text-[10px]" style={{ color: 'var(--text-muted)' }}>{t.exchangeTimestamp}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="p-14 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
+                    <div className="empty-state-icon">
+                      <BarChart3 size={22} style={{ color: '#60a5fa' }} />
+                    </div>
+                    <p className="font-bold text-white text-sm">No Executed Trades</p>
+                    <p className="mt-2">Executed fills appear here automatically.</p>
+                  </div>
+                )
+              )}
+
+              {/* TAB: SANDBOX LOG */}
+              {activeTab === 'sandboxLog' && (
+                sandboxOrders.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left trade-table">
+                      <thead>
+                        <tr>
+                          <th className="pl-5">Order ID</th>
+                          <th>Stock / Side</th>
+                          <th className="text-right">Qty</th>
+                          <th className="text-right">Ref Price</th>
+                          <th className="text-right pr-5">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sandboxOrders.map((o) => (
+                          <tr key={o.orderId}>
+                            <td className="pl-5 font-mono text-[11px] text-amber-300">{o.orderId}</td>
+                            <td>
+                              <span className="font-bold text-white">{o.symbol}</span>{' '}
+                              <span className="font-bold" style={{ color: o.transactionType === 'BUY' ? '#00d68f' : '#ff4d6a' }}>
+                                {o.transactionType}
+                              </span>{' '}
+                              <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>({o.orderType} · {o.timestamp})</span>
+                            </td>
+                            <td className="text-right font-mono text-white">{o.quantity}</td>
+                            <td className="text-right font-mono text-slate-300">₹{fmtInr(o.price)}</td>
+                            <td className="text-right pr-5">
+                              <button
+                                type="button"
+                                onClick={() => handleCancelOrder(o.orderId)}
+                                className="px-3 py-1.5 rounded-lg text-[10px] font-bold cursor-pointer transition-all hover:brightness-125"
+                                style={{ background: 'rgba(255,77,106,0.1)', color: '#ff4d6a', border: '1px solid rgba(255,77,106,0.2)' }}
+                              >
+                                Cancel
+                              </button>
                             </td>
                           </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="p-10 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
-                  <p className="text-2xl mb-2">📋</p>
-                  <p className="font-semibold text-white">No Orders Placed Today</p>
-                  <p className="mt-1">Use the Buy / Sell ticket on the right to place an order via Upstox API.</p>
-                </div>
-              )
-            )}
-
-            {/* TAB 4: EXECUTED TRADES */}
-            {activeTab === 'trades' && (
-              filteredTrades.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs text-left">
-                    <thead>
-                      <tr className="border-b" style={{ borderColor: 'var(--border-color)', color: 'var(--text-muted)' }}>
-                        <th className="px-4 py-3 font-semibold uppercase text-[10px]">Symbol</th>
-                        <th className="px-3 py-3 text-center font-semibold uppercase text-[10px]">Side</th>
-                        <th className="px-3 py-3 text-right font-semibold uppercase text-[10px]">Qty</th>
-                        <th className="px-3 py-3 text-right font-semibold uppercase text-[10px]">Fill Price</th>
-                        <th className="px-4 py-3 text-right font-semibold uppercase text-[10px]">Time</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredTrades.map((t) => (
-                        <tr key={t.tradeId} className="border-b" style={{ borderColor: 'var(--border-subtle)' }}>
-                          <td className="px-4 py-3 font-bold text-white">{t.symbol}</td>
-                          <td className="px-3 py-3 text-center font-bold" style={{ color: t.transactionType === 'BUY' ? '#00d68f' : '#ff4d6a' }}>
-                            {t.transactionType}
-                          </td>
-                          <td className="px-3 py-3 text-right font-mono text-white">{t.quantity}</td>
-                          <td className="px-3 py-3 text-right font-mono text-white">₹{fmtInr(t.averagePrice)}</td>
-                          <td className="px-4 py-3 text-right text-[10px]" style={{ color: 'var(--text-muted)' }}>{t.exchangeTimestamp}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="p-10 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
-                  <p className="text-2xl mb-2">✅</p>
-                  <p className="font-semibold text-white">No Executed Trades Today</p>
-                </div>
-              )
-            )}
-
-            {/* TAB 5: SANDBOX ORDER LOG */}
-            {activeTab === 'sandboxLog' && (
-              sandboxOrders.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs text-left">
-                    <thead>
-                      <tr className="border-b" style={{ borderColor: 'var(--border-color)', color: 'var(--text-muted)' }}>
-                        <th className="px-4 py-3 font-semibold uppercase text-[10px]">Order ID</th>
-                        <th className="px-3 py-3 font-semibold uppercase text-[10px]">Stock / Side</th>
-                        <th className="px-3 py-3 text-right font-semibold uppercase text-[10px]">Qty</th>
-                        <th className="px-3 py-3 text-right font-semibold uppercase text-[10px]">Ref Price</th>
-                        <th className="px-4 py-3 text-right font-semibold uppercase text-[10px]">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sandboxOrders.map((o) => (
-                        <tr key={o.orderId} className="border-b" style={{ borderColor: 'var(--border-subtle)' }}>
-                          <td className="px-4 py-3 font-mono text-[11px] text-amber-300">{o.orderId}</td>
-                          <td className="px-3 py-3">
-                            <span className="font-bold text-white">{o.symbol}</span>{' '}
-                            <span className="font-bold" style={{ color: o.transactionType === 'BUY' ? '#00d68f' : '#ff4d6a' }}>
-                              {o.transactionType}
-                            </span>{' '}
-                            <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>({o.orderType} · {o.timestamp})</span>
-                          </td>
-                          <td className="px-3 py-3 text-right font-mono text-white">{o.quantity}</td>
-                          <td className="px-3 py-3 text-right font-mono text-slate-300">₹{fmtInr(o.price)}</td>
-                          <td className="px-4 py-3 text-right">
-                            <button
-                              type="button"
-                              onClick={() => handleCancelOrder(o.orderId)}
-                              className="px-2 py-1 rounded bg-rose-500/15 text-rose-400 text-[10px] font-bold cursor-pointer"
-                            >
-                              Cancel
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="p-10 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
-                  No Sandbox test orders logged yet.
-                </div>
-              )
-            )}
-          </div>
-        </div>
-
-        {/* RIGHT COLUMN: STICKY BUY / SELL ORDER TICKET */}
-        <div className="xl:col-span-4 xl:sticky xl:top-6">
-          <div
-            className="rounded-2xl p-5 shadow-2xl space-y-4"
-            style={{
-              background: 'var(--bg-card)',
-              border: `1px solid ${side === 'BUY' ? 'rgba(0,214,143,0.3)' : 'rgba(255,77,106,0.3)'}`,
-            }}
-          >
-            {/* Ticket Header + BUY/SELL Switch */}
-            <div className="grid grid-cols-2 rounded-xl overflow-hidden p-1" style={{ background: 'var(--bg-primary)' }}>
-              <button
-                type="button"
-                onClick={() => setSide('BUY')}
-                className="py-2 rounded-lg text-xs font-black tracking-wide cursor-pointer transition-all"
-                style={{
-                  background: side === 'BUY' ? '#00d68f' : 'transparent',
-                  color: side === 'BUY' ? '#000' : 'var(--text-muted)',
-                }}
-              >
-                BUY
-              </button>
-              <button
-                type="button"
-                onClick={() => setSide('SELL')}
-                className="py-2 rounded-lg text-xs font-black tracking-wide cursor-pointer transition-all"
-                style={{
-                  background: side === 'SELL' ? '#ff4d6a' : 'transparent',
-                  color: side === 'SELL' ? '#fff' : 'var(--text-muted)',
-                }}
-              >
-                SELL
-              </button>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="p-14 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
+                    <div className="empty-state-icon">
+                      <ShieldCheck size={22} style={{ color: '#60a5fa' }} />
+                    </div>
+                    <p className="font-bold text-white text-sm">No Sandbox Orders</p>
+                    <p className="mt-2">Test orders will be logged here.</p>
+                  </div>
+                )
+              )}
             </div>
+          </div>
 
-            {/* Symbol Search */}
-            <div className="relative" ref={dropdownRef}>
-              <label className="text-[10px] uppercase font-bold tracking-wider block mb-1" style={{ color: 'var(--text-muted)' }}>
-                Select NSE Stock
-              </label>
-              <div
-                className="flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm"
-                style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)' }}
-              >
-                <Search size={14} style={{ color: 'var(--text-muted)' }} />
-                <input
-                  type="text"
-                  placeholder="Search symbol (e.g. RELIANCE, TMCV, INFY)..."
-                  value={symbolInput}
-                  onChange={(e) => {
-                    setSymbolInput(e.target.value);
-                    if (selectedSymbol) setSelectedSymbol('');
+          {/* ─── RIGHT: Order Ticket ─── */}
+          <div className="xl:col-span-4 xl:sticky xl:top-6">
+            <div
+              className="order-ticket"
+              style={{
+                border: `1px solid ${side === 'BUY' ? 'rgba(0,214,143,0.2)' : 'rgba(255,77,106,0.2)'}`,
+              }}
+            >
+              {/* BUY / SELL Toggle */}
+              <div className="buy-sell-toggle">
+                <button
+                  type="button"
+                  onClick={() => setSide('BUY')}
+                  style={{
+                    background: side === 'BUY' ? 'linear-gradient(135deg, #00d68f, #00b87a)' : 'transparent',
+                    color: side === 'BUY' ? '#000' : 'var(--text-muted)',
+                    boxShadow: side === 'BUY' ? '0 4px 20px rgba(0,214,143,0.3)' : 'none',
                   }}
-                  className="bg-transparent outline-none w-full text-white text-sm font-semibold"
-                />
-                {symbolInput && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSymbolInput('');
-                      setSelectedSymbol('');
-                      setQuote(null);
+                >
+                  <TrendingUp size={14} />
+                  BUY
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSide('SELL')}
+                  style={{
+                    background: side === 'SELL' ? 'linear-gradient(135deg, #ff4d6a, #e63956)' : 'transparent',
+                    color: side === 'SELL' ? '#fff' : 'var(--text-muted)',
+                    boxShadow: side === 'SELL' ? '0 4px 20px rgba(255,77,106,0.3)' : 'none',
+                  }}
+                >
+                  <TrendingDown size={14} />
+                  SELL
+                </button>
+              </div>
+
+              {/* Symbol Search */}
+              <div className="relative mt-5" ref={dropdownRef}>
+                <label className="text-[10px] uppercase font-bold tracking-wider block mb-2" style={{ color: 'var(--text-muted)' }}>
+                  Stock Symbol
+                </label>
+                <div
+                  className="flex items-center gap-2 px-3.5 py-3 rounded-xl text-sm"
+                  style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.08)' }}
+                >
+                  <Search size={14} style={{ color: 'var(--text-muted)' }} />
+                  <input
+                    type="text"
+                    placeholder="Search (e.g. RELIANCE, INFY)..."
+                    value={symbolInput}
+                    onChange={(e) => {
+                      setSymbolInput(e.target.value);
+                      if (selectedSymbol) setSelectedSymbol('');
                     }}
-                    className="text-xs text-slate-400 hover:text-white cursor-pointer"
+                    className="bg-transparent outline-none w-full text-white text-sm font-semibold"
+                  />
+                  {symbolInput && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSymbolInput('');
+                        setSelectedSymbol('');
+                        setQuote(null);
+                      }}
+                      className="text-xs text-slate-400 hover:text-white cursor-pointer"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
+                {showDropdown && searchResults.length > 0 && (
+                  <div
+                    className="absolute top-full left-0 right-0 mt-1.5 rounded-xl overflow-hidden z-50 max-h-56 overflow-y-auto"
+                    style={{
+                      background: 'linear-gradient(165deg, #0f172a, #1e293b)',
+                      border: '1px solid rgba(59,130,246,0.3)',
+                      boxShadow: '0 12px 40px rgba(0,0,0,0.5)',
+                    }}
                   >
-                    ✕
-                  </button>
+                    {searchResults.map((s) => (
+                      <button
+                        type="button"
+                        key={s.symbol}
+                        onClick={() => selectStockForOrder(s.symbol, s.name)}
+                        className="w-full text-left px-4 py-3 hover:bg-blue-500/8 flex items-center justify-between text-xs cursor-pointer border-b transition-colors"
+                        style={{ borderColor: 'rgba(255,255,255,0.03)' }}
+                      >
+                        <div>
+                          <span className="font-bold text-blue-400">{s.symbol}</span>
+                          <span className="ml-2 text-slate-300 truncate">{s.name}</span>
+                        </div>
+                        <span className="text-[9px] uppercase text-slate-500 shrink-0 ml-2">{s.sector}</span>
+                      </button>
+                    ))}
+                  </div>
                 )}
               </div>
 
-              {showDropdown && searchResults.length > 0 && (
+              {/* Live Quote Strip */}
+              {selectedSymbol && (
                 <div
-                  className="absolute top-full left-0 right-0 mt-1 rounded-xl overflow-hidden z-50 shadow-2xl max-h-56 overflow-y-auto"
-                  style={{ background: '#0f172a', border: '1px solid rgba(59,130,246,0.35)' }}
+                  className="rounded-xl p-3.5 flex items-center justify-between mt-4"
+                  style={{
+                    background: 'rgba(0,0,0,0.25)',
+                    border: '1px solid rgba(255,255,255,0.05)',
+                  }}
                 >
-                  {searchResults.map((s) => (
-                    <button
-                      type="button"
-                      key={s.symbol}
-                      onClick={() => selectStockForOrder(s.symbol, s.name)}
-                      className="w-full text-left px-3 py-2 hover:bg-slate-800 flex items-center justify-between text-xs cursor-pointer border-b border-slate-800/70"
-                    >
-                      <div>
-                        <span className="font-bold text-blue-400">{s.symbol}</span>
-                        <span className="ml-2 text-slate-300 truncate">{s.name}</span>
-                      </div>
-                      <span className="text-[9px] uppercase text-slate-500">{s.sector}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Live Quote Strip */}
-            {selectedSymbol && (
-              <div
-                className="rounded-xl p-3 flex items-center justify-between"
-                style={{ background: 'var(--bg-primary)', border: '1px solid rgba(255,255,255,0.05)' }}
-              >
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-black text-white">{selectedSymbol}</span>
-                    <Link href={`/stock/${selectedSymbol}`} className="text-[10px] text-blue-400 hover:underline inline-flex items-center gap-0.5">
-                      Chart <ExternalLink size={9} />
-                    </Link>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-black text-white">{selectedSymbol}</span>
+                      <Link href={`/stock/${selectedSymbol}`} className="text-[10px] text-blue-400 hover:underline inline-flex items-center gap-0.5">
+                        Chart <ExternalLink size={9} />
+                      </Link>
+                    </div>
+                    <p className="text-[10px] truncate max-w-[160px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                      {selectedName}
+                    </p>
                   </div>
-                  <p className="text-[10px] truncate max-w-[160px]" style={{ color: 'var(--text-muted)' }}>
-                    {selectedName}
-                  </p>
+                  <div className="text-right font-mono">
+                    {loadingQuote ? (
+                      <span className="text-xs text-slate-400 animate-pulse">Loading...</span>
+                    ) : quote ? (
+                      <>
+                        <p className="text-lg font-black text-white">₹{fmtInr(quote.price)}</p>
+                        <p
+                          className="text-[10px] font-bold flex items-center justify-end gap-1"
+                          style={{ color: quote.changePercent >= 0 ? '#00d68f' : '#ff4d6a' }}
+                        >
+                          {quote.changePercent >= 0 ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+                          {quote.changePercent >= 0 ? '+' : ''}{quote.changePercent.toFixed(2)}%
+                        </p>
+                      </>
+                    ) : (
+                      <span className="text-xs text-rose-400">Quote N/A</span>
+                    )}
+                  </div>
                 </div>
-                <div className="text-right font-mono">
-                  {loadingQuote ? (
-                    <span className="text-xs text-slate-400 animate-pulse">Fetching LTP...</span>
-                  ) : quote ? (
-                    <>
-                      <p className="text-base font-black text-white">₹{fmtInr(quote.price)}</p>
-                      <p
-                        className="text-[10px] font-bold"
-                        style={{ color: quote.changePercent >= 0 ? '#00d68f' : '#ff4d6a' }}
-                      >
-                        {quote.changePercent >= 0 ? '+' : ''}{quote.changePercent.toFixed(2)}%
-                      </p>
-                    </>
-                  ) : (
-                    <span className="text-xs text-rose-400">Quote N/A</span>
-                  )}
-                </div>
-              </div>
-            )}
+              )}
 
-            {/* Product Type */}
-            <div>
-              <label className="text-[10px] uppercase font-bold tracking-wider block mb-1.5" style={{ color: 'var(--text-muted)' }}>
-                Product
-              </label>
-              <div className="grid grid-cols-3 gap-1.5">
-                {(
-                  [
-                    { id: 'D', label: 'Delivery (CNC)' },
-                    { id: 'I', label: 'Intraday (MIS)' },
-                    { id: 'MTF', label: 'MTF' },
-                  ] as { id: ProductType; label: string }[]
-                ).map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => setProduct(p.id)}
-                    className="py-1.5 px-2 rounded-lg text-[11px] font-bold cursor-pointer transition-all"
-                    style={{
-                      background: product === p.id ? 'rgba(59,130,246,0.2)' : 'var(--bg-primary)',
-                      color: product === p.id ? '#60a5fa' : 'var(--text-muted)',
-                      border: `1px solid ${product === p.id ? 'rgba(59,130,246,0.4)' : 'var(--border-subtle)'}`,
-                    }}
-                  >
-                    {p.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Order Type */}
-            <div>
-              <label className="text-[10px] uppercase font-bold tracking-wider block mb-1.5" style={{ color: 'var(--text-muted)' }}>
-                Order Type
-              </label>
-              <div className="grid grid-cols-4 gap-1.5">
-                {(['MARKET', 'LIMIT', 'SL', 'SL-M'] as OrderType[]).map((ot) => (
-                  <button
-                    key={ot}
-                    type="button"
-                    onClick={() => setOrderType(ot)}
-                    className="py-1.5 rounded-lg text-[11px] font-bold cursor-pointer transition-all"
-                    style={{
-                      background: orderType === ot ? 'rgba(139,92,246,0.22)' : 'var(--bg-primary)',
-                      color: orderType === ot ? '#c4b5fd' : 'var(--text-muted)',
-                      border: `1px solid ${orderType === ot ? 'rgba(139,92,246,0.4)' : 'var(--border-subtle)'}`,
-                    }}
-                  >
-                    {ot}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Quantity + Price Inputs */}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-[10px] uppercase font-bold" style={{ color: 'var(--text-muted)' }}>Qty</label>
-                  {maxAffordableQty > 0 && side === 'BUY' && (
+              {/* Product Type */}
+              <div className="mt-4">
+                <label className="text-[10px] uppercase font-bold tracking-wider block mb-2" style={{ color: 'var(--text-muted)' }}>
+                  Product
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(
+                    [
+                      { id: 'D', label: 'Delivery', sub: 'CNC' },
+                      { id: 'I', label: 'Intraday', sub: 'MIS' },
+                      { id: 'MTF', label: 'MTF', sub: 'Margin' },
+                    ] as { id: ProductType; label: string; sub: string }[]
+                  ).map((p) => (
                     <button
+                      key={p.id}
                       type="button"
-                      onClick={() => setQuantity(String(maxAffordableQty))}
-                      className="text-[9px] text-blue-400 hover:underline cursor-pointer"
+                      onClick={() => setProduct(p.id)}
+                      className="option-chip"
+                      style={{
+                        background: product === p.id ? 'rgba(59,130,246,0.15)' : 'rgba(0,0,0,0.2)',
+                        color: product === p.id ? '#93c5fd' : 'var(--text-muted)',
+                        borderColor: product === p.id ? 'rgba(59,130,246,0.35)' : 'rgba(255,255,255,0.05)',
+                      }}
                     >
-                      Max: {maxAffordableQty}
-                    </button>
-                  )}
-                </div>
-                <input
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={quantity}
-                  onChange={(e) => setQuantity(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl text-sm font-mono font-bold text-white bg-slate-900 border border-slate-700 outline-none"
-                />
-                <div className="flex gap-1 mt-1.5">
-                  {[1, 5, 10, 25].map((add) => (
-                    <button
-                      key={add}
-                      type="button"
-                      onClick={() => setQuantity(String((Math.floor(Number(quantity)) || 0) + add))}
-                      className="flex-1 py-0.5 rounded text-[9px] font-bold cursor-pointer"
-                      style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)' }}
-                    >
-                      +{add}
+                      <span className="block">{p.label}</span>
+                      <span className="text-[9px] opacity-60">{p.sub}</span>
                     </button>
                   ))}
                 </div>
               </div>
 
-              <div>
-                <label className="text-[10px] uppercase font-bold block mb-1" style={{ color: 'var(--text-muted)' }}>
-                  {orderType === 'LIMIT' || orderType === 'SL' ? 'Limit Price (₹)' : 'Market Price (Est)'}
+              {/* Order Type */}
+              <div className="mt-4">
+                <label className="text-[10px] uppercase font-bold tracking-wider block mb-2" style={{ color: 'var(--text-muted)' }}>
+                  Order Type
                 </label>
-                <input
-                  type="number"
-                  step="0.05"
-                  disabled={orderType === 'MARKET' || orderType === 'SL-M'}
-                  value={orderType === 'MARKET' || orderType === 'SL-M' ? (quote?.price ?? '') : limitPrice}
-                  onChange={(e) => setLimitPrice(e.target.value)}
-                  placeholder="0.00"
-                  className="w-full px-3 py-2 rounded-xl text-sm font-mono font-bold text-white bg-slate-900 border border-slate-700 outline-none disabled:opacity-50"
-                />
-              </div>
-            </div>
-
-            {/* Trigger Price (for SL / SL-M) */}
-            {(orderType === 'SL' || orderType === 'SL-M') && (
-              <div>
-                <label className="text-[10px] uppercase font-bold block mb-1" style={{ color: 'var(--text-muted)' }}>
-                  Stop-Loss Trigger Price (₹)
-                </label>
-                <input
-                  type="number"
-                  step="0.05"
-                  value={triggerPrice}
-                  onChange={(e) => setTriggerPrice(e.target.value)}
-                  placeholder="Enter trigger price..."
-                  className="w-full px-3 py-2 rounded-xl text-sm font-mono font-bold text-white bg-slate-900 border border-slate-700 outline-none"
-                />
-              </div>
-            )}
-
-            {/* Validity & AMO Options */}
-            <div className="flex items-center justify-between gap-2 text-xs pt-1">
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] uppercase font-bold" style={{ color: 'var(--text-muted)' }}>Validity:</span>
-                {(['DAY', 'IOC'] as ValidityType[]).map((v) => (
-                  <button
-                    key={v}
-                    type="button"
-                    onClick={() => setValidity(v)}
-                    className="px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer"
-                    style={{
-                      background: validity === v ? 'rgba(59,130,246,0.2)' : 'rgba(255,255,255,0.04)',
-                      color: validity === v ? '#60a5fa' : 'var(--text-muted)',
-                    }}
-                  >
-                    {v}
-                  </button>
-                ))}
-              </div>
-
-              <label className="flex items-center gap-1.5 cursor-pointer text-[11px] font-semibold text-slate-300">
-                <input
-                  type="checkbox"
-                  checked={isAmo}
-                  onChange={(e) => setIsAmo(e.target.checked)}
-                  className="accent-blue-500"
-                />
-                <span>AMO (After-Market)</span>
-              </label>
-            </div>
-
-            {mode === 'live' && (
-              <label className="flex items-center gap-1.5 cursor-pointer text-[11px] text-slate-400">
-                <input
-                  type="checkbox"
-                  checked={sliceOrder}
-                  onChange={(e) => setSliceOrder(e.target.checked)}
-                  className="accent-blue-500"
-                />
-                <span>Auto-slice above exchange freeze qty (Upstox V3)</span>
-              </label>
-            )}
-
-            {/* Pre-trade Margin & Brokerage Preview */}
-            <div
-              className="rounded-xl p-3 space-y-1.5 text-xs"
-              style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-subtle)' }}
-            >
-              <div className="flex justify-between">
-                <span style={{ color: 'var(--text-muted)' }}>Est. Order Value</span>
-                <span className="font-mono font-bold text-white">₹{fmtInr(estOrderValue)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span style={{ color: 'var(--text-muted)' }}>
-                  Brokerage &amp; Taxes {loadingCharges ? '(calc...)' : ''}
-                </span>
-                <span className="font-mono text-slate-300">
-                  {charges ? `₹${fmtInr(charges.charges.total)}` : '—'}
-                </span>
-              </div>
-              {charges && (
-                <div className="text-[10px] flex justify-between pt-1 border-t border-slate-800/80" style={{ color: 'var(--text-muted)' }}>
-                  <span>Brok ₹{charges.charges.brokerage.toFixed(0)} · STT ₹{charges.charges.stt.toFixed(1)}</span>
-                  <span>GST ₹{charges.charges.gst.toFixed(1)} · Stamp ₹{charges.charges.stampDuty.toFixed(1)}</span>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {(['MARKET', 'LIMIT', 'SL', 'SL-M'] as OrderType[]).map((ot) => (
+                    <button
+                      key={ot}
+                      type="button"
+                      onClick={() => setOrderType(ot)}
+                      className="option-chip"
+                      style={{
+                        background: orderType === ot ? 'rgba(139,92,246,0.15)' : 'rgba(0,0,0,0.2)',
+                        color: orderType === ot ? '#c4b5fd' : 'var(--text-muted)',
+                        borderColor: orderType === ot ? 'rgba(139,92,246,0.35)' : 'rgba(255,255,255,0.05)',
+                      }}
+                    >
+                      {ot}
+                    </button>
+                  ))}
                 </div>
-              )}
-            </div>
+              </div>
 
-            {/* Submit Trigger Button (opens Review Confirmation Modal) */}
-            <button
-              type="button"
-              disabled={
-                !selectedSymbol ||
-                qtyNum <= 0 ||
-                (mode === 'live' && !connected) ||
-                (mode === 'sandbox' && !sandboxToken)
-              }
-              onClick={() => setShowConfirmModal(true)}
-              className="w-full py-3 rounded-xl text-sm font-black tracking-wide cursor-pointer transition-all hover:brightness-110 disabled:opacity-40 flex items-center justify-center gap-2"
-              style={{
-                background: side === 'BUY' ? '#00d68f' : '#ff4d6a',
-                color: side === 'BUY' ? '#000' : '#fff',
-              }}
-            >
-              <Zap size={15} />
-              <span>
-                Review {side} {selectedSymbol || 'Order'} {mode === 'sandbox' ? '(Sandbox)' : ''}
-              </span>
-            </button>
-          </div>
-        </div>
-      </div>
+              {/* Quantity + Price */}
+              <div className="grid grid-cols-2 gap-3 mt-4">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-[10px] uppercase font-bold" style={{ color: 'var(--text-muted)' }}>Qty</label>
+                    {maxAffordableQty > 0 && side === 'BUY' && (
+                      <button
+                        type="button"
+                        onClick={() => setQuantity(String(maxAffordableQty))}
+                        className="text-[9px] text-blue-400 hover:underline cursor-pointer font-semibold"
+                      >
+                        Max {maxAffordableQty}
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={quantity}
+                    onChange={(e) => setQuantity(e.target.value)}
+                    className="trade-input"
+                  />
+                  <div className="flex gap-1 mt-2">
+                    {[1, 5, 10, 25].map((add) => (
+                      <button
+                        key={add}
+                        type="button"
+                        onClick={() => setQuantity(String((Math.floor(Number(quantity)) || 0) + add))}
+                        className="qty-chip"
+                      >
+                        +{add}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-      {/* ─── TWO-STEP ORDER CONFIRMATION MODAL ─── */}
-      {showConfirmModal && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div
-            className="w-full max-w-md rounded-2xl p-6 shadow-2xl space-y-4 animate-fade-in-up"
-            style={{ background: '#0f172a', border: '1px solid var(--border-color)' }}
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Lock size={16} style={{ color: mode === 'live' ? '#ff4d6a' : '#fbbf24' }} />
-                <h3 className="text-base font-extrabold text-white">
-                  Confirm {mode === 'live' ? 'LIVE Exchange Order' : 'Sandbox Test Order'}
-                </h3>
+                <div>
+                  <label className="text-[10px] uppercase font-bold block mb-2" style={{ color: 'var(--text-muted)' }}>
+                    {orderType === 'LIMIT' || orderType === 'SL' ? 'Limit Price' : 'Market Price'}
+                  </label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    disabled={orderType === 'MARKET' || orderType === 'SL-M'}
+                    value={orderType === 'MARKET' || orderType === 'SL-M' ? (quote?.price ?? '') : limitPrice}
+                    onChange={(e) => setLimitPrice(e.target.value)}
+                    placeholder="₹ 0.00"
+                    className="trade-input"
+                  />
+                </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setShowConfirmModal(false)}
-                className="text-slate-400 hover:text-white cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
 
-            {mode === 'live' && (
-              <div
-                className="p-3 rounded-lg text-[11px]"
-                style={{ background: 'rgba(255,77,106,0.1)', border: '1px solid rgba(255,77,106,0.3)', color: '#fda4af' }}
-              >
-                <strong>Real Money Warning:</strong> Submitting this order sends a live execution instruction directly to NSE/BSE via your Upstox Demat account.
-              </div>
-            )}
-
-            <div className="rounded-xl p-4 space-y-2 text-xs" style={{ background: 'var(--bg-primary)' }}>
-              <div className="flex justify-between">
-                <span style={{ color: 'var(--text-muted)' }}>Action</span>
-                <span className="font-black" style={{ color: side === 'BUY' ? '#00d68f' : '#ff4d6a' }}>
-                  {side} {qtyNum} × {selectedSymbol}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span style={{ color: 'var(--text-muted)' }}>Order &amp; Product</span>
-                <span className="font-bold text-white">
-                  {orderType} · {product === 'D' ? 'Delivery' : product === 'I' ? 'Intraday' : 'MTF'} · {validity}
-                  {isAmo ? ' (AMO)' : ''}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span style={{ color: 'var(--text-muted)' }}>Price</span>
-                <span className="font-mono font-bold text-white">
-                  {orderType === 'MARKET' || orderType === 'SL-M'
-                    ? `Market (~₹${fmtInr(effectivePrice)})`
-                    : `₹${fmtInr(parseFloat(limitPrice) || 0)}`}
-                </span>
-              </div>
+              {/* Trigger Price */}
               {(orderType === 'SL' || orderType === 'SL-M') && (
-                <div className="flex justify-between">
-                  <span style={{ color: 'var(--text-muted)' }}>Trigger Price</span>
-                  <span className="font-mono font-bold text-amber-300">₹{fmtInr(parseFloat(triggerPrice) || 0)}</span>
+                <div className="mt-3">
+                  <label className="text-[10px] uppercase font-bold block mb-2" style={{ color: 'var(--text-muted)' }}>
+                    Trigger Price (₹)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    value={triggerPrice}
+                    onChange={(e) => setTriggerPrice(e.target.value)}
+                    placeholder="Stop-loss trigger..."
+                    className="trade-input"
+                  />
                 </div>
               )}
-              <div className="flex justify-between pt-2 border-t border-slate-800">
-                <span style={{ color: 'var(--text-muted)' }}>Est. Value + Fees</span>
-                <span className="font-mono font-black text-white">
-                  ₹{fmtInr(estOrderValue + (charges?.charges.total || 0))}
-                </span>
-              </div>
-            </div>
 
-            <div className="flex gap-3 pt-1">
-              <button
-                type="button"
-                onClick={() => setShowConfirmModal(false)}
-                className="flex-1 py-2.5 rounded-xl text-xs font-bold cursor-pointer border border-slate-700 text-slate-300"
+              {/* Validity & AMO */}
+              <div className="flex items-center justify-between gap-2 text-xs mt-4 pt-4" style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] uppercase font-bold" style={{ color: 'var(--text-muted)' }}>Validity</span>
+                  {(['DAY', 'IOC'] as ValidityType[]).map((v) => (
+                    <button
+                      key={v}
+                      type="button"
+                      onClick={() => setValidity(v)}
+                      className="px-2.5 py-1 rounded-lg text-[10px] font-bold cursor-pointer transition-all"
+                      style={{
+                        background: validity === v ? 'rgba(59,130,246,0.15)' : 'rgba(255,255,255,0.03)',
+                        color: validity === v ? '#60a5fa' : 'var(--text-muted)',
+                        border: `1px solid ${validity === v ? 'rgba(59,130,246,0.3)' : 'transparent'}`,
+                      }}
+                    >
+                      {v}
+                    </button>
+                  ))}
+                </div>
+
+                <label className="flex items-center gap-1.5 cursor-pointer text-[11px] font-semibold text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={isAmo}
+                    onChange={(e) => setIsAmo(e.target.checked)}
+                    className="accent-blue-500"
+                  />
+                  AMO
+                </label>
+              </div>
+
+              {mode === 'live' && (
+                <label className="flex items-center gap-1.5 cursor-pointer text-[11px] text-slate-400 mt-2">
+                  <input
+                    type="checkbox"
+                    checked={sliceOrder}
+                    onChange={(e) => setSliceOrder(e.target.checked)}
+                    className="accent-blue-500"
+                  />
+                  Auto-slice above freeze qty
+                </label>
+              )}
+
+              {/* Pre-trade Summary */}
+              <div
+                className="rounded-xl p-4 space-y-2 text-xs mt-4"
+                style={{ background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.05)' }}
               >
-                Cancel
-              </button>
+                <div className="flex justify-between">
+                  <span style={{ color: 'var(--text-muted)' }}>Est. Order Value</span>
+                  <span className="font-mono font-bold text-white">₹{fmtInr(estOrderValue)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span style={{ color: 'var(--text-muted)' }}>
+                    Charges {loadingCharges && <span className="animate-pulse">•••</span>}
+                  </span>
+                  <span className="font-mono text-slate-300">
+                    {charges ? `₹${fmtInr(charges.charges.total)}` : '—'}
+                  </span>
+                </div>
+                {charges && (
+                  <div className="text-[10px] flex justify-between pt-2 border-t border-slate-800/50" style={{ color: 'var(--text-muted)' }}>
+                    <span>Brok ₹{charges.charges.brokerage.toFixed(0)} · STT ₹{charges.charges.stt.toFixed(1)}</span>
+                    <span>GST ₹{charges.charges.gst.toFixed(1)} · Stamp ₹{charges.charges.stampDuty.toFixed(1)}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Submit Button */}
               <button
                 type="button"
-                onClick={handlePlaceOrder}
-                disabled={placingOrder}
-                className="flex-1 py-2.5 rounded-xl text-xs font-black cursor-pointer disabled:opacity-50"
+                disabled={
+                  !selectedSymbol ||
+                  qtyNum <= 0 ||
+                  (mode === 'live' && !connected) ||
+                  (mode === 'sandbox' && !sandboxToken)
+                }
+                onClick={() => setShowConfirmModal(true)}
+                className="w-full py-3.5 rounded-xl text-sm font-black tracking-wide cursor-pointer transition-all hover:brightness-110 hover:shadow-lg disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2 mt-4"
                 style={{
-                  background: side === 'BUY' ? '#00d68f' : '#ff4d6a',
+                  background: side === 'BUY'
+                    ? 'linear-gradient(135deg, #00d68f, #00b87a)'
+                    : 'linear-gradient(135deg, #ff4d6a, #e63956)',
                   color: side === 'BUY' ? '#000' : '#fff',
+                  boxShadow: side === 'BUY'
+                    ? '0 4px 20px rgba(0,214,143,0.25)'
+                    : '0 4px 20px rgba(255,77,106,0.25)',
                 }}
               >
-                {placingOrder ? 'Submitting...' : `Confirm ${side}`}
+                <Zap size={15} />
+                Review {side} {selectedSymbol || 'Order'} {mode === 'sandbox' ? '(Sandbox)' : ''}
               </button>
             </div>
           </div>
         </div>
-      )}
 
-      {/* ─── MODIFY ORDER MODAL ─── */}
-      {editingOrder && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div
-            className="w-full max-w-sm rounded-2xl p-6 shadow-2xl space-y-4"
-            style={{ background: '#0f172a', border: '1px solid var(--border-color)' }}
-          >
-            <h3 className="text-sm font-extrabold text-white">
-              Modify Order · {editingOrder.symbol} (#{editingOrder.orderId})
-            </h3>
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="block text-[10px] uppercase font-bold mb-1 text-slate-400">Order Type</label>
-                <select
-                  value={modType}
-                  onChange={(e) => setModType(e.target.value as OrderType)}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white"
+        {/* ═══════════════════════════════════════════
+            ORDER CONFIRMATION MODAL
+           ═══════════════════════════════════════════ */}
+        {showConfirmModal && (
+          <div className="trade-modal-overlay">
+            <div className="trade-modal space-y-5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div
+                    className="p-2 rounded-xl"
+                    style={{ background: mode === 'live' ? 'rgba(255,77,106,0.12)' : 'rgba(245,158,11,0.12)' }}
+                  >
+                    <Lock size={16} style={{ color: mode === 'live' ? '#ff4d6a' : '#fbbf24' }} />
+                  </div>
+                  <h3 className="text-base font-extrabold text-white">
+                    {mode === 'live' ? 'Confirm Live Order' : 'Confirm Sandbox Order'}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmModal(false)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 cursor-pointer transition-all"
                 >
-                  <option value="LIMIT">LIMIT</option>
-                  <option value="MARKET">MARKET</option>
-                  <option value="SL">SL</option>
-                  <option value="SL-M">SL-M</option>
-                </select>
+                  ✕
+                </button>
               </div>
-              <div>
-                <label className="block text-[10px] uppercase font-bold mb-1 text-slate-400">Quantity</label>
-                <input
-                  type="number"
-                  value={modQty}
-                  onChange={(e) => setModQty(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white"
-                />
-              </div>
-              {(modType === 'LIMIT' || modType === 'SL') && (
-                <div>
-                  <label className="block text-[10px] uppercase font-bold mb-1 text-slate-400">Price (₹)</label>
-                  <input
-                    type="number"
-                    step="0.05"
-                    value={modPrice}
-                    onChange={(e) => setModPrice(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white"
-                  />
-                </div>
-              )}
-              {(modType === 'SL' || modType === 'SL-M') && (
-                <div>
-                  <label className="block text-[10px] uppercase font-bold mb-1 text-slate-400">Trigger Price (₹)</label>
-                  <input
-                    type="number"
-                    step="0.05"
-                    value={modTrigger}
-                    onChange={(e) => setModTrigger(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white"
-                  />
-                </div>
-              )}
-            </div>
-            <div className="flex gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => setEditingOrder(null)}
-                className="flex-1 py-2 rounded-xl text-xs font-bold border border-slate-700 text-slate-300 cursor-pointer"
-              >
-                Close
-              </button>
-              <button
-                type="button"
-                onClick={handleModifyOrder}
-                disabled={submittingModify}
-                className="flex-1 py-2 rounded-xl text-xs font-bold bg-blue-600 text-white cursor-pointer disabled:opacity-50"
-              >
-                {submittingModify ? 'Updating...' : 'Save Changes'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
-      {/* ─── EXIT ALL POSITIONS CONFIRM MODAL ─── */}
-      {showExitAllConfirm && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div
-            className="w-full max-w-sm rounded-2xl p-6 shadow-2xl space-y-4"
-            style={{ background: '#0f172a', border: '1px solid rgba(255,77,106,0.4)' }}
-          >
-            <h3 className="text-base font-extrabold text-rose-400">Square Off All Open Positions?</h3>
-            <p className="text-xs text-slate-300 leading-relaxed">
-              This will submit market exit orders via Upstox (`POST /v2/order/positions/exit`) for all currently open positions in your account.
-            </p>
-            <div className="flex gap-3 pt-1">
-              <button
-                type="button"
-                onClick={() => setShowExitAllConfirm(false)}
-                className="flex-1 py-2 rounded-xl text-xs font-bold border border-slate-700 text-slate-300 cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleExitAllPositions}
-                disabled={exitingAll}
-                className="flex-1 py-2 rounded-xl text-xs font-bold bg-rose-600 text-white cursor-pointer disabled:opacity-50"
-              >
-                {exitingAll ? 'Exiting...' : 'Confirm Exit All'}
-              </button>
+              {mode === 'live' && (
+                <div
+                  className="p-3.5 rounded-xl text-[11px] leading-relaxed"
+                  style={{
+                    background: 'linear-gradient(135deg, rgba(255,77,106,0.08), rgba(255,77,106,0.03))',
+                    border: '1px solid rgba(255,77,106,0.25)',
+                    color: '#fda4af',
+                  }}
+                >
+                  <strong>⚠ Real Money:</strong> This sends a live execution instruction to NSE/BSE via your Upstox account.
+                </div>
+              )}
+
+              <div className="rounded-xl p-4 space-y-2.5 text-xs" style={{ background: 'rgba(0,0,0,0.25)' }}>
+                <div className="flex justify-between">
+                  <span style={{ color: 'var(--text-muted)' }}>Action</span>
+                  <span className="font-black" style={{ color: side === 'BUY' ? '#00d68f' : '#ff4d6a' }}>
+                    {side} {qtyNum} × {selectedSymbol}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span style={{ color: 'var(--text-muted)' }}>Order & Product</span>
+                  <span className="font-bold text-white">
+                    {orderType} · {product === 'D' ? 'Delivery' : product === 'I' ? 'Intraday' : 'MTF'} · {validity}
+                    {isAmo ? ' (AMO)' : ''}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span style={{ color: 'var(--text-muted)' }}>Price</span>
+                  <span className="font-mono font-bold text-white">
+                    {orderType === 'MARKET' || orderType === 'SL-M'
+                      ? `Market (~₹${fmtInr(effectivePrice)})`
+                      : `₹${fmtInr(parseFloat(limitPrice) || 0)}`}
+                  </span>
+                </div>
+                {(orderType === 'SL' || orderType === 'SL-M') && (
+                  <div className="flex justify-between">
+                    <span style={{ color: 'var(--text-muted)' }}>Trigger Price</span>
+                    <span className="font-mono font-bold text-amber-300">₹{fmtInr(parseFloat(triggerPrice) || 0)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between pt-2.5 border-t border-slate-800/50">
+                  <span className="font-semibold" style={{ color: 'var(--text-muted)' }}>Total (incl. fees)</span>
+                  <span className="font-mono font-black text-white text-sm">
+                    ₹{fmtInr(estOrderValue + (charges?.charges.total || 0))}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmModal(false)}
+                  className="flex-1 py-3 rounded-xl text-xs font-bold cursor-pointer transition-all text-slate-300 hover:bg-white/5"
+                  style={{ border: '1px solid rgba(255,255,255,0.1)' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handlePlaceOrder}
+                  disabled={placingOrder}
+                  className="flex-1 py-3 rounded-xl text-xs font-black cursor-pointer disabled:opacity-50 transition-all hover:brightness-110"
+                  style={{
+                    background: side === 'BUY'
+                      ? 'linear-gradient(135deg, #00d68f, #00b87a)'
+                      : 'linear-gradient(135deg, #ff4d6a, #e63956)',
+                    color: side === 'BUY' ? '#000' : '#fff',
+                  }}
+                >
+                  {placingOrder ? 'Submitting...' : `Confirm ${side}`}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
-    </div>
+        )}
+
+        {/* ═══════════════════════════════════════════
+            MODIFY ORDER MODAL
+           ═══════════════════════════════════════════ */}
+        {editingOrder && (
+          <div className="trade-modal-overlay">
+            <div className="trade-modal space-y-5">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-extrabold text-white">
+                  Modify · {editingOrder.symbol}
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setEditingOrder(null)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+              <p className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>
+                Order #{editingOrder.orderId}
+              </p>
+              <div className="space-y-3 text-xs">
+                <div>
+                  <label className="block text-[10px] uppercase font-bold mb-1.5 text-slate-400">Order Type</label>
+                  <select
+                    value={modType}
+                    onChange={(e) => setModType(e.target.value as OrderType)}
+                    className="trade-input"
+                  >
+                    <option value="LIMIT">LIMIT</option>
+                    <option value="MARKET">MARKET</option>
+                    <option value="SL">SL</option>
+                    <option value="SL-M">SL-M</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase font-bold mb-1.5 text-slate-400">Quantity</label>
+                  <input
+                    type="number"
+                    value={modQty}
+                    onChange={(e) => setModQty(e.target.value)}
+                    className="trade-input"
+                  />
+                </div>
+                {(modType === 'LIMIT' || modType === 'SL') && (
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold mb-1.5 text-slate-400">Price (₹)</label>
+                    <input
+                      type="number"
+                      step="0.05"
+                      value={modPrice}
+                      onChange={(e) => setModPrice(e.target.value)}
+                      className="trade-input"
+                    />
+                  </div>
+                )}
+                {(modType === 'SL' || modType === 'SL-M') && (
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold mb-1.5 text-slate-400">Trigger Price (₹)</label>
+                    <input
+                      type="number"
+                      step="0.05"
+                      value={modTrigger}
+                      onChange={(e) => setModTrigger(e.target.value)}
+                      className="trade-input"
+                    />
+                  </div>
+                )}
+              </div>
+              <div className="flex gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setEditingOrder(null)}
+                  className="flex-1 py-2.5 rounded-xl text-xs font-bold cursor-pointer text-slate-300 transition-all hover:bg-white/5"
+                  style={{ border: '1px solid rgba(255,255,255,0.1)' }}
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={handleModifyOrder}
+                  disabled={submittingModify}
+                  className="flex-1 py-2.5 rounded-xl text-xs font-bold cursor-pointer disabled:opacity-50 transition-all hover:brightness-110"
+                  style={{ background: 'linear-gradient(135deg, #3b82f6, #2563eb)', color: '#fff' }}
+                >
+                  {submittingModify ? 'Updating...' : 'Save Changes'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ═══════════════════════════════════════════
+            EXIT ALL POSITIONS MODAL
+           ═══════════════════════════════════════════ */}
+        {showExitAllConfirm && (
+          <div className="trade-modal-overlay">
+            <div className="trade-modal space-y-5" style={{ borderColor: 'rgba(255,77,106,0.3)' }}>
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl" style={{ background: 'rgba(255,77,106,0.12)' }}>
+                  <AlertTriangle size={18} style={{ color: '#ff4d6a' }} />
+                </div>
+                <h3 className="text-base font-extrabold text-rose-400">Square Off All Positions?</h3>
+              </div>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                This submits market exit orders for all open positions via Upstox. This action cannot be undone.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowExitAllConfirm(false)}
+                  className="flex-1 py-2.5 rounded-xl text-xs font-bold cursor-pointer text-slate-300 transition-all hover:bg-white/5"
+                  style={{ border: '1px solid rgba(255,255,255,0.1)' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExitAllPositions}
+                  disabled={exitingAll}
+                  className="flex-1 py-2.5 rounded-xl text-xs font-bold cursor-pointer disabled:opacity-50 transition-all hover:brightness-110"
+                  style={{ background: 'linear-gradient(135deg, #ff4d6a, #e63956)', color: '#fff' }}
+                >
+                  {exitingAll ? 'Exiting...' : 'Confirm Exit All'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -1842,8 +2249,8 @@ export default function LiveTradePage() {
   return (
     <Suspense
       fallback={
-        <div className="p-12 text-center text-sm text-slate-400">
-          Loading Live Trade Terminal...
+        <div className="p-12 text-center text-sm text-slate-400 animate-pulse">
+          Loading Trading Terminal...
         </div>
       }
     >
