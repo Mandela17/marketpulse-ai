@@ -63,10 +63,13 @@ export const SYMBOL_TO_INSTRUMENT_KEY: Record<string, string> = {
   'APOLLOHOSP':  'NSE_EQ|INE437A01024',
   'BIOCON':      'NSE_EQ|INE376G01013',
 
-  // Indices (for option chain)
+  // Indices (for quotes & option chain)
   'NIFTY':       'NSE_INDEX|Nifty 50',
+  'NIFTY50':     'NSE_INDEX|Nifty 50',
+  'SENSEX':      'BSE_INDEX|SENSEX',
   'BANKNIFTY':   'NSE_INDEX|Nifty Bank',
   'FINNIFTY':    'NSE_INDEX|Nifty Fin Service',
+  'INDIAVIX':    'NSE_INDEX|India VIX',
 };
 
 import upstoxMap from './upstoxInstrumentsMap.json';

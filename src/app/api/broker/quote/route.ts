@@ -48,6 +48,8 @@ export async function GET(request: Request) {
     if (!instrumentKey) {
       if (symbol === 'NIFTY' || symbol === 'NIFTY50') {
         instrumentKey = 'NSE_INDEX|Nifty 50';
+      } else if (symbol === 'SENSEX' || symbol === 'BSESN') {
+        instrumentKey = 'BSE_INDEX|SENSEX';
       } else if (symbol === 'BANKNIFTY') {
         instrumentKey = 'NSE_INDEX|Nifty Bank';
       } else {
@@ -70,7 +72,7 @@ export async function GET(request: Request) {
     // Fetch live quote
     const quoteRes = await fetch(
       `https://api.upstox.com/v2/market-quote/quotes?instrument_key=${encodeURIComponent(instrumentKey)}`,
-      { headers }
+      { headers, cache: 'no-store' }
     );
 
     if (!quoteRes.ok) {

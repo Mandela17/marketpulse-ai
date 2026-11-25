@@ -1,12 +1,54 @@
 // API Route: Fetch real market data (NIFTY, SENSEX, stock prices)
 import { NextResponse } from 'next/server';
 export const dynamic = 'force-dynamic';
-import { fetchNifty50, fetchSensex, fetchStockPrice } from '@/lib/stockData';
+import { fetchNifty50, fetchSensex, fetchStockPrice, type IndexData } from '@/lib/stockData';
 import { isMarketOpenNow } from '@/lib/marketHolidays';
+import { getUpstoxToken } from '@/lib/upstoxTokenStore';
 
-// In-memory cache for index data to avoid redundant Yahoo Finance calls
+// Short cache during market hours for live ticks; longer off-hours
 let indexCache: { data: any; timestamp: number } | null = null;
-const INDEX_CACHE_TTL = 2 * 60 * 1000; // 2 minutes
+const LIVE_INDEX_TTL = 15 * 1000;      // 15 seconds while market open
+const CLOSED_INDEX_TTL = 2 * 60 * 1000; // 2 minutes off-hours
+
+function parseUpstoxIndex(q: any): IndexData | null {
+  if (!q || !q.last_price || q.last_price <= 0) return null;
+  const price = Number(q.last_price);
+  const change = typeof q.net_change === 'number' ? q.net_change : 0;
+  const prevClose = price - change;
+  const changePercent =
+    typeof q.percentage_change === 'number' && q.percentage_change !== 0
+      ? q.percentage_change
+      : prevClose > 0 && change !== 0
+        ? Number(((change / prevClose) * 100).toFixed(2))
+        : 0;
+  return { value: price, change: Number(change.toFixed(2)), changePercent };
+}
+
+async function fetchLiveIndicesFromUpstox(): Promise<{ nifty: IndexData | null; sensex: IndexData | null }> {
+  try {
+    const tokenInfo = await getUpstoxToken();
+    if (!tokenInfo?.accessToken) return { nifty: null, sensex: null };
+
+    const keys = 'NSE_INDEX|Nifty 50,BSE_INDEX|SENSEX';
+    const res = await fetch(
+      `https://api.upstox.com/v2/market-quote/quotes?instrument_key=${encodeURIComponent(keys)}`,
+      {
+        headers: { Accept: 'application/json', Authorization: `Bearer ${tokenInfo.accessToken}` },
+        cache: 'no-store',
+        signal: AbortSignal.timeout(5000),
+      }
+    );
+    if (!res.ok) return { nifty: null, sensex: null };
+    const json = await res.json();
+    const map = json?.data || {};
+    return {
+      nifty: parseUpstoxIndex(map['NSE_INDEX:Nifty 50']),
+      sensex: parseUpstoxIndex(map['BSE_INDEX:SENSEX']),
+    };
+  } catch {
+    return { nifty: null, sensex: null };
+  }
+}
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -22,21 +64,26 @@ export async function GET(request: Request) {
       return NextResponse.json(data);
     }
 
+    const marketOpen = isMarketOpenNow();
+    const ttl = marketOpen ? LIVE_INDEX_TTL : CLOSED_INDEX_TTL;
+
     // Return cached index data if still fresh
-    if (indexCache && Date.now() - indexCache.timestamp < INDEX_CACHE_TTL) {
+    if (indexCache && Date.now() - indexCache.timestamp < ttl) {
       return NextResponse.json(indexCache.data);
     }
 
-    // Fetch index data in parallel
+    // Prefer live Upstox quotes for both NIFTY 50 & SENSEX; fill any missing side via Yahoo/Google
+    const upstox = await fetchLiveIndicesFromUpstox();
     const [nifty, sensex] = await Promise.all([
-      fetchNifty50(),
-      fetchSensex(),
+      upstox.nifty && upstox.nifty.value > 0 ? Promise.resolve(upstox.nifty) : fetchNifty50(),
+      upstox.sensex && upstox.sensex.value > 0 ? Promise.resolve(upstox.sensex) : fetchSensex(),
     ]);
 
     const responseData = {
       nifty50: nifty,
       sensex: sensex,
-      marketStatus: isMarketOpenNow() ? 'open' : 'closed',
+      marketStatus: marketOpen ? 'open' : 'closed',
+      source: upstox.nifty || upstox.sensex ? 'upstox' : 'yahoo',
       lastUpdated: new Date().toISOString(),
     };
 

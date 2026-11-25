@@ -92,6 +92,33 @@ export default function Dashboard() {
       })
       .catch(() => {}); // keep localStorage state on network error
 
+    const normalizeUpstoxIndex = (
+      qRes: any,
+      fallback?: { value: number; change: number; changePercent: number }
+    ) => {
+      if (!qRes || qRes.error || !(qRes.price > 0)) return null;
+      const prevClose =
+        qRes.previousClose > 0
+          ? qRes.previousClose
+          : qRes.price && qRes.change
+            ? qRes.price - qRes.change
+            : 0;
+      const cp =
+        qRes.changePercent !== 0
+          ? qRes.changePercent
+          : prevClose > 0
+            ? (qRes.change / prevClose) * 100
+            : 0;
+      if (cp === 0 && fallback && fallback.changePercent !== 0) {
+        return null;
+      }
+      return {
+        value: qRes.price,
+        change: qRes.change,
+        changePercent: Number(cp.toFixed(2)),
+      };
+    };
+
     async function fetchData() {
       try {
         const t = Date.now();
@@ -139,42 +166,29 @@ export default function Dashboard() {
           setMarketData(freshMarketData);
         }
 
-        // If Upstox is connected, try to enrich NIFTY 50 with Upstox real-time data
+        // If Upstox is connected, enrich BOTH NIFTY 50 & SENSEX with Upstox real-time quotes
         if (localConnected && brokerConfig.accessToken) {
           try {
-            const niftyRes = await fetch('/api/broker/quote?symbol=NIFTY', {
-              headers: { 'X-Upstox-Token': brokerConfig.accessToken },
-            }).then(r => r.json());
+            const headers = { 'X-Upstox-Token': brokerConfig.accessToken };
+            const [niftyRes, sensexRes] = await Promise.all([
+              fetch(`/api/broker/quote?symbol=NIFTY&_t=${t}`, { headers, cache: 'no-store' }).then(r => r.json()).catch(() => null),
+              fetch(`/api/broker/quote?symbol=SENSEX&_t=${t}`, { headers, cache: 'no-store' }).then(r => r.json()).catch(() => null),
+            ]);
 
-            if (niftyRes && !niftyRes.error && niftyRes.price > 0) {
-              const prevClose = niftyRes.previousClose > 0 
-                ? niftyRes.previousClose 
-                : (niftyRes.price && niftyRes.change ? niftyRes.price - niftyRes.change : 0);
-              let cp = niftyRes.changePercent !== 0 
-                ? niftyRes.changePercent 
-                : (prevClose > 0 ? (niftyRes.change / prevClose) * 100 : 0);
+            const nextNifty = normalizeUpstoxIndex(niftyRes, freshMarketData?.nifty50);
+            const nextSensex = normalizeUpstoxIndex(sensexRes, freshMarketData?.sensex);
 
-              // If Upstox still returns 0% but Yahoo had valid data, DON'T override
-              const yahooNifty = freshMarketData?.nifty50;
-              if (cp === 0 && yahooNifty && yahooNifty.changePercent !== 0) {
-                // Upstox data is unreliable for percent — keep Yahoo data for NIFTY
-                console.warn('[Dashboard] Upstox changePercent=0, keeping Yahoo data');
-              } else {
-                setMarketData(prev => ({
-                  ...prev,
-                  nifty50: {
-                    value: niftyRes.price,
-                    change: niftyRes.change,
-                    changePercent: Number(cp.toFixed(2)),
-                  },
-                  sensex: prev?.sensex || { value: 0, change: 0, changePercent: 0 },
-                  marketStatus: prev?.marketStatus || 'closed',
-                }));
-                setDataSource('upstox');
-              }
+            if (nextNifty || nextSensex) {
+              freshMarketData = {
+                nifty50: nextNifty || freshMarketData?.nifty50 || { value: 0, change: 0, changePercent: 0 },
+                sensex: nextSensex || freshMarketData?.sensex || { value: 0, change: 0, changePercent: 0 },
+                marketStatus: freshMarketData?.marketStatus || 'closed',
+              };
+              setMarketData(freshMarketData);
+              setDataSource('upstox');
             }
           } catch (upstoxErr) {
-            console.warn('[Dashboard] Upstox NIFTY quote failed:', upstoxErr);
+            console.warn('[Dashboard] Upstox index quotes failed:', upstoxErr);
           }
         }
         // ─── Persist to localStorage for instant next load ───
@@ -192,15 +206,49 @@ export default function Dashboard() {
       }
     }
 
+    async function refreshLiveIndices() {
+      const cfg = getBrokerConfig();
+      const hasLocalToken = cfg.provider === 'upstox' && cfg.connected && !!cfg.accessToken;
+      try {
+        if (hasLocalToken && cfg.accessToken) {
+          const headers = { 'X-Upstox-Token': cfg.accessToken };
+          const ts = Date.now();
+          const [nRes, sRes] = await Promise.all([
+            fetch(`/api/broker/quote?symbol=NIFTY&_t=${ts}`, { headers, cache: 'no-store' }).then(r => r.json()).catch(() => null),
+            fetch(`/api/broker/quote?symbol=SENSEX&_t=${ts}`, { headers, cache: 'no-store' }).then(r => r.json()).catch(() => null),
+          ]);
+          setMarketData(prev => {
+            const nextNifty = normalizeUpstoxIndex(nRes, prev?.nifty50);
+            const nextSensex = normalizeUpstoxIndex(sRes, prev?.sensex);
+            return {
+              nifty50: nextNifty || prev?.nifty50 || { value: 0, change: 0, changePercent: 0 },
+              sensex: nextSensex || prev?.sensex || { value: 0, change: 0, changePercent: 0 },
+              marketStatus: 'open',
+            };
+          });
+          setDataSource('upstox');
+          return;
+        }
+        const mRes = await fetch(`/api/market?_t=${Date.now()}`, { cache: 'no-store' }).then(r => r.json()).catch(() => null);
+        if (mRes && !mRes.error) {
+          setMarketData(mRes);
+        }
+      } catch {}
+    }
+
     fetchData();
 
-    // Only auto-refresh during Indian market hours (Mon-Fri 9:15-15:30 IST, excluding holidays)
-    // Saves unnecessary RSS + Gemini API calls during off-hours
-    let interval: NodeJS.Timeout | undefined;
+    // During market hours: poll live NIFTY & SENSEX every 30s, full news/sentiment every 5m
+    let fullInterval: NodeJS.Timeout | undefined;
+    let indexInterval: NodeJS.Timeout | undefined;
     if (isMarketOpenNow()) {
-      interval = setInterval(fetchData, 5 * 60 * 1000);
+      fullInterval = setInterval(fetchData, 5 * 60 * 1000);
+      indexInterval = setInterval(refreshLiveIndices, 30 * 1000);
     }
-    return () => { if (interval) clearInterval(interval); };
+    return () => {
+      if (fullInterval) clearInterval(fullInterval);
+      if (indexInterval) clearInterval(indexInterval);
+    };
   }, []);
 
   const nifty = marketData?.nifty50 || { value: 0, change: 0, changePercent: 0 };
