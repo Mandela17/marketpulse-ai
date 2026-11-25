@@ -26,7 +26,7 @@ import {
   Info,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
-import { getBrokerConfig } from '@/lib/brokerApi';
+import { getActiveClientUpstoxToken } from '@/lib/brokerApi';
 import { searchStocks } from '@/lib/sectorData';
 import { isMarketOpenNow } from '@/lib/marketHolidays';
 
@@ -204,8 +204,13 @@ function LiveTradeContent() {
 
   // Live Account Portfolio State
   const [connected, setConnected] = useState<boolean>(false);
+  const [tradingConnected, setTradingConnected] = useState<boolean>(false);
+  const [analyticsConnected, setAnalyticsConnected] = useState<boolean>(false);
   const [loadingAccount, setLoadingAccount] = useState<boolean>(true);
   const [accountError, setAccountError] = useState<string | null>(null);
+  const [requestingApproval, setRequestingApproval] = useState<boolean>(false);
+  const [pollingApproval, setPollingApproval] = useState<boolean>(false);
+  const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [profile, setProfile] = useState<any>(null);
   const [staticIp, setStaticIp] = useState<{ configured: boolean; primaryIp: string | null; secondaryIp: string | null } | null>(null);
   const [funds, setFunds] = useState<any>(null);
@@ -273,13 +278,13 @@ function LiveTradeContent() {
   const marketOpen = isMarketOpenNow();
 
   const authHeaders = useCallback((): Record<string, string> => {
-    const brokerConfig = getBrokerConfig();
+    const activeClientTok = getActiveClientUpstoxToken();
     const h: Record<string, string> = {};
     if (session?.access_token) {
       h['Authorization'] = `Bearer ${session.access_token}`;
     }
-    if (brokerConfig.provider === 'upstox' && brokerConfig.accessToken) {
-      h['X-Upstox-Token'] = brokerConfig.accessToken;
+    if (activeClientTok) {
+      h['X-Upstox-Token'] = activeClientTok;
     }
     if (sandboxToken) {
       h['X-Upstox-Sandbox-Token'] = sandboxToken;
@@ -311,10 +316,10 @@ function LiveTradeContent() {
     if (!sym) return;
     setLoadingQuote(true);
     try {
-      const brokerConfig = getBrokerConfig();
+      const activeClientTok = getActiveClientUpstoxToken();
       const headers: Record<string, string> = {};
-      if (brokerConfig.provider === 'upstox' && brokerConfig.accessToken) {
-        headers['X-Upstox-Token'] = brokerConfig.accessToken;
+      if (activeClientTok) {
+        headers['X-Upstox-Token'] = activeClientTok;
       }
       const res = await fetch(`/api/stock?symbol=${encodeURIComponent(sym)}`, { headers });
       const data = await res.json();
@@ -339,19 +344,31 @@ function LiveTradeContent() {
     }
   }, []);
 
-  // Fetch Upstox Account Portfolio (Holdings, Positions, Orders, Trades, Funds, Static IP)
+  // Fetch Upstox Account Portfolio + Status (Holdings, Positions, Orders, Trades, Funds, Static IP)
   const fetchAccount = useCallback(async () => {
     if (!session?.access_token) return;
     setLoadingAccount(true);
     setAccountError(null);
     try {
-      const res = await fetch('/api/upstox/portfolio', { headers: authHeaders() });
+      const [res, statusRes] = await Promise.all([
+        fetch('/api/upstox/portfolio', { headers: authHeaders(), cache: 'no-store' }),
+        fetch('/api/upstox-status', { cache: 'no-store' }).catch(() => null),
+      ]);
+
+      const statusData = statusRes ? await statusRes.json().catch(() => null) : null;
+      if (statusData) {
+        setTradingConnected(Boolean(statusData.tradingConnected ?? statusData.trading?.connected));
+        setAnalyticsConnected(Boolean(statusData.analyticsConnected ?? statusData.analytics?.connected));
+      }
+
       const data = await res.json();
       if (!res.ok || !data.connected) {
         setConnected(false);
         setAccountError(data.error || 'Upstox not connected');
       } else {
         setConnected(true);
+        if (data.tokenKind === 'trading') setTradingConnected(true);
+        if (data.analyticsActive) setAnalyticsConnected(true);
         setProfile(data.profile);
         setStaticIp(data.staticIp);
         setFunds(data.funds);
@@ -367,6 +384,75 @@ function LiveTradeContent() {
       setLoadingAccount(false);
     }
   }, [session?.access_token, authHeaders]);
+
+  const stopApprovalPoll = useCallback(() => {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+    setPollingApproval(false);
+  }, []);
+
+  useEffect(() => {
+    return () => stopApprovalPoll();
+  }, [stopApprovalPoll]);
+
+  const handleRequestPhoneApproval = async () => {
+    if (!session?.access_token) return;
+    setRequestingApproval(true);
+    setOrderFeedback(null);
+    stopApprovalPoll();
+
+    try {
+      const res = await fetch('/api/broker/request-token', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setOrderFeedback({
+          type: 'error',
+          message: data.error || 'Could not send phone approval request',
+          hint: data.hint,
+        });
+        return;
+      }
+
+      setOrderFeedback({
+        type: 'success',
+        message: 'WhatsApp & Upstox App notification sent — tap Approve on your phone.',
+        hint: 'Checking automatically every 3 seconds...',
+      });
+      setPollingApproval(true);
+
+      let attempts = 0;
+      pollTimerRef.current = setInterval(async () => {
+        attempts += 1;
+        try {
+          const stRes = await fetch('/api/upstox-status', { cache: 'no-store' });
+          const st = await stRes.json();
+          if (st?.tradingConnected || st?.trading?.connected) {
+            stopApprovalPoll();
+            setTradingConnected(true);
+            setOrderFeedback({
+              type: 'success',
+              message: 'Approved! Daily Live Trading session is now active until 3:30 AM IST.',
+            });
+            fetchAccount();
+          } else if (st?.pendingRequest?.status === 'rejected') {
+            stopApprovalPoll();
+            setOrderFeedback({ type: 'error', message: 'Approval request was rejected on phone.' });
+          } else if (attempts >= 40) {
+            stopApprovalPoll();
+          }
+        } catch {}
+      }, 3000);
+    } catch (err: any) {
+      setOrderFeedback({ type: 'error', message: err?.message || 'Failed to trigger phone approval' });
+    } finally {
+      setRequestingApproval(false);
+    }
+  };
 
   useEffect(() => {
     fetchAccount();
@@ -693,16 +779,22 @@ function LiveTradeContent() {
     netOrderTotal > funds.availableMargin &&
     estOrderValue > 0;
 
+  const canPlaceLiveOrder = connected && tradingConnected;
+
   const isSubmitDisabled =
     !selectedSymbol ||
     qtyNum <= 0 ||
     ((orderType === 'LIMIT' || orderType === 'SL') && !(parseFloat(limitPrice) > 0)) ||
     ((orderType === 'SL' || orderType === 'SL-M') && !(parseFloat(triggerPrice) > 0)) ||
-    (mode === 'live' && !connected) ||
+    (mode === 'live' && !canPlaceLiveOrder) ||
     (mode === 'sandbox' && !sandboxToken);
 
   const disabledReason = useMemo(() => {
-    if (mode === 'live' && !connected) return 'Connect your Upstox account or switch to Sandbox mode';
+    if (mode === 'live' && !canPlaceLiveOrder) {
+      return analyticsConnected
+        ? '1-Year Analytics active (read-only) — tap 1-Tap Phone Approve above or switch to Sandbox to place orders'
+        : 'Tap 1-Tap Phone Approve, connect on Broker API, or switch to Sandbox mode';
+    }
     if (mode === 'sandbox' && !sandboxToken) return 'Paste & save your Sandbox token above to place test orders';
     if (!selectedSymbol) return 'Select an NSE stock above to review and place an order';
     if (qtyNum <= 0) return 'Enter quantity of at least 1 share';
@@ -713,7 +805,7 @@ function LiveTradeContent() {
       return 'Enter a valid Stop-Loss Trigger Price';
     }
     return null;
-  }, [mode, connected, sandboxToken, selectedSymbol, qtyNum, orderType, limitPrice, triggerPrice]);
+  }, [mode, canPlaceLiveOrder, analyticsConnected, sandboxToken, selectedSymbol, qtyNum, orderType, limitPrice, triggerPrice]);
 
   return (
     <div className="animate-fade-in" style={{ width: '100%', maxWidth: '100%', paddingBottom: '48px' }}>
@@ -801,27 +893,52 @@ function LiveTradeContent() {
       </div>
 
       {/* ─── Connection & Compliance Banners ─── */}
-      {!connected && !loadingAccount && (
+      {mode === 'live' && (!connected || !tradingConnected) && !loadingAccount && (
         <div
           className="glass-card-static p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
           style={{
             marginBottom: '20px',
-            background: 'linear-gradient(135deg, rgba(245,158,11,0.08), rgba(245,158,11,0.03))',
-            border: '1px solid rgba(245,158,11,0.28)',
+            background: analyticsConnected
+              ? 'linear-gradient(135deg, rgba(139,92,246,0.09), rgba(59,130,246,0.04))'
+              : 'linear-gradient(135deg, rgba(245,158,11,0.08), rgba(245,158,11,0.03))',
+            border: `1px solid ${analyticsConnected ? 'rgba(139,92,246,0.3)' : 'rgba(245,158,11,0.28)'}`,
           }}
         >
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl shrink-0" style={{ background: 'rgba(245,158,11,0.14)' }}>
-              <AlertTriangle size={18} style={{ color: '#fbbf24' }} />
+            <div
+              className="p-2 rounded-xl shrink-0"
+              style={{ background: analyticsConnected ? 'rgba(139,92,246,0.14)' : 'rgba(245,158,11,0.14)' }}
+            >
+              <AlertTriangle size={18} style={{ color: analyticsConnected ? '#c4b5fd' : '#fbbf24' }} />
             </div>
             <div>
-              <p className="font-bold text-white text-sm">Upstox Account Not Connected</p>
+              <p className="font-bold text-white text-sm">
+                {analyticsConnected
+                  ? '1-Year Analytics Active (Read-Only) · Daily Trading Approval Needed'
+                  : 'Upstox Live Trading Not Connected'}
+              </p>
               <p className="mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-                {accountError || 'Connect your Upstox token on Broker API to view your Demat holdings, margin, and live orders.'}
+                {accountError ||
+                  (analyticsConnected
+                    ? 'Market quotes & charts are live. Tap Approve on WhatsApp/Upstox App once today to place BUY/SELL orders.'
+                    : 'Approve via WhatsApp/Upstox App in 1 tap, connect on Broker API, or test orders risk-free in Sandbox mode.')}
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={handleRequestPhoneApproval}
+              disabled={requestingApproval || pollingApproval}
+              className="px-3.5 py-2 rounded-xl font-bold text-white cursor-pointer transition-all hover:brightness-110 disabled:opacity-60"
+              style={{ background: 'linear-gradient(135deg, #10b981, #059669)' }}
+            >
+              {requestingApproval
+                ? 'Sending...'
+                : pollingApproval
+                  ? '⏳ Waiting for Phone Tap...'
+                  : '📱 1-Tap Phone Approve'}
+            </button>
             <button
               type="button"
               onClick={() => setMode('sandbox')}
@@ -835,7 +952,7 @@ function LiveTradeContent() {
               className="px-4 py-2 rounded-xl font-bold text-white text-center transition-all hover:brightness-110"
               style={{ background: 'linear-gradient(135deg, #8b5cf6, #6366f1)' }}
             >
-              Connect Upstox →
+              Broker Settings →
             </Link>
           </div>
         </div>

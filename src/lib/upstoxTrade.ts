@@ -7,7 +7,15 @@ import https from 'node:https';
 import { getServiceClient } from './supabase';
 import { isUserApproved, type UserRole } from './userRoles';
 import { getInstrumentKey } from './upstoxInstruments';
-import { getUpstoxToken, invalidateUpstoxTokens } from './upstoxTokenStore';
+import {
+  getUpstoxTradingToken,
+  getUpstoxAnalyticsToken,
+  invalidateUpstoxTokens,
+  isJwtExpired,
+  isLongLivedToken,
+  getJwtIssuedAtMs,
+  type UpstoxTokenKind,
+} from './upstoxTokenStore';
 
 export type TradingMode = 'live' | 'sandbox';
 export type UpstoxTransactionType = 'BUY' | 'SELL';
@@ -93,23 +101,76 @@ export async function verifyAuthorizedTrader(
   }
 }
 
-/** Resolve Upstox bearer token for live or sandbox trading mode. */
-export async function resolveUpstoxToken(
+/**
+ * Resolve Upstox bearer token for live or sandbox trading mode.
+ * Returns both the token and whether it is a daily `trading` token or 1-year `analytics` token.
+ * Ignores expired client JWTs so stale localStorage tokens never shadow fresh server tokens.
+ */
+export async function resolveUpstoxTokenWithMeta(
   request: Request,
-  mode: TradingMode
-): Promise<string | null> {
+  mode: TradingMode,
+  options: { allowAnalytics?: boolean } = {}
+): Promise<{ token: string | null; tokenKind: UpstoxTokenKind | 'sandbox' | null }> {
   if (mode === 'sandbox') {
     const sbTok = request.headers.get('X-Upstox-Sandbox-Token')?.trim();
-    return sbTok && sbTok.length > 10 ? sbTok : null;
+    return {
+      token: sbTok && sbTok.length > 10 ? sbTok : null,
+      tokenKind: sbTok && sbTok.length > 10 ? 'sandbox' : null,
+    };
   }
 
-  const clientTok = request.headers.get('X-Upstox-Token')?.trim();
-  if (clientTok && clientTok !== 'sandbox' && clientTok !== 'mock' && clientTok.length > 10) {
-    return clientTok;
+  const rawClient = request.headers.get('X-Upstox-Token')?.trim() || '';
+  const clientValid =
+    rawClient &&
+    rawClient !== 'sandbox' &&
+    rawClient !== 'mock' &&
+    rawClient.length > 10 &&
+    !isJwtExpired(rawClient)
+      ? rawClient
+      : '';
+
+  const storedTrading = await getUpstoxTradingToken();
+
+  // Prefer the newest valid daily trading token (either fresh client token or webhook/OAuth Supabase token)
+  if (clientValid && !isLongLivedToken(clientValid)) {
+    if (storedTrading) {
+      const clientIat = getJwtIssuedAtMs(clientValid);
+      const serverMs = Math.max(
+        getJwtIssuedAtMs(storedTrading.accessToken),
+        Date.parse(storedTrading.updatedAt) || 0
+      );
+      if (serverMs > clientIat + 5000) {
+        return { token: storedTrading.accessToken, tokenKind: 'trading' };
+      }
+    }
+    return { token: clientValid, tokenKind: 'trading' };
   }
 
-  const stored = await getUpstoxToken();
-  return stored?.accessToken || null;
+  if (storedTrading) {
+    return { token: storedTrading.accessToken, tokenKind: 'trading' };
+  }
+
+  if (options.allowAnalytics) {
+    if (clientValid) {
+      return { token: clientValid, tokenKind: 'analytics' };
+    }
+    const storedAnalytics = await getUpstoxAnalyticsToken();
+    if (storedAnalytics) {
+      return { token: storedAnalytics.accessToken, tokenKind: 'analytics' };
+    }
+  }
+
+  return { token: null, tokenKind: null };
+}
+
+/** Resolve Upstox bearer token string for live or sandbox trading mode. */
+export async function resolveUpstoxToken(
+  request: Request,
+  mode: TradingMode,
+  options: { allowAnalytics?: boolean } = {}
+): Promise<string | null> {
+  const { token } = await resolveUpstoxTokenWithMeta(request, mode, options);
+  return token;
 }
 
 export function resolveUpstoxInstrumentToken(symbol: string, explicitToken?: string): string | null {
@@ -324,7 +385,7 @@ export async function upstoxJsonRequest(
     }
 
     if (status === 401 && mode === 'live') {
-      await invalidateUpstoxTokens();
+      await invalidateUpstoxTokens({ token });
     }
 
     if (!ok) {

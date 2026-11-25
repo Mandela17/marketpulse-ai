@@ -2,7 +2,7 @@
 // Replaces 20+ sequential per-stock fetches (/api/stock + /api/predict) with 1 fast batch call (~100ms).
 
 import { NextResponse } from 'next/server';
-import { getUpstoxToken } from '@/lib/upstoxTokenStore';
+import { resolveReadUpstoxToken } from '@/lib/upstoxTokenStore';
 import { fetchBatchEnrichedQuotes } from '@/lib/batchQuotes';
 import { getStockBySymbol } from '@/lib/sectorData';
 import type { WatchlistStockData } from '@/lib/watchlistCache';
@@ -33,12 +33,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    let upstoxToken =
-      clientToken && clientToken !== 'sandbox' && clientToken !== 'mock' ? clientToken : '';
-    if (!upstoxToken) {
-      const stored = await getUpstoxToken();
-      if (stored?.accessToken) upstoxToken = stored.accessToken;
-    }
+    const upstoxToken = await resolveReadUpstoxToken(clientToken);
 
     const cacheKey = `${upstoxToken ? 'u' : 'y'}:${[...symbols].sort().join(',')}`;
     const cached = watchlistMemCache.get(cacheKey);

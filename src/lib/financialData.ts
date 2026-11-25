@@ -4,7 +4,7 @@
 
 import { toYahooTicker } from './symbolMap';
 import { getInstrumentKey } from './upstoxInstruments';
-import { getUpstoxToken, invalidateUpstoxTokens } from './upstoxTokenStore';
+import { resolveReadUpstoxToken, invalidateUpstoxTokens } from './upstoxTokenStore';
 import { cachedFetch, techCache } from './cache';
 
 export type StatementType = 'consolidated' | 'standalone';
@@ -429,9 +429,9 @@ async function fetchUpstoxFinancials(
     upstoxFundamentalsGet(`${isin}/balance-sheet?type=${effectiveType}&fs=true`, token),
   ]);
 
-  // Invalidate token if Upstox rejects it
+  // Invalidate only this rejected token if Upstox rejects it
   if (qRes.status === 401 || aRes.status === 401) {
-    await invalidateUpstoxTokens();
+    await invalidateUpstoxTokens({ token });
     return null;
   }
 
@@ -777,17 +777,8 @@ export async function fetchFinancialPerformance(
   const statementType: StatementType = options.statementType === 'standalone' ? 'standalone' : 'consolidated';
   const forceRefresh = Boolean(options.forceRefresh);
 
-  // Resolve Upstox access token: client header -> server Supabase store
-  let upstoxToken = options.clientToken && options.clientToken !== 'sandbox' && options.clientToken !== 'mock'
-    ? options.clientToken
-    : '';
-
-  if (!upstoxToken) {
-    const stored = await getUpstoxToken();
-    if (stored?.accessToken) {
-      upstoxToken = stored.accessToken;
-    }
-  }
+  // Resolve Upstox access token: non-expired client header -> server Supabase store (trading or analytics)
+  const upstoxToken = await resolveReadUpstoxToken(options.clientToken);
 
   // 1. Try Upstox Company Fundamentals API first when token is available
   if (upstoxToken) {

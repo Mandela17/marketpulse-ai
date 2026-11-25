@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
-import { saveUpstoxToken } from '@/lib/upstoxTokenStore';
+import {
+  saveUpstoxToken,
+  saveUpstoxAnalyticsToken,
+  parseUpstoxExpiry,
+  updatePendingTokenRequestStatus,
+} from '@/lib/upstoxTokenStore';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,17 +53,27 @@ export async function POST(request: Request) {
         }, { status: response.status });
       }
 
-      // Persist token to Supabase for server-side cron jobs
-      await saveUpstoxToken(
-        data.access_token,
-        data.user_id || 'default',
-        data.expires_at
-      ).catch(err => console.error('[TokenStore] Failed to persist token:', err));
+      const userId = data.user_id || 'default';
+      const tradingExpiry = parseUpstoxExpiry(data.expires_at, data.access_token, 'trading');
+
+      // Persist daily trading token + optional 1-year extended token to Supabase
+      await saveUpstoxToken(data.access_token, userId, tradingExpiry, 'trading').catch((err) =>
+        console.error('[TokenStore] Failed to persist trading token:', err)
+      );
+
+      if (data.extended_token && typeof data.extended_token === 'string') {
+        await saveUpstoxAnalyticsToken(data.extended_token, userId).catch((err) =>
+          console.error('[TokenStore] Failed to persist extended analytics token:', err)
+        );
+      }
+
+      await updatePendingTokenRequestStatus('approved');
 
       return NextResponse.json({
         accessToken: data.access_token,
+        extendedTokenSaved: Boolean(data.extended_token),
         userId: data.user_id,
-        expiresAt: data.expires_at,
+        expiresAt: tradingExpiry,
       });
     }
 

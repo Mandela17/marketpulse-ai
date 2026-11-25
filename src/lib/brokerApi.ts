@@ -70,6 +70,32 @@ export function saveBrokerConfig(config: BrokerConfig): void {
   }
 }
 
+/** True when a stored Upstox JWT in localStorage has passed its `exp` timestamp. */
+export function isClientJwtExpired(token?: string, skewSeconds = 30): boolean {
+  if (!token || token.length < 10) return true;
+  if (token === 'mock' || token === 'sandbox') return false;
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3 || !parts[1]) return false;
+    const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const pad = b64.length % 4 === 0 ? '' : '='.repeat(4 - (b64.length % 4));
+    const payload = JSON.parse(atob(b64 + pad));
+    const exp = Number(payload?.exp);
+    if (!Number.isFinite(exp) || exp <= 0) return false;
+    return exp * 1000 <= Date.now() + skewSeconds * 1000;
+  } catch {
+    return false;
+  }
+}
+
+/** Return client localStorage Upstox token only if valid and unexpired (so expired tokens fall back to server Supabase). */
+export function getActiveClientUpstoxToken(): string {
+  const cfg = getBrokerConfig();
+  if (cfg.provider !== 'upstox' || !cfg.accessToken) return '';
+  if (isClientJwtExpired(cfg.accessToken)) return '';
+  return cfg.accessToken;
+}
+
 // Generate realistic option chain and delivery percentages for a stock
 export function generateMockDerivativesData(symbol: string, spotPrice: number): DerivativesData {
   // Determine strike spacing
@@ -193,15 +219,14 @@ export async function getDerivativesData(symbol: string, spotPrice: number): Pro
 // Returns null if not connected or on any error.
 export async function getUpstoxQuote(symbol: string): Promise<UpstoxQuote | null> {
   const config = getBrokerConfig();
-  if (config.provider !== 'upstox' || !config.connected || !config.accessToken) {
+  if (config.provider !== 'upstox' || !config.connected) {
     return null;
   }
 
   try {
+    const tok = getActiveClientUpstoxToken();
     const res = await fetch(`/api/broker/quote?symbol=${encodeURIComponent(symbol)}`, {
-      headers: {
-        'X-Upstox-Token': config.accessToken,
-      },
+      headers: tok ? { 'X-Upstox-Token': tok } : {},
     });
 
     if (res.ok) {

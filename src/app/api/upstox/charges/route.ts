@@ -33,7 +33,7 @@ export async function GET(request: Request) {
     );
   }
 
-  const token = await resolveUpstoxToken(request, 'live');
+  const token = await resolveUpstoxToken(request, 'live', { allowAnalytics: true });
   if (!token) {
     return NextResponse.json({ error: 'Upstox token unavailable for brokerage calculation.' }, { status: 400 });
   }

@@ -4,19 +4,16 @@
 
 import { NextResponse } from 'next/server';
 import { getInstrumentKey } from '@/lib/upstoxInstruments';
+import { resolveReadUpstoxToken } from '@/lib/upstoxTokenStore';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const symbol = searchParams.get('symbol') || 'NIFTY';
-  const accessToken = request.headers.get('X-Upstox-Token') || '';
+  const rawHeaderToken = request.headers.get('X-Upstox-Token') || '';
 
-  if (!accessToken) {
-    return NextResponse.json({ error: 'No Upstox access token provided' }, { status: 401 });
-  }
-
-  if (accessToken === 'sandbox' || accessToken === 'mock') {
+  if (rawHeaderToken === 'sandbox' || rawHeaderToken === 'mock') {
     const basePrice = symbol.includes('NIFTY') ? 23500 : symbol.includes('SENSEX') ? 77200 : 1500;
     const change = (Math.random() - 0.45) * (basePrice * 0.01);
     const changePercent = (change / basePrice) * 100;
@@ -33,6 +30,11 @@ export async function GET(request: Request) {
       volume: 2400000,
       source: 'upstox',
     });
+  }
+
+  const accessToken = await resolveReadUpstoxToken(rawHeaderToken);
+  if (!accessToken) {
+    return NextResponse.json({ error: 'No valid Upstox access token available' }, { status: 401 });
   }
 
   const headers = {

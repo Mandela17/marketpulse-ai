@@ -1,102 +1,174 @@
-// API route to check Upstox connectivity status
+// API route to check Upstox connectivity status across both:
+// 1. Daily Trading Token (orders + live portfolio + data, expires 3:30 AM IST)
+// 2. 1-Year Analytics Token (continuous read-only quotes, indices, charts & cron)
 // GET /api/upstox-status
 
 import { NextResponse } from 'next/server';
 export const dynamic = 'force-dynamic';
 
+import {
+  getUpstoxTradingToken,
+  getUpstoxAnalyticsToken,
+  getPendingTokenRequest,
+  invalidateUpstoxTokens,
+} from '@/lib/upstoxTokenStore';
 import { getServiceClient } from '@/lib/supabase';
 
-export async function GET() {
+function resolveWebhookUrl(request: Request): string {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  if (appUrl) {
+    return `${appUrl.replace(/\/+$/, '')}/api/broker/webhook`;
+  }
+  return `${new URL(request.url).origin}/api/broker/webhook`;
+}
+
+export async function GET(request: Request) {
+  const webhookUrl = resolveWebhookUrl(request);
+
   try {
-    const db = getServiceClient();
+    const [tradingToken, analyticsToken, pendingRequest] = await Promise.all([
+      getUpstoxTradingToken(),
+      getUpstoxAnalyticsToken(),
+      getPendingTokenRequest(),
+    ]);
 
-    const { data, error } = await db
-      .from('broker_tokens')
-      .select('*')
-      .eq('provider', 'upstox')
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .single();
+    let tradingValid = Boolean(tradingToken);
+    let tradingApiReachable = false;
 
-    if (error || !data) {
-      return NextResponse.json({
-        connected: false,
-        status: 'not_configured',
-        message: 'No Upstox account linked. Connect via Settings → Broker to get live data.',
-        tokenPresent: false,
-        tokenValid: false,
-        expiresAt: null,
-        updatedAt: null,
-      });
-    }
-
-    const expiresAt = new Date(data.expires_at);
-    const isExpired = expiresAt <= new Date();
-    const isValid = data.is_valid && !isExpired;
-
-    if (!isValid) {
-      return NextResponse.json({
-        connected: false,
-        status: 'token_expired',
-        message: `Upstox token expired on ${expiresAt.toLocaleDateString('en-IN', { 
-          day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' 
-        })}. Re-authenticate to resume live data.`,
-        tokenPresent: true,
-        tokenValid: false,
-        expiresAt: data.expires_at,
-        updatedAt: data.updated_at,
-        userId: data.user_id,
-      });
-    }
-
-    // Token exists and is valid — test connectivity with a lightweight API call
-    let apiReachable = false;
-    try {
-      const testRes = await fetch('https://api.upstox.com/v2/user/profile', {
-        headers: {
-          Accept: 'application/json',
-          Authorization: `Bearer ${data.access_token}`,
-        },
-      });
-      apiReachable = testRes.ok;
-      if (!apiReachable && testRes.status === 401) {
-        // Token was rejected — mark invalid
-        await db.from('broker_tokens').update({ is_valid: false }).eq('id', data.id);
-        return NextResponse.json({
-          connected: false,
-          status: 'token_rejected',
-          message: 'Upstox rejected the stored token (401 Unauthorized). Please re-authenticate.',
-          tokenPresent: true,
-          tokenValid: false,
-          expiresAt: data.expires_at,
-          updatedAt: data.updated_at,
+    if (tradingToken) {
+      try {
+        const testRes = await fetch('https://api.upstox.com/v2/user/profile', {
+          headers: {
+            Accept: 'application/json',
+            Authorization: `Bearer ${tradingToken.accessToken}`,
+          },
+          signal: AbortSignal.timeout(5000),
         });
+        tradingApiReachable = testRes.ok;
+        if (testRes.status === 401) {
+          await invalidateUpstoxTokens({ token: tradingToken.accessToken });
+          tradingValid = false;
+        }
+      } catch {
+        // Transient network issue — treat DB token as valid until Upstox rejects
+        tradingApiReachable = true;
       }
-    } catch {
-      // Network issue — token exists but API unreachable
+    }
+
+    let analyticsValid = Boolean(analyticsToken);
+    if (analyticsToken && !tradingValid) {
+      try {
+        const qTest = await fetch(
+          `https://api.upstox.com/v2/market-quote/quotes?instrument_key=${encodeURIComponent('NSE_INDEX|Nifty 50')}`,
+          {
+            headers: {
+              Accept: 'application/json',
+              Authorization: `Bearer ${analyticsToken.accessToken}`,
+            },
+            signal: AbortSignal.timeout(5000),
+          }
+        );
+        if (qTest.status === 401) {
+          await invalidateUpstoxTokens({ token: analyticsToken.accessToken });
+          analyticsValid = false;
+        }
+      } catch {
+        // Keep DB validity state on transient error
+      }
+    }
+
+    // Check most recent expired trading row only to display helpful expiry message when disconnected
+    let expiredHint: { expiresAt: string; userId: string; updatedAt: string } | null = null;
+    if (!tradingValid) {
+      try {
+        const db = getServiceClient();
+        const { data: lastRow } = await db
+          .from('broker_tokens')
+          .select('expires_at, user_id, updated_at')
+          .eq('provider', 'upstox')
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .single();
+        if (lastRow?.expires_at) {
+          expiredHint = {
+            expiresAt: lastRow.expires_at,
+            userId: lastRow.user_id,
+            updatedAt: lastRow.updated_at,
+          };
+        }
+      } catch {}
+    }
+
+    const anyConnected = tradingValid || analyticsValid;
+    const activeToken = tradingValid ? tradingToken : analyticsValid ? analyticsToken : null;
+
+    let status = 'not_configured';
+    let message = 'No Upstox account linked. Connect via Broker API to enable live data and trading.';
+
+    if (tradingValid) {
+      status = tradingApiReachable ? 'live' : 'token_valid_api_unreachable';
+      message = analyticsValid
+        ? 'Upstox Live Trading & 1-Year Analytics tokens are both active.'
+        : 'Upstox Live Trading is active (expires 3:30 AM IST).';
+    } else if (analyticsValid) {
+      status = 'analytics_only';
+      message =
+        '1-Year Analytics token is active for live quotes & charts. Tap Approve on WhatsApp/Upstox App when ready for live trading.';
+    } else if (expiredHint) {
+      status = 'token_expired';
+      const expStr = new Date(expiredHint.expiresAt).toLocaleDateString('en-IN', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+      message = `Daily trading token expired on ${expStr}. Request 1-tap approval or re-authenticate.`;
     }
 
     return NextResponse.json({
-      connected: true,
-      status: apiReachable ? 'live' : 'token_valid_api_unreachable',
-      message: apiReachable
-        ? 'Upstox is connected and live. All stock & shareholding data is real-time.'
-        : 'Token is valid but Upstox API is temporarily unreachable. Data may fall back.',
-      tokenPresent: true,
-      tokenValid: true,
-      expiresAt: data.expires_at,
-      updatedAt: data.updated_at,
-      userId: data.user_id,
+      connected: anyConnected,
+      tradingConnected: tradingValid,
+      analyticsConnected: analyticsValid,
+      mode: tradingValid ? 'live_trading' : analyticsValid ? 'analytics_only' : 'disconnected',
+      status,
+      message,
+      tokenPresent: Boolean(anyConnected || expiredHint),
+      tokenValid: anyConnected,
+      expiresAt: tradingValid
+        ? tradingToken?.expiresAt
+        : analyticsValid
+          ? analyticsToken?.expiresAt
+          : expiredHint?.expiresAt || null,
+      updatedAt: activeToken?.updatedAt || expiredHint?.updatedAt || null,
+      userId: activeToken?.userId || expiredHint?.userId || null,
+      trading: {
+        connected: tradingValid,
+        userId: tradingToken?.userId || expiredHint?.userId || null,
+        expiresAt: tradingToken?.expiresAt || expiredHint?.expiresAt || null,
+        updatedAt: tradingToken?.updatedAt || null,
+      },
+      analytics: {
+        connected: analyticsValid,
+        userId: analyticsToken?.userId || null,
+        expiresAt: analyticsToken?.expiresAt || null,
+        updatedAt: analyticsToken?.updatedAt || null,
+      },
+      pendingRequest,
+      webhookUrl,
     });
   } catch (err: any) {
     return NextResponse.json({
       connected: false,
+      tradingConnected: false,
+      analyticsConnected: false,
       status: 'error',
       message: `Error checking Upstox status: ${err.message}`,
       tokenPresent: false,
       tokenValid: false,
       expiresAt: null,
       updatedAt: null,
+      webhookUrl,
     });
   }
 }

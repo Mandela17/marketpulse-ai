@@ -1,71 +1,93 @@
-// API Route: Manage Upstox access token server-side
-// Allows admins to store/retrieve/validate access tokens without client-side OAuth
-// Tokens can be generated from the Upstox Developer Dashboard → "Generate" button
+// API Route: Manage Upstox access tokens server-side (Daily Trading + 1-Year Analytics)
+// Supports storing either a daily trading token (expires 3:30 AM IST) or a 1-year Analytics token.
 
 import { NextResponse } from 'next/server';
-import { saveUpstoxToken, getUpstoxToken, invalidateUpstoxTokens } from '@/lib/upstoxTokenStore';
+import {
+  saveUpstoxToken,
+  getUpstoxTradingToken,
+  getUpstoxAnalyticsToken,
+  invalidateUpstoxTokens,
+  isLongLivedToken,
+  parseUpstoxExpiry,
+  type UpstoxTokenKind,
+} from '@/lib/upstoxTokenStore';
 
 export const dynamic = 'force-dynamic';
 
-// GET: Check if a valid server-side token exists
-export async function GET(request: Request) {
+// GET: Check server-side trading and analytics token status
+export async function GET() {
   try {
-    const token = await getUpstoxToken();
+    const [trading, analytics] = await Promise.all([
+      getUpstoxTradingToken(),
+      getUpstoxAnalyticsToken(),
+    ]);
 
-    if (token) {
-      // Verify the token is still valid by making a lightweight Upstox API call
-      let verified = false;
-      try {
-        const testRes = await fetch('https://api.upstox.com/v2/user/get-funds-and-margin', {
-          headers: {
-            'Accept': 'application/json',
-            'Authorization': `Bearer ${token.accessToken}`,
-          },
-        });
-        verified = testRes.ok || testRes.status === 403; // 403 = valid token but insufficient permissions (still valid)
-        if (testRes.status === 401) {
-          await invalidateUpstoxTokens();
-          return NextResponse.json({
-            connected: false,
-            reason: 'Token expired or revoked by Upstox',
-          });
-        }
-      } catch {
-        // Network error — assume token might still be valid
-        verified = true;
-      }
-
+    const active = trading || analytics;
+    if (!active) {
       return NextResponse.json({
-        connected: true,
-        verified,
-        userId: token.userId,
-        expiresAt: token.expiresAt,
-        updatedAt: token.updatedAt,
+        connected: false,
+        tradingConnected: false,
+        analyticsConnected: false,
+        reason: 'No stored token',
       });
     }
 
-    return NextResponse.json({ connected: false, reason: 'No stored token' });
+    // Verify active trading token if present (analytics token validated via market-quote fallback)
+    if (trading) {
+      try {
+        const testRes = await fetch('https://api.upstox.com/v2/user/get-funds-and-margin', {
+          headers: { Accept: 'application/json', Authorization: `Bearer ${trading.accessToken}` },
+        });
+        if (testRes.status === 401) {
+          await invalidateUpstoxTokens({ token: trading.accessToken });
+          if (!analytics) {
+            return NextResponse.json({
+              connected: false,
+              tradingConnected: false,
+              analyticsConnected: false,
+              reason: 'Trading token expired or revoked by Upstox',
+            });
+          }
+        }
+      } catch {
+        // Network error — keep existing DB validity state
+      }
+    }
+
+    return NextResponse.json({
+      connected: true,
+      verified: true,
+      tradingConnected: Boolean(trading),
+      analyticsConnected: Boolean(analytics),
+      userId: active.userId,
+      expiresAt: active.expiresAt,
+      updatedAt: active.updatedAt,
+    });
   } catch (err: any) {
     return NextResponse.json({ connected: false, error: err.message }, { status: 500 });
   }
 }
 
-// POST: Store an access token (generated from Upstox Developer Dashboard)
+// POST: Store an Upstox token (daily trading OR 1-year analytics)
 export async function POST(request: Request) {
   try {
-    const { accessToken, source } = await request.json();
+    const { accessToken, source, tokenType } = await request.json();
 
-    if (!accessToken || typeof accessToken !== 'string' || accessToken.length < 10) {
+    if (!accessToken || typeof accessToken !== 'string' || accessToken.trim().length < 10) {
       return NextResponse.json({ error: 'Valid access token required' }, { status: 400 });
     }
 
-    // Validate token with Upstox API before storing
+    const cleanToken = accessToken.trim();
+    const detectedLongLived = isLongLivedToken(cleanToken);
+    const effectiveType: UpstoxTokenKind =
+      tokenType === 'analytics' || detectedLongLived ? 'analytics' : 'trading';
+
     let userId = 'admin';
     try {
       const profileRes = await fetch('https://api.upstox.com/v2/user/profile', {
         headers: {
-          'Accept': 'application/json',
-          'Authorization': `Bearer ${accessToken}`,
+          Accept: 'application/json',
+          Authorization: `Bearer ${cleanToken}`,
         },
       });
 
@@ -76,18 +98,22 @@ export async function POST(request: Request) {
       if (profileRes.ok) {
         const profile = await profileRes.json();
         userId = profile.data?.user_id || profile.data?.email || 'admin';
+      } else if (profileRes.status === 403 && effectiveType === 'analytics') {
+        // Analytics tokens without static IP may get 403 on user/profile while market-quote works
+        const quoteCheck = await fetch(
+          `https://api.upstox.com/v2/market-quote/quotes?instrument_key=${encodeURIComponent('NSE_INDEX|Nifty 50')}`,
+          { headers: { Accept: 'application/json', Authorization: `Bearer ${cleanToken}` } }
+        );
+        if (quoteCheck.status === 401) {
+          return NextResponse.json({ error: 'Invalid or expired Analytics token' }, { status: 401 });
+        }
       }
     } catch {
-      // Can't verify — store anyway
+      // Transient Upstox network error — allow save
     }
 
-    // Upstox tokens expire at end of trading day (~3:30 PM IST next day)
-    // Set expiry to tomorrow 6 AM IST to be safe
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(0, 30, 0, 0); // 6 AM IST = 00:30 UTC
-
-    const saved = await saveUpstoxToken(accessToken, userId, tomorrow.toISOString());
+    const expiryIso = parseUpstoxExpiry(undefined, cleanToken, effectiveType);
+    const saved = await saveUpstoxToken(cleanToken, userId, expiryIso, effectiveType);
 
     if (!saved) {
       return NextResponse.json({ error: 'Failed to store token in database' }, { status: 500 });
@@ -95,21 +121,42 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
+      tokenType: effectiveType,
+      autoDetectedAnalytics: tokenType !== 'analytics' && detectedLongLived,
       userId,
-      expiresAt: tomorrow.toISOString(),
+      expiresAt: expiryIso,
       source: source || 'manual',
-      message: 'Token stored. All server-side market data will now use Upstox.',
+      message:
+        effectiveType === 'analytics'
+          ? '1-year Analytics token stored. Market quotes, NIFTY/SENSEX & charts stay connected continuously.'
+          : 'Trading token stored (valid until 3:30 AM IST).',
     });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
 
-// DELETE: Disconnect — invalidate all stored tokens
-export async function DELETE() {
+// DELETE: Disconnect trading, analytics, or all tokens (?scope=trading|analytics|all)
+export async function DELETE(request: Request) {
   try {
-    await invalidateUpstoxTokens();
-    return NextResponse.json({ success: true, message: 'All Upstox tokens invalidated' });
+    const { searchParams } = new URL(request.url);
+    const scopeParam = searchParams.get('scope');
+    const scope =
+      scopeParam === 'trading' || scopeParam === 'analytics' || scopeParam === 'all'
+        ? scopeParam
+        : 'all';
+
+    await invalidateUpstoxTokens(scope);
+    return NextResponse.json({
+      success: true,
+      scope,
+      message:
+        scope === 'trading'
+          ? 'Upstox daily trading session disconnected (1-year Analytics preserved if set).'
+          : scope === 'analytics'
+            ? 'Upstox 1-year Analytics token disconnected.'
+            : 'All Upstox tokens invalidated.',
+    });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

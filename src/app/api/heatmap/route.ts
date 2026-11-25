@@ -2,7 +2,7 @@
 // Uses shared batch quote engine (1 Upstox API call + Yahoo 5d fallback + Supabase DB enrichment)
 
 import { NextResponse } from 'next/server';
-import { getUpstoxToken } from '@/lib/upstoxTokenStore';
+import { resolveReadUpstoxToken } from '@/lib/upstoxTokenStore';
 import { fetchBatchEnrichedQuotes } from '@/lib/batchQuotes';
 import {
   NIFTY_HEATMAP_CONSTITUENTS,
@@ -22,12 +22,7 @@ export async function GET(request: Request) {
   const clientToken = request.headers.get('X-Upstox-Token') || '';
 
   try {
-    let upstoxToken =
-      clientToken && clientToken !== 'sandbox' && clientToken !== 'mock' ? clientToken : '';
-    if (!upstoxToken) {
-      const stored = await getUpstoxToken();
-      if (stored?.accessToken) upstoxToken = stored.accessToken;
-    }
+    const upstoxToken = await resolveReadUpstoxToken(clientToken);
 
     if (
       !forceRefresh &&

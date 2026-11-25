@@ -255,7 +255,7 @@ export async function fetchBatchEnrichedQuotes(
   ]);
 
   if (upstoxResult.unauthorized) {
-    await invalidateUpstoxTokens();
+    await invalidateUpstoxTokens({ token: upstoxToken });
   }
 
   const quoteMap = new Map<string, BatchQuoteData>(upstoxResult.quotes);

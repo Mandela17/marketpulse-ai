@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic';
 import { fetchStockPrice } from '@/lib/stockData';
 import { computeRealTechnicals } from '@/lib/technicalAnalysis';
 import { getInstrumentKey } from '@/lib/upstoxInstruments';
-import { getUpstoxToken } from '@/lib/upstoxTokenStore';
+import { resolveReadUpstoxToken } from '@/lib/upstoxTokenStore';
 import { quoteCache, QUOTE_TTL, techCache, TECH_TTL } from '@/lib/cache';
 
 export async function GET(request: Request) {
@@ -17,18 +17,9 @@ export async function GET(request: Request) {
   }
   
   try {
-    // ─── Resolve Upstox token: client-provided OR server-side stored ───
-    let upstoxToken = clientToken;
-    let tokenSource = 'client';
-    
-    if (!upstoxToken || upstoxToken === 'sandbox' || upstoxToken === 'mock') {
-      // Try server-side stored token (from Supabase)
-      const storedToken = await getUpstoxToken();
-      if (storedToken) {
-        upstoxToken = storedToken.accessToken;
-        tokenSource = 'server';
-      }
-    }
+    // ─── Resolve Upstox token: valid client-provided OR server-side stored ───
+    const upstoxToken = await resolveReadUpstoxToken(clientToken);
+    const tokenSource = upstoxToken && upstoxToken === clientToken ? 'client' : 'server';
 
     // ─── Try Upstox for real-time quote ───
     let upstoxQuote: any = null;

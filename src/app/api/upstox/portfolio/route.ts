@@ -4,7 +4,7 @@
 import { NextResponse } from 'next/server';
 import {
   verifyAuthorizedTrader,
-  resolveUpstoxToken,
+  resolveUpstoxTokenWithMeta,
   upstoxJsonRequest,
 } from '@/lib/upstoxTrade';
 
@@ -16,12 +16,15 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: auth.error }, { status: auth.status || 401 });
   }
 
-  const token = await resolveUpstoxToken(request, 'live');
+  const { token, tokenKind } = await resolveUpstoxTokenWithMeta(request, 'live', {
+    allowAnalytics: true,
+  });
   if (!token) {
     return NextResponse.json(
       {
         connected: false,
-        error: 'Upstox broker token not connected or expired. Connect via Broker API page.',
+        tokenKind: null,
+        error: 'Upstox broker token not connected or expired. Connect or approve on Broker API page.',
       },
       { status: 400 }
     );
@@ -49,9 +52,29 @@ export async function GET(request: Request) {
       return NextResponse.json(
         {
           connected: false,
+          tokenKind,
           error: 'Upstox session expired or revoked. Re-authenticate via Broker API.',
         },
         { status: 401 }
+      );
+    }
+
+    // Analytics tokens without account permissions / static IP may get 403 on personal endpoints
+    const accountForbidden =
+      tokenKind === 'analytics' &&
+      profileRes.status === 403 &&
+      holdingsRes.status === 403 &&
+      ordersRes.status === 403;
+    if (accountForbidden) {
+      return NextResponse.json(
+        {
+          connected: false,
+          analyticsActive: true,
+          tokenKind,
+          error:
+            '1-year Analytics token is active for market quotes, but Upstox requires daily 1-tap approval (Trading token) or Static IP access to load Demat Holdings & place orders.',
+        },
+        { status: 403 }
       );
     }
 
@@ -182,6 +205,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       connected: true,
+      tokenKind,
       profile: profileData
         ? {
             userId: profileData.user_id,
