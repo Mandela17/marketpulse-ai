@@ -2,6 +2,8 @@
 // Supports: Order Placement (V3 Live / V2 Sandbox), Modify, Cancel, Position Exit,
 // Pre-trade Charges, Holdings, Positions, Funds/Margin, Order Book, Trades & Static IP check.
 
+import tls from 'node:tls';
+import https from 'node:https';
 import { getServiceClient } from './supabase';
 import { isUserApproved, type UserRole } from './userRoles';
 import { getInstrumentKey } from './upstoxInstruments';
@@ -148,6 +150,127 @@ export function normalizeUpstoxError(status: number, body: any): {
   return { code, message: rawMsg, hint };
 }
 
+function shouldUseStaticProxy(url: string, mode: TradingMode): boolean {
+  if (mode !== 'live') return false;
+  if (!process.env.ZERO_IP_API_KEY || !process.env.ZERO_IP_IPV6) return false;
+  return url.includes('api-hft.upstox.com') || url.includes('/v2/order/');
+}
+
+/** Tunnel a single HTTPS JSON request through Snipy Zero IP static IPv6 proxy. */
+async function proxiedHttpsJson(
+  urlStr: string,
+  method: string,
+  headers: Record<string, string>,
+  bodyStr: string | undefined,
+  signal: AbortSignal
+): Promise<{ ok: boolean; status: number; json: any }> {
+  const proxyHost = process.env.ZERO_IP_PROXY_HOST || 'zeroip.snipy.in';
+  const proxyPort = Number(process.env.ZERO_IP_PROXY_PORT || 8443);
+  const proxyKey = process.env.ZERO_IP_API_KEY!.trim();
+  const proxyIpv6 = process.env.ZERO_IP_IPV6!.trim();
+
+  const url = new URL(urlStr);
+  const targetPort = Number(url.port || 443);
+  const targetAuthority = `${url.hostname}:${targetPort}`;
+
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      const err = new Error('Aborted');
+      err.name = 'AbortError';
+      return reject(err);
+    }
+
+    let settled = false;
+    let proxySock: tls.TLSSocket | null = null;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', onAbort);
+      fn();
+    };
+    const onAbort = () => {
+      proxySock?.destroy();
+      const err = new Error('Upstox API request timed out');
+      err.name = 'AbortError';
+      finish(() => reject(err));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+
+    proxySock = tls.connect({ host: proxyHost, port: proxyPort, servername: proxyHost }, () => {
+      const connectLines = [
+        `CONNECT ${targetAuthority} HTTP/1.1`,
+        `Host: ${targetAuthority}`,
+        `Proxy-Authorization: Bearer ${proxyKey}`,
+        `X-Snipy-Proxy-IPv6: ${proxyIpv6}`,
+        '',
+        '',
+      ].join('\r\n');
+      proxySock!.write(connectLines);
+    });
+
+    let buf = '';
+    const onConnectData = (chunk: Buffer) => {
+      buf += chunk.toString('latin1');
+      const endIdx = buf.indexOf('\r\n\r\n');
+      if (endIdx === -1) return;
+      proxySock!.off('data', onConnectData);
+
+      const statusLine = buf.slice(0, endIdx).split('\r\n')[0] || '';
+      if (!statusLine.includes(' 200 ')) {
+        proxySock!.destroy();
+        return finish(() => reject(new Error(`Zero IP proxy error: ${statusLine}`)));
+      }
+
+      const outHeaders: Record<string, string | number> = {
+        ...headers,
+        Host: url.hostname,
+      };
+      if (bodyStr !== undefined) {
+        outHeaders['Content-Length'] = Buffer.byteLength(bodyStr, 'utf8');
+      }
+
+      const req = https.request(
+        {
+          hostname: url.hostname,
+          port: targetPort,
+          path: url.pathname + url.search,
+          method,
+          headers: outHeaders,
+          createConnection: () =>
+            tls.connect({
+              socket: proxySock!,
+              servername: url.hostname,
+            }),
+        },
+        (res) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (c: Buffer) => chunks.push(c));
+          res.on('end', () => {
+            const raw = Buffer.concat(chunks).toString('utf8');
+            let parsed: any = null;
+            try {
+              parsed = raw ? JSON.parse(raw) : null;
+            } catch {
+              parsed = null;
+            }
+            const status = res.statusCode || 502;
+            finish(() => resolve({ ok: status >= 200 && status < 300, status, json: parsed }));
+          });
+        }
+      );
+
+      req.on('error', (err) => finish(() => reject(err)));
+      if (bodyStr !== undefined) {
+        req.write(bodyStr);
+      }
+      req.end();
+    };
+
+    proxySock.on('data', onConnectData);
+    proxySock.on('error', (err: any) => finish(() => reject(err)));
+  });
+}
+
 export async function upstoxJsonRequest(
   url: string,
   token: string,
@@ -173,28 +296,47 @@ export async function upstoxJsonRequest(
   }
 
   try {
-    const res = await fetch(url, {
-      ...fetchOpts,
-      headers: reqHeaders,
-      signal: controller.signal,
-    });
+    let status = 502;
+    let ok = false;
+    let json: any = null;
 
-    const json = await res.json().catch(() => null);
+    if (shouldUseStaticProxy(url, mode)) {
+      const bodyStr = typeof fetchOpts.body === 'string' ? fetchOpts.body : undefined;
+      const proxied = await proxiedHttpsJson(
+        url,
+        String(fetchOpts.method || 'GET').toUpperCase(),
+        reqHeaders,
+        bodyStr,
+        controller.signal
+      );
+      status = proxied.status;
+      ok = proxied.ok;
+      json = proxied.json;
+    } else {
+      const res = await fetch(url, {
+        ...fetchOpts,
+        headers: reqHeaders,
+        signal: controller.signal,
+      });
+      status = res.status;
+      ok = res.ok;
+      json = await res.json().catch(() => null);
+    }
 
-    if (res.status === 401 && mode === 'live') {
+    if (status === 401 && mode === 'live') {
       await invalidateUpstoxTokens();
     }
 
-    if (!res.ok) {
+    if (!ok) {
       return {
         ok: false,
-        status: res.status,
+        status,
         data: json,
-        error: normalizeUpstoxError(res.status, json),
+        error: normalizeUpstoxError(status, json),
       };
     }
 
-    return { ok: true, status: res.status, data: json };
+    return { ok: true, status, data: json };
   } catch (err: any) {
     return {
       ok: false,
