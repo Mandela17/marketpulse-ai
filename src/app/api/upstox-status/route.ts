@@ -10,6 +10,7 @@ import {
   getUpstoxTradingToken,
   getUpstoxAnalyticsToken,
   getPendingTokenRequest,
+  getLatestWebhookDebugEvent,
   invalidateUpstoxTokens,
 } from '@/lib/upstoxTokenStore';
 import { verifyUpstoxTokenLive } from '@/lib/upstoxTrade';
@@ -27,10 +28,11 @@ export async function GET(request: Request) {
   const webhookUrl = resolveWebhookUrl(request);
 
   try {
-    const [tradingToken, analyticsToken, pendingRequest] = await Promise.all([
+    const [tradingToken, analyticsToken, pendingRequest, lastWebhookEvent] = await Promise.all([
       getUpstoxTradingToken(),
       getUpstoxAnalyticsToken(),
       getPendingTokenRequest(),
+      getLatestWebhookDebugEvent(),
     ]);
 
     let tradingValid = Boolean(tradingToken);
@@ -135,6 +137,7 @@ export async function GET(request: Request) {
         updatedAt: analyticsToken?.updatedAt || null,
       },
       pendingRequest,
+      lastWebhookEvent,
       webhookUrl,
     });
   } catch (err: any) {

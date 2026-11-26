@@ -418,10 +418,13 @@ function LiveTradeContent() {
         return;
       }
 
+      const reqTimeMs = Date.parse(data?.pendingRequest?.requestedAt || '') || Date.now();
       setOrderFeedback({
-        type: 'success',
-        message: 'WhatsApp & Upstox App notification sent — tap Approve on your phone.',
-        hint: 'Checking automatically every 3 seconds...',
+        type: data.notifierMismatch ? 'error' : 'success',
+        message: data.notifierMismatch
+          ? 'Prompt sent, but Upstox Notifier Webhook URL is missing or mismatched!'
+          : 'WhatsApp & Upstox App notification sent — tap Approve on your phone.',
+        hint: data.warning || 'Checking automatically every 3 seconds...',
       });
       setPollingApproval(true);
 
@@ -442,8 +445,23 @@ function LiveTradeContent() {
           } else if (st?.pendingRequest?.status === 'rejected') {
             stopApprovalPoll();
             setOrderFeedback({ type: 'error', message: 'Approval request was rejected on phone.' });
-          } else if (attempts >= 40) {
+          } else if (
+            st?.lastWebhookEvent?.error &&
+            Date.parse(st.lastWebhookEvent.receivedAt) >= reqTimeMs - 2000
+          ) {
             stopApprovalPoll();
+            setOrderFeedback({
+              type: 'error',
+              message: `Webhook delivery error (${st.lastWebhookEvent.outcome})`,
+              hint: st.lastWebhookEvent.error,
+            });
+          } else if (attempts >= 100) {
+            stopApprovalPoll();
+            setOrderFeedback({
+              type: 'error',
+              message: 'Timed out waiting for Upstox webhook callback.',
+              hint: 'Check Upstox Mobile App → Notifications or verify Notifier Webhook Endpoint in Broker Settings.',
+            });
           }
         } catch {}
       }, 3000);

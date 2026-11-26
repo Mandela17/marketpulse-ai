@@ -27,6 +27,17 @@ interface UpstoxServerStatus {
     status: 'pending' | 'approved' | 'rejected' | 'expired';
     authorizationExpiry?: string;
     requestedAt?: string;
+    upstoxNotifierUrl?: string | null;
+    clientIdSuffix?: string;
+    lastWebhookAt?: string;
+    lastWebhookOutcome?: string;
+  } | null;
+  lastWebhookEvent?: {
+    receivedAt: string;
+    outcome: string;
+    error?: string;
+    messageType?: string;
+    hasAccessToken?: boolean;
   } | null;
   webhookUrl?: string;
 }
@@ -376,9 +387,12 @@ export default function BrokerPage() {
         return;
       }
 
+      const reqTimeMs = Date.parse(data?.pendingRequest?.requestedAt || '') || Date.now();
       setApprovalNotice({
-        type: 'info',
-        text: '📱 WhatsApp & Upstox App notification sent! Tap Approve on your phone — checking automatically...',
+        type: data.notifierMismatch ? 'error' : 'info',
+        text: data.warning
+          ? `⚠️ ${data.warning}`
+          : '📱 Sent to WhatsApp & Upstox Mobile App! Tap Approve on WhatsApp (or inside the Upstox App Notifications) — checking automatically...',
       });
       setPollingApproval(true);
 
@@ -396,13 +410,22 @@ export default function BrokerPage() {
           stopPolling();
           setApprovalNotice({
             type: 'error',
-            text: 'Request was rejected on your phone. Click Request Approval again when ready.',
+            text: 'Request was rejected on your phone. Click Send Approval Prompt again when ready.',
           });
-        } else if (attempts >= 40) {
+        } else if (
+          fresh?.lastWebhookEvent?.error &&
+          Date.parse(fresh.lastWebhookEvent.receivedAt) >= reqTimeMs - 2000
+        ) {
+          stopPolling();
+          setApprovalNotice({
+            type: 'error',
+            text: `Upstox webhook reached server but failed (${fresh.lastWebhookEvent.outcome}): ${fresh.lastWebhookEvent.error}`,
+          });
+        } else if (attempts >= 100) {
           stopPolling();
           setApprovalNotice({
             type: 'info',
-            text: 'Still waiting for phone approval. Tap Approve on WhatsApp/Upstox App and click Refresh Status.',
+            text: 'No webhook callback received from Upstox yet. Check Upstox Mobile App → Notifications, verify Notifier Webhook Endpoint in Upstox My Apps, and click Refresh Status.',
           });
         }
       }, 3000);
@@ -676,6 +699,26 @@ export default function BrokerPage() {
                   {copiedWebhook ? 'Copied ✓' : 'Copy URL'}
                 </button>
               </div>
+              {serverToken?.pendingRequest && (
+                <div className="mt-2 pt-2 border-t border-slate-800/80 text-[10px] space-y-0.5" style={{ color: 'var(--text-muted)' }}>
+                  <p>
+                    Last prompt: <span className="text-slate-200">{serverToken.pendingRequest.requestedAt ? new Date(serverToken.pendingRequest.requestedAt).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' }) : '—'}</span>
+                    {' · '}Status: <span className="text-slate-200">{serverToken.pendingRequest.status}</span>
+                    {serverToken.pendingRequest.clientIdSuffix ? ` · Client ...${serverToken.pendingRequest.clientIdSuffix}` : ''}
+                  </p>
+                  {serverToken.pendingRequest.upstoxNotifierUrl !== undefined && (
+                    <p className={serverToken.pendingRequest.upstoxNotifierUrl?.replace(/\/+$/, '') === webhookUrl.replace(/\/+$/, '') ? 'text-emerald-400' : 'text-amber-400 font-semibold'}>
+                      Upstox registered notifier_url: {serverToken.pendingRequest.upstoxNotifierUrl || 'NONE (not saved in Upstox Console!)'}
+                    </p>
+                  )}
+                  {serverToken.lastWebhookEvent && (
+                    <p className={serverToken.lastWebhookEvent.error ? 'text-rose-400 font-semibold' : 'text-emerald-400'}>
+                      Last webhook hit: {new Date(serverToken.lastWebhookEvent.receivedAt).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' })} — {serverToken.lastWebhookEvent.outcome}
+                      {serverToken.lastWebhookEvent.error ? ` (${serverToken.lastWebhookEvent.error})` : ''}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 

@@ -20,12 +20,31 @@ export interface PendingTokenRequest {
   authorizationExpiry: string;
   requestedAt: string;
   requestedBy?: string;
+  upstoxNotifierUrl?: string | null;
+  clientIdSuffix?: string;
+  lastWebhookAt?: string;
+  lastWebhookOutcome?: string;
+}
+
+export interface WebhookDebugEvent {
+  receivedAt: string;
+  contentType?: string;
+  bodyKeys?: string[];
+  clientId?: string;
+  userId?: string;
+  messageType?: string;
+  rawStatus?: string;
+  hasAccessToken?: boolean;
+  tokenLength?: number;
+  outcome: string;
+  error?: string;
 }
 
 const TABLE = 'broker_tokens';
 export const TRADING_PROVIDER = 'upstox';
 export const ANALYTICS_PROVIDER = 'upstox_analytics';
 export const PENDING_REQUEST_PROVIDER = 'upstox_pending_request';
+export const WEBHOOK_DEBUG_PROVIDER = 'upstox_webhook_debug';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -344,13 +363,58 @@ export async function getPendingTokenRequest(): Promise<PendingTokenRequest | nu
 }
 
 export async function updatePendingTokenRequestStatus(
-  status: 'approved' | 'rejected' | 'expired'
+  status: 'approved' | 'rejected' | 'expired',
+  meta?: { lastWebhookAt?: string; lastWebhookOutcome?: string }
 ): Promise<void> {
   try {
     const existing = await getPendingTokenRequest();
     if (!existing) return;
-    await savePendingTokenRequest({ ...existing, status });
+    await savePendingTokenRequest({
+      ...existing,
+      status,
+      ...(meta?.lastWebhookAt ? { lastWebhookAt: meta.lastWebhookAt } : {}),
+      ...(meta?.lastWebhookOutcome ? { lastWebhookOutcome: meta.lastWebhookOutcome } : {}),
+    });
   } catch {}
+}
+
+/** Record latest webhook POST arrival/outcome (never storing raw secrets) for diagnosing delivery issues. */
+export async function saveWebhookDebugEvent(event: WebhookDebugEvent): Promise<void> {
+  try {
+    const db = getServiceClient();
+    const now = new Date().toISOString();
+    await db
+      .from(TABLE)
+      .upsert(
+        {
+          provider: WEBHOOK_DEBUG_PROVIDER,
+          user_id: 'default',
+          access_token: JSON.stringify(event),
+          expires_at: new Date(Date.now() + 7 * DAY_MS).toISOString(),
+          updated_at: now,
+          is_valid: true,
+        },
+        { onConflict: 'provider,user_id' }
+      );
+  } catch {}
+}
+
+export async function getLatestWebhookDebugEvent(): Promise<WebhookDebugEvent | null> {
+  try {
+    const db = getServiceClient();
+    const { data, error } = await db
+      .from(TABLE)
+      .select('access_token')
+      .eq('provider', WEBHOOK_DEBUG_PROVIDER)
+      .eq('user_id', 'default')
+      .limit(1)
+      .single();
+
+    if (error || !data?.access_token) return null;
+    return JSON.parse(data.access_token) as WebhookDebugEvent;
+  } catch {
+    return null;
+  }
 }
 
 /** Make an authenticated read Upstox API call using the stored token (trading or analytics). */

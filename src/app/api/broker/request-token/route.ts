@@ -107,18 +107,38 @@ export async function POST(request: Request) {
       '',
       'trading'
     );
+    const upstoxNotifierUrl =
+      typeof data?.data?.notifier_url === 'string' && data.data.notifier_url.trim()
+        ? data.data.notifier_url.trim()
+        : null;
+
+    const normalizedExpected = webhookUrl.replace(/\/+$/, '');
+    const normalizedActual = (upstoxNotifierUrl || '').replace(/\/+$/, '');
+    const notifierMismatch = !normalizedActual || normalizedActual !== normalizedExpected;
 
     const pendingRecord = {
       status: 'pending' as const,
       authorizationExpiry,
       requestedAt: new Date().toISOString(),
       requestedBy,
+      upstoxNotifierUrl,
+      clientIdSuffix: clientId.slice(-6),
     };
     await savePendingTokenRequest(pendingRecord);
 
+    const warning = notifierMismatch
+      ? `Upstox returned notifier_url="${upstoxNotifierUrl || 'none'}" for Client ID ending in ...${clientId.slice(-6)}, which does not match "${webhookUrl}". Update the Notifier Webhook Endpoint in Upstox My Apps and click Save!`
+      : undefined;
+
     return NextResponse.json({
       success: true,
-      message: 'Approval request sent to your WhatsApp & Upstox App. Tap Approve once to connect.',
+      message: notifierMismatch
+        ? 'Approval prompt sent, but Upstox Notifier Webhook URL appears missing/mismatched — check warning.'
+        : 'Approval request sent to your WhatsApp & Upstox App. Tap Approve once to connect.',
+      warning,
+      notifierMismatch,
+      upstoxNotifierUrl,
+      clientIdSuffix: clientId.slice(-6),
       authorizationExpiry,
       webhookUrl,
       pendingRequest: pendingRecord,
